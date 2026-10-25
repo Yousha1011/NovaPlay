@@ -21,7 +21,14 @@ kotlin {
         androidMain.get().dependsOn(jvmShared)
         // Windows and iPhone: mouse and touch versions of the TV widgets.
         val screenMain by creating { dependsOn(commonMain.get()) }
-        if (onMac) iosMain.get().dependsOn(screenMain)
+        if (onMac) {
+            // The default hierarchy is off (the custom sets above), so iOS is wired by hand.
+            val ios = maybeCreate("iosMain")
+            ios.dependsOn(screenMain)
+            getByName("iosArm64Main").dependsOn(ios)
+            getByName("iosSimulatorArm64Main").dependsOn(ios)
+            ios.dependencies { implementation("io.ktor:ktor-client-darwin:3.1.3") }
+        }
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)
@@ -53,7 +60,6 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
             }
         }
-        if (onMac) iosMain.dependencies { implementation("io.ktor:ktor-client-darwin:3.1.3") }
     }
 }
 
