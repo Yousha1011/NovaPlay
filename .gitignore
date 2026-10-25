@@ -1,0 +1,12 @@
+.gradle/
+build/
+*/build/
+local.properties
+*.apk
+*.ipa
+*.msi
+.idea/
+.kotlin/
+iosApp/build/
+iosApp/*.xcodeproj/
+iosApp/Pods/
