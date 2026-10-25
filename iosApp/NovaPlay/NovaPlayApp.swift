@@ -4,7 +4,7 @@ import Shared
 
 /// The iPhone app: the shared NovaPlay screens full screen, and VLC's player over them for live TV and films.
 @main
-struct NovaPlayApp: App {
+struct NovaPlayApp: SwiftUI.App {
     init() {
         IosEntryKt.start()
         PlayerHost.shared.connect()
