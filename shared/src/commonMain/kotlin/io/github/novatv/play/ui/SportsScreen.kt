@@ -354,7 +354,7 @@ private fun SportPicks(sport: Sport, v: Int, changed: () -> Unit) {
     val clubs = remember(events) {
         events.orEmpty().flatMap { e -> e.teams.map { (e.subtitle ?: e.league.name) to (e to it) } }
             .groupBy({ it.first }, { it.second }).mapValues { (_, l) -> l.distinctBy { it.second.name }.sortedBy { it.second.name } }
-            .toSortedMap()
+            .entries.sortedBy { it.key }.associate { it.key to it.value }
     }
     // Cricket by country: the national side, then that country's own competitions.
     val cricket = remember(events, sport) {

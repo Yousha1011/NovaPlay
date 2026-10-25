@@ -37,7 +37,7 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
         if (ev.home != null && ev.away != null) {
             val h = keyword(ev.home)?.let(::fold); val a = keyword(ev.away)?.let(::fold)
             if (h != null && a != null && h.length >= 3 && a.length >= 3)
-                for ((n, c) in feeds) if (n.contains(h) && n.contains(a)) out.putIfAbsent(c.id, Airing(c, null, "Match feed"))
+                for ((n, c) in feeds) if (n.contains(h) && n.contains(a)) out.putNew(c.id, Airing(c, null, "Match feed"))
         }
         val from = ev.start - 45 * 60_000L
         val to = ev.start + 4 * 3600_000L
@@ -45,13 +45,13 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
             val words = if (ev.home != null && ev.away != null) listOfNotNull(keyword(ev.home), keyword(ev.away))
                 else leagueWords(ev)
             if (words.isNotEmpty()) for (p in epg.find(words, from, to)) {
-                for (c in byKey[p.channelKey].orEmpty()) out.putIfAbsent(c.id, Airing(c, p, "In your TV guide"))
+                for (c in byKey[p.channelKey].orEmpty()) out.putNew(c.id, Airing(c, p, "In your TV guide"))
             }
             // One side's name plus the competition catches "Arsenal: Premier League Live" style titles.
             if (out.isEmpty() && ev.home != null && ev.away != null) {
                 for (side in ev.teams) keyword(side)?.let { w ->
                     for (p in epg.find(listOf(w), from, to).filter { prog -> leagueWords(ev).any { prog.title.contains(it, true) || prog.desc?.contains(it, true) == true } })
-                        for (c in byKey[p.channelKey].orEmpty()) out.putIfAbsent(c.id, Airing(c, p, "In your TV guide"))
+                        for (c in byKey[p.channelKey].orEmpty()) out.putNew(c.id, Airing(c, p, "In your TV guide"))
                 }
             }
         }
@@ -61,7 +61,7 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
             if (n.length < 4) continue
             val why = "Broadcaster: ${b.channel}" + (b.country?.let { " ($it)" } ?: "")
             for ((name, c) in named) if (name == n || name.startsWith(n) || (n.length >= 6 && name.contains(n)))
-                out.putIfAbsent(c.id, Airing(c, null, why))
+                out.putNew(c.id, Airing(c, null, why))
         }
         return out.values.take(maxOf(limit, out.values.count { it.why == "Match feed" }))
     }
@@ -99,7 +99,7 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
 
     companion object {
         /** Lower case without accents: "Çorum" and "corum", "Göztepe" and "goztepe" match. */
-        fun fold(s: String): String = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+        fun fold(s: String): String = io.github.novatv.play.platform.foldAccents(s)
 
         /** Short upper-case words that are part of a channel's name, not a country code. */
         private val keepTails = setOf("tv", "hd", "uhd", "one", "max", "ppv", "plus")
@@ -107,3 +107,6 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
             "the", "and", "de", "del", "la", "le", "los", "las", "women", "men", "u19", "u21", "u23", "team", "county", "rovers", "wanderers")
     }
 }
+
+/** Adds [v] unless [k] is already there (putIfAbsent is JVM-only). */
+private fun <K, V> MutableMap<K, V>.putNew(k: K, v: V) { if (k !in this) put(k, v) }
