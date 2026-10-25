@@ -1,0 +1,35 @@
+# XcodeGen: the Xcode project is generated from this file in the cloud build (no .xcodeproj is kept in git).
+name: NovaPlay
+options:
+  bundleIdPrefix: io.github.novatv
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  NovaPlay:
+    type: application
+    platform: iOS
+    sources:
+      - NovaPlay
+    settings:
+      base:
+        PRODUCT_NAME: NovaPlay
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.novatv.play
+        INFOPLIST_FILE: NovaPlay/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        ENABLE_BITCODE: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # The Kotlin framework (static) built by Gradle in the step below.
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: "$(inherited) -framework Shared"
+        # Unsigned: Sideloadly or AltStore signs it with the user's Apple ID.
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+    preBuildScripts:
+      - name: Build the shared Kotlin code
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode --no-daemon
+        basedOnDependencyAnalysis: false

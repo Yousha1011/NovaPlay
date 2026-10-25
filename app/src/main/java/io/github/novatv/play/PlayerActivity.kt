@@ -66,9 +66,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import androidx.tv.material3.Text
+import io.github.novatv.play.ui.Text
 import io.github.novatv.play.data.Channel
 import io.github.novatv.play.data.Http
+import io.github.novatv.play.platform.IO
 import io.github.novatv.play.data.PlayItem
 import io.github.novatv.play.data.Programme
 import io.github.novatv.play.ui.Badge
@@ -125,7 +126,7 @@ class PlayerActivity : ComponentActivity() {
         val load = DefaultLoadControl.Builder()
             .setBufferDurationsMs(maxOf(15_000, buffer * 3), maxOf(50_000, buffer * 8), buffer.coerceAtMost(15_000), buffer)
             .build()
-        val data = OkHttpDataSource.Factory(Http.client).setUserAgent(Http.UA)
+        val data = OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA)
         player = ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER))
             .setLoadControl(load)
@@ -174,12 +175,12 @@ class PlayerActivity : ComponentActivity() {
         val it = item ?: return
         title = if (it is PlayItem.Live) it.channels[channelIndex].name else it.title
         startJob = lifecycleScope.launch {
-            val url = withContext(Dispatchers.IO) {
+            val url = withContext(IO) {
                 try {
                     val p = App.repo.provider ?: return@withContext null
                     when (it) {
                         is PlayItem.Live -> p.liveUrl(it.channels[channelIndex])
-                        is PlayItem.Vod -> if (it.movie != null) p.movieUrl(it.movie) else p.episodeUrl(it.series!!, it.episode!!)
+                        is PlayItem.Vod -> it.movie?.let { m -> p.movieUrl(m) } ?: p.episodeUrl(it.series!!, it.episode!!)
                     }
                 } catch (e: Exception) { null }
             }
@@ -199,7 +200,7 @@ class PlayerActivity : ComponentActivity() {
             if (it is PlayItem.Live) {
                 epg = emptyList()
                 val ch = it.channels[channelIndex]
-                epg = withContext(Dispatchers.IO) { App.repo.nowNext(ch) }
+                epg = withContext(IO) { App.repo.nowNext(ch) }
             }
         }
         flashInfo()
@@ -231,10 +232,11 @@ class PlayerActivity : ComponentActivity() {
         val v = item as? PlayItem.Vod ?: return
         saveProgress(ended = true)
         val next = v.nextEpisodes.firstOrNull()
-        if (next != null && v.series != null) {
+        val series = v.series
+        if (next != null && series != null) {
             Toast.makeText(this, "Next: S${next.season} E${next.number}", Toast.LENGTH_SHORT).show()
-            item = PlayItem.Vod(App.repo.episodeKey(v.series, next), "${v.series.name} · S${next.season} E${next.number}", episode = next,
-                series = v.series, nextEpisodes = v.nextEpisodes.drop(1))
+            item = PlayItem.Vod(App.repo.episodeKey(series, next), "${series.name} · S${next.season} E${next.number}", episode = next,
+                series = series, nextEpisodes = v.nextEpisodes.drop(1))
             startCurrent()
         } else finish()
     }

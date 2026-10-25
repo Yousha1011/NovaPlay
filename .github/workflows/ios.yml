@@ -1,0 +1,61 @@
+# Builds an unsigned NovaPlay.ipa on a cloud Mac. Sideloadly or AltStore signs it with your Apple ID when installing.
+name: iPhone app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Tools
+        run: |
+          chmod +x gradlew
+          brew install xcodegen
+          # Android is not built here; an empty SDK path keeps Gradle from looking for one.
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Xcode project
+        working-directory: iosApp
+        run: |
+          xcodegen generate
+          pod install
+
+      - name: Build
+        working-directory: iosApp
+        run: |
+          xcodebuild -workspace NovaPlay.xcworkspace -scheme NovaPlay -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package the .ipa
+        working-directory: iosApp
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/NovaPlay.app Payload/
+          zip -qry NovaPlay.ipa Payload
+          ls -la NovaPlay.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovaPlay-ipa
+          path: iosApp/NovaPlay.ipa
+          retention-days: 30
