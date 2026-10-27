@@ -33,6 +33,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
@@ -40,30 +43,75 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import io.github.novatv.play.res.Res
+import io.github.novatv.play.res.playfair_display_600
+import io.github.novatv.play.res.playfair_display_700
+import io.github.novatv.play.res.manrope_400
+import io.github.novatv.play.res.manrope_500
+import io.github.novatv.play.res.manrope_600
+import io.github.novatv.play.res.manrope_700
 import io.github.novatv.play.data.Movie
 import io.github.novatv.play.data.Series
 import io.github.novatv.play.ui.Icon
 import io.github.novatv.play.ui.Text
 import io.github.novatv.play.ui.initials
 
-/** The iPhone's look: black, grey cards, one blue and one red accent, the phone's own type sizes. */
+/** A colour theme: the background's gradient, the cards, and two accents (buttons and highlights). */
+class PhoneTheme(val id: String, val name: String, val top: Color, val bottom: Color, val card: Color, val card2: Color, val accent: Color, val highlight: Color)
+
+/**
+ * The iPhone's look: a themed gradient behind everything, cards a shade lighter, an accent for buttons and one for
+ * highlights; Playfair Display for titles, Manrope for the rest.
+ */
 object P {
-    val bg = Color.Black
-    val card = Color(0xFF1C1C1E)
-    val card2 = Color(0xFF2C2C2E)
+    val themes = listOf(
+        PhoneTheme("midnight", "Midnight Blue", Color(0xFF101A3D), Color(0xFF05060F), Color(0xFF161D38), Color(0xFF232B4D), Color(0xFF5B8CFF), Color(0xFFFF5A6E)),
+        PhoneTheme("onyx", "Onyx", Color(0xFF141416), Color(0xFF000000), Color(0xFF1C1C1E), Color(0xFF2C2C2E), Color(0xFF0A84FF), Color(0xFFFF453A)),
+        PhoneTheme("plum", "Royal Plum", Color(0xFF2A1248), Color(0xFF09040F), Color(0xFF241638), Color(0xFF33214F), Color(0xFFB388FF), Color(0xFFFF7AB6)),
+        PhoneTheme("emerald", "Emerald Night", Color(0xFF07342A), Color(0xFF010A08), Color(0xFF0E2A23), Color(0xFF173A31), Color(0xFF34D399), Color(0xFFFFC857)),
+        PhoneTheme("wine", "Wine & Gold", Color(0xFF3A0A18), Color(0xFF0B0205), Color(0xFF2C0F18), Color(0xFF3D1824), Color(0xFFE8C27A), Color(0xFFFF8A65)),
+        PhoneTheme("ocean", "Deep Ocean", Color(0xFF033B57), Color(0xFF010D14), Color(0xFF0A2C3E), Color(0xFF123A50), Color(0xFF4FC3F7), Color(0xFFFF7043)),
+    )
+    var theme by androidx.compose.runtime.mutableStateOf(themes[0])
+
+    val bg get() = theme.bottom
+    val background get() = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(theme.top, theme.bottom))
+    val card get() = theme.card
+    val card2 get() = theme.card2
     val line = Color(0x22FFFFFF)
     val text = Color.White
-    val dim = Color(0xFF9A9AA0)
-    val blue = Color(0xFF0A84FF)
-    val red = Color(0xFFFF453A)
+    val dim = Color(0xFFA6A8B4)
+    val blue get() = theme.accent
+    val red get() = theme.highlight
     val gold = Color(0xFFFFCC00)
 
-    val large = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.Bold, color = text)
-    val title = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, color = text)
-    val head = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = text)
-    val body = TextStyle(fontSize = 16.sp, color = text)
-    val small = TextStyle(fontSize = 13.sp, color = dim)
-    val caps = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = dim, letterSpacing = 1.5.sp)
+    var serif: FontFamily = FontFamily.Serif
+    var sans: FontFamily = FontFamily.Default
+
+    val large get() = TextStyle(fontFamily = serif, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = text)
+    val title get() = TextStyle(fontFamily = serif, fontSize = 23.sp, fontWeight = FontWeight.SemiBold, color = text)
+    val head get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = text)
+    val body get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.Normal, color = text, lineHeight = 23.sp)
+    val small get() = TextStyle(fontFamily = sans, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = dim)
+    val caps get() = TextStyle(fontFamily = sans, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = dim, letterSpacing = 1.8.sp)
+}
+
+/** Loads the app's fonts and the saved theme; called once at the top of the iPhone app. */
+@Composable
+fun PhoneStyle() {
+    P.serif = FontFamily(
+        org.jetbrains.compose.resources.Font(Res.font.playfair_display_600, FontWeight.SemiBold),
+        org.jetbrains.compose.resources.Font(Res.font.playfair_display_700, FontWeight.Bold),
+    )
+    P.sans = FontFamily(
+        org.jetbrains.compose.resources.Font(Res.font.manrope_400, FontWeight.Normal),
+        org.jetbrains.compose.resources.Font(Res.font.manrope_500, FontWeight.Medium),
+        org.jetbrains.compose.resources.Font(Res.font.manrope_600, FontWeight.SemiBold),
+        org.jetbrains.compose.resources.Font(Res.font.manrope_700, FontWeight.Bold),
+    )
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        P.themes.firstOrNull { it.id == io.github.novatv.play.App.store.phoneTheme }?.let { P.theme = it }
+    }
 }
 
 /**
@@ -90,7 +138,7 @@ fun RoundIcon(icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modif
 /** A row of choice chips: the picked one white with red text. */
 @Composable
 fun Chips(labels: List<Pair<String, String>>, picked: String?, onPick: (String) -> Unit, modifier: Modifier = Modifier) {
-    LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
+    LazyRow(modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
         items(labels, key = { it.first }) { (id, label) ->
             val on = id == picked
             Box((if (on) Modifier.clip(RoundedCornerShape(50)).background(Color.White) else Modifier.glass(RoundedCornerShape(50)))
@@ -127,7 +175,7 @@ fun PosterRow(title: String, items: List<Any>, onOpen: (Any) -> Unit, onSeeAll: 
     if (items.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         RowTitle(title, onSeeAll)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
             items(items.take(30), key = { (it as? Movie)?.let { m -> "m" + m.id } ?: ("s" + (it as Series).id) }) { m ->
                 Poster(nameOf(m), posterOf(m), ratingOf(m), onClick = { onOpen(m) }, modifier = Modifier.width(width))
             }
@@ -137,7 +185,7 @@ fun PosterRow(title: String, items: List<Any>, onOpen: (Any) -> Unit, onSeeAll: 
 
 @Composable
 fun RowTitle(title: String, onSeeAll: (() -> Unit)?) {
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 34.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = P.title, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (onSeeAll != null) Text("See All", style = P.head.copy(color = P.red), modifier = Modifier.padding(start = 12.dp).tap(onSeeAll))
     }

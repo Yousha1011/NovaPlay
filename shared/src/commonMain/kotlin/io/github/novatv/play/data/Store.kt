@@ -133,6 +133,11 @@ class Store(private val sp: Prefs = Prefs()) {
         get() = sp.getString("tmdbKey", "") ?: ""
         set(v) { ps("tmdbKey", v.trim()) }
 
+    /** The iPhone app's colour theme (an id from the theme list). */
+    var phoneTheme: String
+        get() = sp.getString("phoneTheme", "midnight") ?: "midnight"
+        set(v) { ps("phoneTheme", v) }
+
     /** Recent searches, newest first. */
     var searchHistory: List<String>
         get() = strList("searchHistory")
@@ -190,7 +195,7 @@ class Store(private val sp: Prefs = Prefs()) {
 
     /** Playlists (with their logins), guides, favourites, Sports picks and keys. */
     private val backedUp = setOf("sources", "active", "extraEpg", "favs.json", "favTeams.json", "sportsComps.json", "sportsEnabled.json",
-        "sportsLeagues.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh")
+        "sportsLeagues.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh", "phoneTheme")
 
     fun snapshot(): String = JSONObject().also { o -> for (k in backedUp) sp.getString(k, null)?.let { o.put(k, it) } }.toString()
 

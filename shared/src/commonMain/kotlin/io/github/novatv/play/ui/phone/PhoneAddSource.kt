@@ -57,7 +57,7 @@ import org.jetbrains.compose.resources.painterResource
 /** The first screen on a new iPhone install: the logo and one button to add a playlist. */
 @Composable
 fun PhoneWelcome(nav: Nav) {
-    Column(Modifier.fillMaxSize().background(P.bg).windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
+    Column(Modifier.fillMaxSize().background(P.background).windowInsetsPadding(WindowInsets.safeDrawing).padding(24.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Image(painterResource(Res.drawable.logo), "NovaPlay", Modifier.size(240.dp))
         Spacer(Modifier.height(18.dp))
@@ -83,7 +83,7 @@ fun PhoneAddSource(nav: Nav) {
     var mac by remember { mutableStateOf("00:1A:79:") }
     var epg by remember { mutableStateOf("") }
 
-    Box(Modifier.fillMaxSize().background(P.bg).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
+    Box(Modifier.fillMaxSize().background(P.background).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 62.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Add a playlist", style = P.large)

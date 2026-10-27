@@ -5,7 +5,7 @@ import Shared
 /// The player, in two layouts like IM Player's:
 /// portrait, the picture on top with the channel's details, its guide and "More from" its category below;
 /// landscape, the picture full screen with floating controls, brightness and volume sliders and a More Channels drawer.
-final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICollectionViewDataSource, UICollectionViewDelegate {
+final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICollectionViewDataSource, UICollectionViewDelegate, UIGestureRecognizerDelegate {
     private let player = VLCMediaPlayer()
     private var request: PlayRequest
 
@@ -188,7 +188,12 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         view.addSubview(videoBox)
         videoBox.pin(video)
         video.isUserInteractionEnabled = false
-        videoBox.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+        // Taps are caught on the whole screen: once VLC starts drawing it adds its own views, which could swallow taps
+        // meant for the picture. Taps on buttons, sliders and lists are left to them (see gestureRecognizer below).
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
     }
 
     private func buildControls() {
@@ -453,6 +458,8 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         switch player.state {
         case .playing:
             spinner.stopAnimating(); errorLabel.isHidden = true
+            // VLC's own views inside the picture must never take touches.
+            video.subviews.forEach { $0.isUserInteractionEnabled = false }
             if !didResume && !request.live && request.startMs > 0 {
                 didResume = true
                 player.time = VLCTime(int: Int32(clamping: request.startMs))
@@ -683,6 +690,19 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             if !self.controlsShown { self.controls.isHidden = true }
         }
     }
+
+    /// Only taps on the picture itself toggle the controls (not the page below it in portrait, nor any button).
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var v = touch.view
+        while let cur = v {
+            if cur is UIControl || cur is UICollectionView || cur is VerticalSlider || cur === page { return false }
+            if cur === videoBox { return true }
+            v = cur.superview
+        }
+        return false
+    }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
     @objc private func tapped() {
         if !drawer.isHidden { closeDrawer(); return }

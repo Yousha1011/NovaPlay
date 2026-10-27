@@ -79,9 +79,10 @@ private fun label(t: Tab) = when (t) { Tab.SERIES -> "TV Shows"; else -> t.label
 /** The iPhone app: a screen per tab, a floating tab bar, and pages pushed over them with a back button. */
 @Composable
 fun PhoneRoot() {
+    PhoneStyle()
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
-    Box(Modifier.fillMaxSize().background(P.bg)) {
+    Box(Modifier.fillMaxSize().background(P.background)) {
         if (state.source == null && nav.stack.isEmpty()) {
             PhoneWelcome(nav)
             return@Box
@@ -94,6 +95,7 @@ fun PhoneRoot() {
                 is Route.SeeAll -> SeeAll(nav, top.title, top.items)
                 Route.Menu -> AppMenu(nav)
                 Route.SearchSettings -> SearchSettings(nav)
+                Route.Appearance -> Appearance(nav)
                 Route.Settings -> Pushed(nav) { TvCanvas { SettingsScreen(nav) } }
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> Pushed(nav) { TvCanvas { LeaguesScreen(nav) } }
@@ -174,7 +176,7 @@ fun TopBar(nav: Nav, right: @Composable () -> Unit = {}) {
 /** A page over the tabs with a round back button at its top left. */
 @Composable
 fun Pushed(nav: Nav, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(P.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    Box(Modifier.fillMaxSize().background(P.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Box(Modifier.fillMaxSize().padding(top = 56.dp)) { content() }
         RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() }, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
     }
@@ -262,7 +264,7 @@ private fun PhoneLive(nav: Nav) {
                 if (cat == "fav") "Open a channel and tap the heart to add it." else null)
             return@Column
         }
-        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(list.size, key = { list[it].id }) { i -> PhoneChannelRow(list[i]) { playChannel(list, i) } }
         }
     }
@@ -273,7 +275,7 @@ fun PhoneChannelRow(c: Channel, onClick: () -> Unit) {
     val nn = nowNext(c)
     val p: Programme? = nn.firstOrNull()
     val now = io.github.novatv.play.ui.now()
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(P.card).tap(onClick).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap(onClick).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
         ChannelLogo(c.logo, c.name, Modifier.size(72.dp, 50.dp))
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {

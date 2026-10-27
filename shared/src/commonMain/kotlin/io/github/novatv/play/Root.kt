@@ -104,6 +104,7 @@ sealed class Route {
     data object Menu : Route()
     data object Settings : Route()
     data object SearchSettings : Route()
+    data object Appearance : Route()
 }
 
 /**

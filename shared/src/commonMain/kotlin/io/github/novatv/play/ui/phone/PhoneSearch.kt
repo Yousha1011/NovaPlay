@@ -27,11 +27,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -223,6 +225,7 @@ fun AppMenu(nav: Nav) {
                 Group(listOf(
                     MenuItem(Icons.Rounded.SportsSoccer, "Choose sports") { nav.push(Route.Leagues) },
                     MenuItem(Icons.Rounded.Search, "Search Settings") { nav.push(Route.SearchSettings) },
+                    MenuItem(Icons.Rounded.Palette, "Appearance") { nav.push(Route.Appearance) },
                     MenuItem(Icons.Rounded.Tune, "Configurations") { nav.push(Route.Settings) },
                 ))
             }
@@ -252,3 +255,30 @@ private fun Group(items: List<MenuItem>) {
     }
 }
 
+
+/** Appearance: the colour themes, each shown as a swatch of its background and accents. */
+@Composable
+fun Appearance(nav: Nav) {
+    Pushed(nav) {
+        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item { Text("Appearance", style = P.large, modifier = Modifier.padding(vertical = 8.dp)) }
+            item { Text("THEME", style = P.caps, modifier = Modifier.padding(start = 4.dp, top = 6.dp)) }
+            items(P.themes, key = { it.id }) { t ->
+                val on = P.theme.id == t.id
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                    .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(t.top, t.bottom)))
+                    .border(if (on) 2.dp else 1.dp, if (on) t.accent else P.line, RoundedCornerShape(22.dp))
+                    .tap { P.theme = t; App.store.phoneTheme = t.id }.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(t.name, style = P.title.copy(fontSize = androidx.compose.ui.unit.TextUnit(21f, androidx.compose.ui.unit.TextUnitType.Sp)))
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (c in listOf(t.card, t.card2, t.accent, t.highlight)) Box(Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).background(c).border(1.dp, P.line, RoundedCornerShape(13.dp)))
+                        }
+                    }
+                    if (on) Icon(Icons.Rounded.Check, size = 28.dp, tint = t.accent)
+                }
+            }
+        }
+    }
+}

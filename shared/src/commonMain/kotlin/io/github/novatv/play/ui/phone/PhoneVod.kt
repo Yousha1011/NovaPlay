@@ -205,13 +205,13 @@ fun PhoneDetail(nav: Nav, movie: Movie? = null, series: Series? = null) {
     val rating = (details.rating ?: movie?.rating ?: series?.rating)?.takeIf { (it.toFloatOrNull() ?: 0f) > 0f }
         ?: tmdb?.score?.let { ((it * 10).toInt() / 10.0).toString() }
 
-    Box(Modifier.fillMaxSize().background(P.bg)) {
+    Box(Modifier.fillMaxSize().background(P.background)) {
         LazyColumn(contentPadding = PaddingValues(bottom = 60.dp)) {
             item {
                 Box(Modifier.fillMaxWidth().height(520.dp)) {
                     val art = tmdb?.backdrop ?: details.backdrop ?: poster
                     if (art != null) AsyncImage(art, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x66000000), Color.Transparent, Color(0xCC000000), Color.Black))))
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x66000000), Color.Transparent, P.bg.copy(alpha = 0.8f), P.bg))))
                     Row(Modifier.align(Alignment.BottomStart).padding(16.dp), verticalAlignment = Alignment.Bottom) {
                         Poster(title, poster, rating, onClick = {}, modifier = Modifier.width(118.dp))
                         Spacer(Modifier.width(16.dp))
