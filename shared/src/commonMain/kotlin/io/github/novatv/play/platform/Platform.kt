@@ -43,6 +43,9 @@ interface Host {
     fun toast(msg: String)
     /** Opens a web page outside the app; platforms without a browser to hand ignore it. */
     fun openUrl(url: String) {}
+    /** Keeps a snapshot of the settings where it survives reinstalling the app (the iPhone's Keychain). */
+    fun saveBackup(json: String) {}
+    fun restoreBackup(): String? = null
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

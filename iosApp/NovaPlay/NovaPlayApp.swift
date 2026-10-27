@@ -6,6 +6,9 @@ import Shared
 @main
 struct NovaPlayApp: SwiftUI.App {
     init() {
+        // Playlists and settings are mirrored in the Keychain, so updating or reinstalling the app keeps the login.
+        IosHost.shared.keychainSave = { Keychain.save($0) }
+        IosHost.shared.keychainLoad = { Keychain.load() }
         IosEntryKt.start()
         PlayerHost.shared.connect()
     }
@@ -77,5 +80,35 @@ final class PlayerHost {
         let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "OK", style: .default))
         topController()?.present(a, animated: true)
+    }
+}
+
+/// One Keychain item holding NovaPlay's settings snapshot. Keychain items outlive the app being deleted and
+/// reinstalled with the same Apple ID, unlike the app's own storage.
+enum Keychain {
+    private static let service = "NovaPlay"
+    private static let account = "settings"
+
+    private static func query() -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+
+    static func save(_ value: String) {
+        let data = Data(value.utf8)
+        let attrs: [String: Any] = [kSecValueData as String: data, kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        if SecItemUpdate(query() as CFDictionary, attrs as CFDictionary) == errSecItemNotFound {
+            var add = query()
+            add.merge(attrs) { $1 }
+            SecItemAdd(add as CFDictionary, nil)
+        }
+    }
+
+    static func load() -> String? {
+        var q = query()
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }

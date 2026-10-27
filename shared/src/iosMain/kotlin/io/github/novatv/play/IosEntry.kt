@@ -55,6 +55,11 @@ fun MainViewController(): UIViewController = ComposeUIViewController {
 object IosHost : Host {
     override val device = Device.PHONE
     var message by mutableStateOf<Pair<String, Long>?>(null)
+    /** Set by Swift before start: the Keychain, where playlists outlive reinstalling the app. */
+    var keychainSave: ((String) -> Unit)? = null
+    var keychainLoad: (() -> String?)? = null
+    override fun saveBackup(json: String) { keychainSave?.invoke(json) }
+    override fun restoreBackup(): String? = keychainLoad?.invoke()
     override fun play(item: PlayItem) = IosPlayback.open(item)
     override fun toast(msg: String) { message = msg to nowMs() }
     override fun openUrl(url: String) {

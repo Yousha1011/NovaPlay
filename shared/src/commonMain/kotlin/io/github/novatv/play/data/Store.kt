@@ -16,7 +16,7 @@ class Store(private val sp: Prefs = Prefs()) {
 
     var activeSourceId: String?
         get() = sp.getString("active", null)
-        set(v) { sp.putString("active", v) }
+        set(v) { ps("active", v) }
 
     /** Favourite channels, movies and series as "kind:sourceId:itemId". */
     var favourites: Set<String>
@@ -88,16 +88,16 @@ class Store(private val sp: Prefs = Prefs()) {
     /** The user's own API keys, typed by them in Settings. */
     var sportsDbKey: String
         get() = sp.getString("sportsDbKey", "") ?: ""
-        set(v) { sp.putString("sportsDbKey", v.trim()) }
+        set(v) { ps("sportsDbKey", v.trim()) }
 
     var sportMonksKey: String
         get() = sp.getString("sportMonksKey", "") ?: ""
-        set(v) { sp.putString("sportMonksKey", v.trim()) }
+        set(v) { ps("sportMonksKey", v.trim()) }
 
     /** Broadcasters from this country are listed first ("United Kingdom", as TheSportsDB names countries). */
     var sportsCountry: String
         get() = sp.getString("sportsCountry", "") ?: ""
-        set(v) { sp.putString("sportsCountry", v) }
+        set(v) { ps("sportsCountry", v) }
 
     /** Extra XMLTV guides imported alongside the playlist's own. */
     var extraEpg: List<String>
@@ -131,7 +131,7 @@ class Store(private val sp: Prefs = Prefs()) {
     /** The user's own TMDB key (v3 API key or v4 read token), typed in Settings: ratings, cast and trailers. */
     var tmdbKey: String
         get() = sp.getString("tmdbKey", "") ?: ""
-        set(v) { sp.putString("tmdbKey", v.trim()) }
+        set(v) { ps("tmdbKey", v.trim()) }
 
     /** Recent searches, newest first. */
     var searchHistory: List<String>
@@ -159,7 +159,7 @@ class Store(private val sp: Prefs = Prefs()) {
 
     var lastChannel: String?
         get() = sp.getString("lastChannel", null)
-        set(v) { sp.putString("lastChannel", v) }
+        set(v) { ps("lastChannel", v) }
 
     /** Prefer .m3u8 over .ts for Xtream live streams (some panels play smoother one way). */
     var xtreamHls: Boolean
@@ -175,7 +175,33 @@ class Store(private val sp: Prefs = Prefs()) {
     private fun arr(k: String) = try { JSONArray(sp.getString(k, "[]") ?: "[]") } catch (e: Exception) { JSONArray() }
     private fun obj(k: String) = try { JSONObject(sp.getString(k, "{}") ?: "{}") } catch (e: Exception) { JSONObject() }
     private fun strList(k: String) = arr(k).let { a -> (0 until a.length()).map { a.getString(it) } }
-    private fun put(k: String, v: Any) { sp.putString(k, v.toString()) }
+    private fun put(k: String, v: Any) { ps(k, v.toString()) }
+
+    /** Writes [k], and refreshes the backup when it is a value worth keeping across reinstalls. */
+    private fun ps(k: String, v: String?) {
+        sp.putString(k, v)
+        if (k in backedUp) backup?.invoke(snapshot())
+    }
+
+    // ---------- backup (iPhone: kept in the Keychain, which outlives reinstalling the app) ----------
+
+    /** Set by the platform: stores a snapshot somewhere that survives the app being reinstalled. */
+    var backup: ((String) -> Unit)? = null
+
+    /** Playlists (with their logins), guides, favourites, Sports picks and keys. */
+    private val backedUp = setOf("sources", "active", "extraEpg", "favs.json", "favTeams.json", "sportsComps.json", "sportsEnabled.json",
+        "sportsLeagues.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh")
+
+    fun snapshot(): String = JSONObject().also { o -> for (k in backedUp) sp.getString(k, null)?.let { o.put(k, it) } }.toString()
+
+    /** Puts a snapshot back (only into an empty app: one with no playlists yet). Returns whether it did. */
+    fun restore(json: String): Boolean {
+        if (sources.isNotEmpty()) return false
+        val o = try { JSONObject(json) } catch (e: Exception) { return false }
+        if (!o.has("sources")) return false
+        for (k in o.keys()) if (k in backedUp) sp.putString(k, o.optString(k))
+        return sources.isNotEmpty()
+    }
     /** Sets are kept as JSON arrays; "<key>.json" (earlier Fire TV versions used Android string sets under "<key>"). */
     private fun strSet(k: String): Set<String> = strList("$k.json").toSet()
     private fun putSet(k: String, v: Set<String>) = put("$k.json", JSONArray(v.toList()))

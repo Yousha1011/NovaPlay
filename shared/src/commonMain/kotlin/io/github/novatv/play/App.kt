@@ -26,6 +26,10 @@ object App {
         started = true
         this.host = host
         store = Store()
+        // A reinstalled app starts empty: its playlists come back from the platform's backup, then every change updates it.
+        host.restoreBackup()?.let { store.restore(it) }
+        store.backup = { host.saveBackup(it) }
+        if (store.sources.isNotEmpty()) host.saveBackup(store.snapshot())
         repo = Repo(store, Epg())
         repo.start()
     }
