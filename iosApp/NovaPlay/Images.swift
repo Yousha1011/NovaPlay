@@ -62,19 +62,30 @@ extension UIView {
     }
 }
 
-/// A round icon button on frosted glass.
+/// A round icon button on frosted glass. The glass is the button's own background (a view added inside the button
+/// would cover its icon).
 func roundButton(_ symbol: String, size: CGFloat = 44, point: CGFloat = 18, target: Any?, action: Selector) -> UIButton {
-    let b = UIButton(type: .system)
-    b.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: point, weight: .semibold)), for: .normal)
-    b.tintColor = .white
+    var c = UIButton.Configuration.plain()
+    c.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: point, weight: .semibold))
+    c.baseForegroundColor = .white
+    c.background.visualEffect = UIBlurEffect(style: .systemUltraThinMaterialDark)
+    c.background.backgroundColor = UIColor(white: 1, alpha: 0.10)
+    c.background.cornerRadius = size / 2
+    c.background.strokeColor = UIColor(white: 1, alpha: 0.25)
+    c.background.strokeWidth = 1
+    c.cornerStyle = .fixed
+    let b = UIButton(configuration: c)
     b.translatesAutoresizingMaskIntoConstraints = false
     b.widthAnchor.constraint(equalToConstant: size).isActive = true
     b.heightAnchor.constraint(equalToConstant: size).isActive = true
-    b.layer.cornerRadius = size / 2
-    b.clipsToBounds = true
-    _ = b.glass(radius: size / 2)
     b.addTarget(target, action: action, for: .touchUpInside)
     return b
+}
+
+/// Changes a button's icon whether it is drawn by a configuration (round buttons) or not.
+func setSymbol(_ b: UIButton, _ symbol: String, point: CGFloat) {
+    let img = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: point, weight: .semibold))
+    if b.configuration != nil { b.configuration?.image = img } else { b.setImage(img, for: .normal) }
 }
 
 /// A plain icon button for inside a glass bar.

@@ -484,7 +484,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     private func updatePlayIcon() {
         let name = player.isPlaying ? "pause.fill" : "play.fill"
-        playButton.setImage(UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .semibold)), for: .normal)
+        setSymbol(playButton, name, point: 30)
     }
 
     /// Once a second: the timeline and the stream's figures.
@@ -742,7 +742,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     @objc private func toggleLock() {
         locked.toggle()
-        lockButton.setImage(UIImage(systemName: locked ? "lock.fill" : "lock.open.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)), for: .normal)
+        setSymbol(lockButton, locked ? "lock.fill" : "lock.open.fill", point: 15)
         if locked { setLockedLook() } else { for v in controls.subviews { v.isHidden = false }; applyLayout() }
     }
 

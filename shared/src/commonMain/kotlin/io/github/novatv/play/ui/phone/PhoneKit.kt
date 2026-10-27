@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import coil3.compose.AsyncImage
 import io.github.novatv.play.res.Res
 import io.github.novatv.play.res.playfair_display_600
@@ -125,7 +127,14 @@ fun Modifier.glass(shape: androidx.compose.ui.graphics.Shape, strength: Float = 
 
 /** A tap without the Android ripple (the phone's own look has none). */
 @Composable
-fun Modifier.tap(onClick: () -> Unit): Modifier = clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
+fun Modifier.tap(onClick: () -> Unit): Modifier {
+    // Pressed things squish a little and spring back, like pressing a drop of water.
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val k by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.95f else 1f,
+        androidx.compose.animation.core.spring(dampingRatio = 0.45f, stiffness = 500f), label = "squish")
+    return graphicsLayer { scaleX = k; scaleY = k }.clickable(src, null, onClick = onClick)
+}
 
 /** A round dark button with an icon, as at the top of every iPhone screen. */
 @Composable

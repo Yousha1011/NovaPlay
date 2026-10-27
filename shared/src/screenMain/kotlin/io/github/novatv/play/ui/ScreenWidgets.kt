@@ -100,7 +100,6 @@ private fun Modifier.combinedClickableCompat(src: MutableInteractionSource, onCl
 @Composable
 actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit) {
     var text by remember { mutableStateOf(value) }
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
     BasicTextField(
@@ -128,9 +127,6 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
                         if (text.isEmpty()) Text(hint, style = T.body.copy(color = Color(0x80FFFFFF)), maxLines = 1)
                         inner()
                     }
-                    // Paste from the clipboard in one tap (logins and links are usually copied from a message).
-                    Text("Paste", style = T.small.copy(color = C.accent), modifier = Modifier.padding(start = 12.dp)
-                        .clickable { clipboard.getText()?.text?.trim()?.let { t -> text = t; onChange(t) } })
                 }
             }
         },

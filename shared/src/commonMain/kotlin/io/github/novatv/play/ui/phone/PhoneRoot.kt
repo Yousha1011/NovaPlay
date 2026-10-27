@@ -53,6 +53,9 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.graphicsLayer
+import io.github.novatv.play.res.logo_mark
 import io.github.novatv.play.App
 import io.github.novatv.play.Nav
 import io.github.novatv.play.Route
@@ -62,7 +65,6 @@ import io.github.novatv.play.data.Programme
 import io.github.novatv.play.ui.Icon
 import io.github.novatv.play.ui.LeaguesScreen
 import io.github.novatv.play.ui.SettingsScreen
-import io.github.novatv.play.ui.SportsScreen
 import io.github.novatv.play.ui.Text
 import io.github.novatv.play.ui.clock
 import io.github.novatv.play.ui.nowNext
@@ -89,7 +91,8 @@ fun PhoneRoot() {
         }
         val top = nav.stack.lastOrNull()
         if (top != null) {
-            when (top) {
+            // Each page flows in from the right, like a drop running across the screen.
+            key(nav.stack.size, top) { Box(Modifier.fillMaxSize().flowIn(fromX = 0.35f)) { when (top) {
                 is Route.MovieDetail -> PhoneDetail(nav, movie = top.movie)
                 is Route.SeriesDetail -> PhoneDetail(nav, series = top.series)
                 is Route.SeeAll -> SeeAll(nav, top.title, top.items)
@@ -99,7 +102,8 @@ fun PhoneRoot() {
                 Route.Settings -> Pushed(nav) { TvCanvas { SettingsScreen(nav) } }
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> Pushed(nav) { TvCanvas { LeaguesScreen(nav) } }
-            }
+                is Route.Match -> MatchPage(nav, top.event)
+            } } }
             return@Box
         }
         // The visited tabs stay built so switching back is instant.
@@ -108,14 +112,11 @@ fun PhoneRoot() {
         if (visited.lastOrNull() != nav.tab) { visited.remove(nav.tab); visited.add(nav.tab); while (visited.size > 4) visited.removeAt(0) }
         Box(Modifier.fillMaxSize()) {
             for (t in visited) key(t) {
-                Box(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
+                Box(if (t == nav.tab) Modifier.fillMaxSize().tabFlow(t) else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
                     when (t) {
                         Tab.HOME -> PhoneHome(nav)
                         Tab.LIVE -> PhoneLive(nav)
-                        Tab.SPORTS -> Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-                            TopBar(nav)
-                            Box(Modifier.weight(1f).padding(bottom = 70.dp)) { TvCanvas { SportsScreen(nav) } }
-                        }
+                        Tab.SPORTS -> PhoneSports(nav)
                         Tab.MOVIES -> PhoneVod(nav, series = false)
                         Tab.SERIES -> PhoneVod(nav, series = true)
                         Tab.SEARCH -> PhoneSearch(nav)
@@ -128,48 +129,92 @@ fun PhoneRoot() {
     }
 }
 
-/** A floating capsule of tabs; the open one sits on a lighter pill in blue. */
+/**
+ * A floating capsule of tabs. The open tab sits on a glass drop that runs to the next tab like water: it stretches while
+ * it moves and settles with a little wobble.
+ */
 @Composable
 private fun TabBar(nav: Nav, modifier: Modifier) {
-    Row(
+    val index = phoneTabs.indexOfFirst { it.first == nav.tab }.coerceAtLeast(0)
+    val pos by androidx.compose.animation.core.animateFloatAsState(index.toFloat(),
+        androidx.compose.animation.core.spring(dampingRatio = 0.62f, stiffness = 260f), label = "drop")
+    // How far the drop still has to go: it stretches by that much, so it looks pulled along.
+    val stretch = kotlin.math.abs(index - pos).coerceAtMost(1f)
+    androidx.compose.foundation.layout.BoxWithConstraints(
         modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth()
             .clip(RoundedCornerShape(36.dp)).background(Color(0xB0000000)).glass(RoundedCornerShape(36.dp), strength = 1.4f).padding(5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        for ((t, icon) in phoneTabs) {
-            val on = nav.tab == t
-            Column(
-                Modifier.weight(1f).then(if (on) Modifier.glass(RoundedCornerShape(30.dp), strength = 0.8f) else Modifier)
-                    .tap { nav.tab = t }.padding(vertical = 7.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(icon, size = 25.dp, tint = if (on) P.blue else Color.White)
-                Text(label(t), style = P.small.copy(color = if (on) P.blue else Color.White), maxLines = 1)
+        val itemW = maxWidth / phoneTabs.size
+        val dropW = itemW * (1f + 0.45f * stretch)
+        val dropX = itemW * pos - (dropW - itemW) / 2
+        Box(Modifier.offset(x = dropX).width(dropW).height(58.dp).graphicsLayer { scaleY = 1f - 0.12f * stretch }
+            .glass(RoundedCornerShape(30.dp), strength = 1.1f))
+        Row(Modifier.fillMaxWidth()) {
+            for ((t, icon) in phoneTabs) {
+                val on = nav.tab == t
+                Column(Modifier.weight(1f).height(58.dp).tap { nav.tab = t },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Icon(icon, size = 25.dp, tint = if (on) P.blue else Color.White)
+                    Text(label(t), style = P.small.copy(color = if (on) P.blue else Color.White), maxLines = 1)
+                }
             }
         }
     }
 }
 
-/** Account and settings on the left, the playlist in the middle, an action on the right. */
+/** The tab now open flows in from the side it lies on (left or right of the last one), as water would. */
+@Composable
+private fun Modifier.tabFlow(t: Tab): Modifier {
+    val i = phoneTabs.indexOfFirst { it.first == t }
+    val last = remember { mutableStateOf(i) }
+    val dir = if (i >= last.value) 1f else -1f
+    androidx.compose.runtime.SideEffect { last.value = i }
+    return flowIn(fromX = 0.18f * dir, key = t)
+}
+
+/**
+ * Comes in like a drop of water: from [fromX] of the width away, a little squeezed, settling with a soft spring.
+ * [key] restarts it.
+ */
+@Composable
+fun Modifier.flowIn(fromX: Float, key: Any? = Unit): Modifier {
+    val a = remember(key) { androidx.compose.animation.core.Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(key) {
+        a.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.72f, stiffness = 220f))
+    }
+    return graphicsLayer {
+        val v = a.value
+        translationX = size.width * fromX * (1f - v)
+        alpha = (0.25f + 0.75f * v).coerceIn(0f, 1f)
+        scaleX = 0.94f + 0.06f * v
+        scaleY = 0.97f + 0.03f * v
+    }
+}
+
+/** The NovaPlay logo and name on the left; the playlist and the app menu on the right. */
 @Composable
 fun TopBar(nav: Nav, right: @Composable () -> Unit = {}) {
     val st by App.repo.state.collectAsState()
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        RoundIcon(Icons.Rounded.Person, onClick = { nav.push(Route.Menu) })
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.Image(org.jetbrains.compose.resources.painterResource(io.github.novatv.play.res.Res.drawable.logo_mark), "NovaPlay",
+            Modifier.size(38.dp))
+        Spacer(Modifier.width(10.dp))
+        Text("NovaPlay", style = P.title.copy(fontSize = 26.sp))
         Spacer(Modifier.weight(1f))
-        Row(Modifier.glass(RoundedCornerShape(22.dp)).tap { nav.push(Route.Menu) }.padding(horizontal = 14.dp, vertical = 8.dp),
+        right()
+        Spacer(Modifier.width(10.dp))
+        Row(Modifier.glass(RoundedCornerShape(22.dp)).tap { nav.push(Route.Menu) }.padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(st.source?.name ?: "NovaPlay", style = P.head, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
-            Spacer(Modifier.width(6.dp))
-            Box(Modifier.size(22.dp).clip(CircleShape).background(P.card2), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.KeyboardArrowDown, size = 16.dp) }
+            Box(Modifier.size(30.dp).clip(CircleShape).background(P.card2), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Person, size = 18.dp) }
+            Spacer(Modifier.width(8.dp))
+            Text(st.source?.name ?: "Add", style = P.head.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
+            Icon(Icons.Rounded.KeyboardArrowDown, size = 18.dp, tint = P.dim)
         }
-        Spacer(Modifier.weight(1f))
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { right() }
     }
     if (st.loading || st.status.isNotBlank() || st.error != null) {
         Text(st.error?.let { "Could not load: $it" } ?: st.status.ifBlank { st.epgStatus.orEmpty() },
             style = P.small.copy(color = if (st.error != null) P.red else P.dim), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 16.dp))
+            modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 6.dp))
     }
 }
 
@@ -193,10 +238,6 @@ private fun PhoneHome(nav: Nav) {
     val recent = remember(st.index, store.recentChannels) { st.index?.channelsFor(store.recentChannels.filter { it.startsWith(prefix) }).orEmpty() }
     LazyColumn(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { TopBar(nav) }
-        item {
-            val h = io.github.novatv.play.platform.Time.hourOfDay()
-            Text(when { h < 12 -> "Good morning"; h < 18 -> "Good afternoon"; else -> "Good evening" }, style = P.large, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        }
         val resume = store.continueWatching
         if (resume.isNotEmpty()) item {
             RowTitle("Continue watching", null)

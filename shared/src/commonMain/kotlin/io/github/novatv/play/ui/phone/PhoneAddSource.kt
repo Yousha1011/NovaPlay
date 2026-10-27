@@ -38,7 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -140,10 +139,9 @@ fun PhoneAddSource(nav: Nav) {
 @Composable
 private fun FieldLabel(text: String) = Text(text, style = P.head.copy(color = P.dim), modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
 
-/** A labelled text box at the phone's size, with a Paste button. */
+/** A labelled text box at the phone's size (press and hold in it to paste). */
 @Composable
 private fun Field(label: String, value: String, hint: String, keyboard: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
-    val clipboard = LocalClipboardManager.current
     Column {
         FieldLabel(label)
         Row(Modifier.fillMaxWidth().height(54.dp).glass(RoundedCornerShape(16.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -152,8 +150,6 @@ private fun Field(label: String, value: String, hint: String, keyboard: Keyboard
                 BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, textStyle = P.body.copy(fontSize = 17.sp),
                     cursorBrush = SolidColor(P.blue), keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrectEnabled = false))
             }
-            Spacer(Modifier.width(10.dp))
-            Text("Paste", style = P.head.copy(color = P.blue), modifier = Modifier.tap { clipboard.getText()?.text?.trim()?.let(onChange) })
         }
     }
 }
