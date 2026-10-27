@@ -220,14 +220,14 @@ private fun EpisodeRow(s: Series, e: Episode, onClick: () -> Unit) {
 }
 
 /** The episode to offer first: the one in progress, else the one after the last watched, else the first. */
-private fun nextEpisode(s: Series, d: Details): Pair<Episode, String>? {
+internal fun nextEpisode(s: Series, d: Details): Pair<Episode, String>? {
     val all = d.seasons.values.flatten()
     if (all.isEmpty()) return null
     all.firstOrNull { App.store.progress(App.repo.episodeKey(s, it)) != null }?.let { return it to "Resume S${it.season} E${it.number}" }
     return all.first() to "Play S${all.first().season} E${all.first().number}"
 }
 
-private fun playEpisode(s: Series, d: Details, e: Episode) {
+internal fun playEpisode(s: Series, d: Details, e: Episode) {
     val all = d.seasons.values.flatten()
     val after = all.dropWhile { it.id != e.id }.drop(1)
     play(PlayItem.Vod(App.repo.episodeKey(s, e), "${s.name} · S${e.season} E${e.number}", episode = e, series = s, nextEpisodes = after))

@@ -13,7 +13,6 @@ struct NovaPlayApp: SwiftUI.App {
     var body: some Scene {
         WindowGroup {
             ComposeScreen()
-                .onAppear { Orientation.startInLandscape() }
                 .ignoresSafeArea()
                 .preferredColorScheme(.dark)
                 .statusBarHidden(true)
@@ -21,10 +20,9 @@ struct NovaPlayApp: SwiftUI.App {
     }
 }
 
-/// The app opens in landscape, like other players, whatever the phone (or a host app such as LiveContainer) prefers;
-/// after that it turns with the phone.
+/// Turns the screen on request (the player goes landscape for films).
 enum Orientation {
-    static func startInLandscape() {
+    static func landscape() {
         DispatchQueue.main.async {
             guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
             if #available(iOS 16.0, *) {
@@ -69,7 +67,10 @@ final class PlayerHost {
         let player = PlayerViewController(request: request)
         player.modalPresentationStyle = .fullScreen
         current = player
-        topController()?.present(player, animated: true)
+        topController()?.present(player, animated: true) {
+            // Films and episodes play full screen; live channels open on their page upright, as in IM Player.
+            if !request.live { Orientation.landscape() }
+        }
     }
 
     private func alert(_ message: String) {

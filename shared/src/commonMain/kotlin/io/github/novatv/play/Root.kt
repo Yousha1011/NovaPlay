@@ -99,6 +99,11 @@ sealed class Route {
     data class SeriesDetail(val series: Series) : Route()
     data object AddSource : Route()
     data object Leagues : Route()
+    // iPhone only.
+    data class SeeAll(val title: String, val items: List<Any>) : Route()
+    data object Menu : Route()
+    data object Settings : Route()
+    data object SearchSettings : Route()
 }
 
 /**
@@ -147,6 +152,7 @@ fun Root() {
                 is Route.SeriesDetail -> DetailScreen(nav, series = top.series)
                 Route.AddSource -> AddSourceScreen(nav)
                 Route.Leagues -> LeaguesScreen(nav)
+                else -> {} // iPhone-only screens never open on a TV or PC
             }
             // A remote has Back; with a mouse or a finger the screen needs a button.
             if (App.device != Device.TV) Pill("Back", onClick = { nav.pop() }, icon = Icons.AutoMirrored.Rounded.ArrowBack,

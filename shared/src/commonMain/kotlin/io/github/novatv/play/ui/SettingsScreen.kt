@@ -124,6 +124,8 @@ fun SettingsScreen(nav: Nav) {
             { App.store.sportsDbKey = it }, { io.github.novatv.play.sports.Broadcasters.testSportsDb() }) }
         item { ApiKey("SportMonks API token", "TV stations for football", App.store.sportMonksKey,
             { App.store.sportMonksKey = it }, { io.github.novatv.play.sports.Broadcasters.testSportMonks() }) }
+        item { ApiKey("TMDB API key", "Ratings, cast, trailers and reviews on film and series pages (free at themoviedb.org)", App.store.tmdbKey,
+            { App.store.tmdbKey = it }, { io.github.novatv.play.data.Tmdb.test() }) }
         item { Text("Scores and fixtures come from ESPN. Each match lists the channels showing it from TheSportsDB, SportMonks and ESPN, " +
             "and NovaPlay finds them in your playlist through your TV guide and channel names.", style = T.small) }
 
@@ -162,7 +164,7 @@ fun AddSourceScreen(nav: Nav) {
         } }
         if (type == SourceType.XTREAM) {
             item { Column { Label("Username"); InputField(user, "Username", { user = it }, Modifier.fillMaxWidth()) } }
-            item { Column { Label("Password"); InputField(pass, "Password", { pass = it }, Modifier.fillMaxWidth(), password = true) } }
+            item { Column { Label("Password"); InputField(pass, "Password", { pass = it }, Modifier.fillMaxWidth()) } }
         }
         if (type == SourceType.STALKER) item { Column { Label("MAC address"); InputField(mac, "00:1A:79:XX:XX:XX", { mac = it }, Modifier.fillMaxWidth()) } }
         item { Column {

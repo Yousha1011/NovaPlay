@@ -3,6 +3,7 @@ package io.github.novatv.play.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.hoverable
@@ -99,6 +100,7 @@ private fun Modifier.combinedClickableCompat(src: MutableInteractionSource, onCl
 @Composable
 actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit) {
     var text by remember { mutableStateOf(value) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
     BasicTextField(
@@ -121,8 +123,15 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
                     .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (text.isEmpty()) Text(hint, style = T.body.copy(color = Color(0x80FFFFFF)), maxLines = 1)
-                inner()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        if (text.isEmpty()) Text(hint, style = T.body.copy(color = Color(0x80FFFFFF)), maxLines = 1)
+                        inner()
+                    }
+                    // Paste from the clipboard in one tap (logins and links are usually copied from a message).
+                    Text("Paste", style = T.small.copy(color = C.accent), modifier = Modifier.padding(start = 12.dp)
+                        .clickable { clipboard.getText()?.text?.trim()?.let { t -> text = t; onChange(t) } })
+                }
             }
         },
     )

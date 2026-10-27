@@ -126,6 +126,35 @@ class Store(private val sp: Prefs = Prefs()) {
         "https://epgshare01.online/epgshare01/epg_ripper_RS1.xml.gz",
     )
 
+    // ---------- iPhone extras ----------
+
+    /** The user's own TMDB key (v3 API key or v4 read token), typed in Settings: ratings, cast and trailers. */
+    var tmdbKey: String
+        get() = sp.getString("tmdbKey", "") ?: ""
+        set(v) { sp.putString("tmdbKey", v.trim()) }
+
+    /** Recent searches, newest first. */
+    var searchHistory: List<String>
+        get() = strList("searchHistory")
+        set(v) = put("searchHistory", JSONArray(v.take(30)))
+
+    fun addSearch(q: String) {
+        val t = q.trim()
+        if (t.length < 2 || searchHistoryOff) return
+        searchHistory = listOf(t) + searchHistory.filterNot { it.equals(t, ignoreCase = true) }
+    }
+
+    var searchHistoryOff: Boolean
+        get() = sp.getBoolean("searchHistoryOff", false)
+        set(v) { sp.putBoolean("searchHistoryOff", v) }
+
+    /** Movies and series played, newest first (their favourite keys: "mv:..." and "se:..."). */
+    var watched: List<String>
+        get() = strList("watched")
+        set(v) = put("watched", JSONArray(v.take(200)))
+
+    fun addWatched(key: String) { watched = listOf(key) + watched.filter { it != key } }
+
     // ---------- Settings ----------
 
     var lastChannel: String?

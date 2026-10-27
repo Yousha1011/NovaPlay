@@ -36,8 +36,15 @@ object App {
 /** Opens the player full screen. */
 fun play(item: PlayItem) {
     App.pending = item
+    if (item is PlayItem.Vod) {
+        item.movie?.let { App.store.addWatched(App.repo.movieKey(it)) }
+        item.series?.let { App.store.addWatched(App.repo.seriesKey(it)) }
+    }
     App.host.play(item)
 }
+
+/** Opens a web address (a trailer) in the phone's browser or YouTube. */
+fun openUrl(url: String) = App.host.openUrl(url)
 
 /** A short message at the bottom of the screen. */
 fun toast(msg: String) = App.host.toast(msg)

@@ -41,6 +41,8 @@ interface Host {
     /** Opens the player full screen. */
     fun play(item: PlayItem)
     fun toast(msg: String)
+    /** Opens a web page outside the app; platforms without a browser to hand ignore it. */
+    fun openUrl(url: String) {}
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

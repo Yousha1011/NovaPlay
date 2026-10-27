@@ -22,7 +22,6 @@ import io.github.novatv.play.platform.Device
 import io.github.novatv.play.platform.Host
 import io.github.novatv.play.platform.IO
 import io.github.novatv.play.platform.nowMs
-import io.github.novatv.play.ui.NovaTheme
 import io.github.novatv.play.ui.T
 import io.github.novatv.play.ui.Text
 import io.github.novatv.play.ui.clock
@@ -40,11 +39,13 @@ fun start() = App.start(IosHost)
 /** The whole app as one view controller; the Swift side shows it full screen. */
 @Suppress("FunctionName", "unused")
 fun MainViewController(): UIViewController = ComposeUIViewController {
-    NovaTheme {
-        Root()
+    // The phone's own layout (tabs along the bottom, upright first), drawn at the phone's own scale.
+    Box(Modifier.fillMaxSize()) {
+        io.github.novatv.play.ui.phone.PhoneRoot()
         IosHost.message?.let { (msg, at) ->
             LaunchedEffect(at) { delay(2500); if (IosHost.message?.second == at) IosHost.message = null }
-            Box(Modifier.fillMaxSize().padding(bottom = 30.dp), contentAlignment = Alignment.BottomCenter) {
+            // Above the tab bar.
+            Box(Modifier.fillMaxSize().padding(bottom = 120.dp), contentAlignment = Alignment.BottomCenter) {
                 Text(msg, style = T.body, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xE0141A28)).padding(horizontal = 20.dp, vertical = 12.dp))
             }
         }
@@ -56,6 +57,10 @@ object IosHost : Host {
     var message by mutableStateOf<Pair<String, Long>?>(null)
     override fun play(item: PlayItem) = IosPlayback.open(item)
     override fun toast(msg: String) { message = msg to nowMs() }
+    override fun openUrl(url: String) {
+        val u = platform.Foundation.NSURL.URLWithString(url) ?: return
+        platform.UIKit.UIApplication.sharedApplication.openURL(u, emptyMap<Any?, Any?>(), null)
+    }
 }
 
 /** What the Swift player is asked to play. */

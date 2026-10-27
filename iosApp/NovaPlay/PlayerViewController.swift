@@ -33,6 +33,8 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     private lazy var prevButton = roundButton("backward.end.fill", size: 64, point: 24, target: self, action: #selector(prevChannel))
     private lazy var playButton = roundButton("pause.fill", size: 76, point: 30, target: self, action: #selector(togglePlay))
     private lazy var nextButton = roundButton("forward.end.fill", size: 64, point: 24, target: self, action: #selector(nextChannel))
+    private lazy var backSkip = roundButton("gobackward.15", size: 64, point: 24, target: self, action: #selector(skipBack))
+    private lazy var forwardSkip = roundButton("goforward.15", size: 64, point: 24, target: self, action: #selector(skipForward))
     private let brightness = VerticalSlider(symbol: "sun.max.fill")
     private let volume = VerticalSlider(symbol: "speaker.wave.2.fill")
 
@@ -162,7 +164,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
                           brightness, volume, resPill, fpsPill, ratePill, lockButton, moreButton] { v.isHidden = !land }
         backButton.isHidden = land
         expandButton.isHidden = land
-        speedButton.isHidden = !land || request.live
+        speedButton.isHidden = true
+        backSkip.isHidden = request.live
+        forwardSkip.isHidden = request.live
         prevButton.isHidden = !land || !request.live
         nextButton.isHidden = !land || !request.live
         moreButton.isHidden = !land || !request.live
@@ -228,7 +232,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         // Middle: the logo over previous / play / next.
         logoView.contentMode = .scaleAspectFit
         logoView.translatesAutoresizingMaskIntoConstraints = false
-        let middle = UIStackView(arrangedSubviews: [prevButton, playButton, nextButton])
+        let middle = UIStackView(arrangedSubviews: [prevButton, backSkip, playButton, forwardSkip, nextButton])
         middle.axis = .horizontal; middle.spacing = 28; middle.alignment = .center
         middle.translatesAutoresizingMaskIntoConstraints = false
         controls.addSubview(logoView)
@@ -683,6 +687,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     @objc private func prevChannel() { spinner.startAnimating(); IosPlayback.shared.zap(delta: -1); showControls() }
     @objc private func nextChannel() { spinner.startAnimating(); IosPlayback.shared.zap(delta: 1); showControls() }
 
+    @objc private func skipBack() { player.jumpBackward(15); showControls() }
+    @objc private func skipForward() { player.jumpForward(15); showControls() }
+
     @objc private func rotate() { setOrientation(isLandscape ? .portrait : .landscapeRight) }
 
     private func setOrientation(_ mask: UIInterfaceOrientationMask) {
@@ -745,6 +752,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             tracks("Subtitles Tracks", "captions.bubble", names: p.videoSubTitlesNames, ids: p.videoSubTitlesIndexes, current: p.currentVideoSubTitleIndex) { p.currentVideoSubTitleIndex = $0 },
             tracks("Audio Tracks", "waveform", names: p.audioTrackNames, ids: p.audioTrackIndexes, current: p.currentAudioTrackIndex) { p.currentAudioTrackIndex = $0 },
             tracks("Video Tracks", "video", names: p.videoTrackNames, ids: p.videoTrackIndexes, current: p.currentVideoTrackIndex) { p.currentVideoTrackIndex = $0 },
+            UIMenu(title: "Playback Speed", image: UIImage(systemName: "speedometer"), children: [0.5, 0.75, 1, 1.25, 1.5, 2].map { r in
+                UIAction(title: "\(r)×", state: abs(Double(p.rate) - r) < 0.01 ? .on : .off) { _ in p.rate = Float(r) }
+            }),
             aspectMenu,
         ]
     }
