@@ -30,9 +30,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     // Middle.
     private let logoView = UIImageView()
-    private lazy var prevButton = roundButton("backward.end.fill", size: 64, point: 24, target: self, action: #selector(prev))
+    private lazy var prevButton = roundButton("backward.end.fill", size: 64, point: 24, target: self, action: #selector(prevChannel))
     private lazy var playButton = roundButton("pause.fill", size: 76, point: 30, target: self, action: #selector(togglePlay))
-    private lazy var nextButton = roundButton("forward.end.fill", size: 64, point: 24, target: self, action: #selector(next))
+    private lazy var nextButton = roundButton("forward.end.fill", size: 64, point: 24, target: self, action: #selector(nextChannel))
     private let brightness = VerticalSlider(symbol: "sun.max.fill")
     private let volume = VerticalSlider(symbol: "speaker.wave.2.fill")
 
@@ -680,8 +680,8 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     }
 
     @objc private func togglePlay() { if player.isPlaying { player.pause() } else { player.play() }; updatePlayIcon(); showControls() }
-    @objc private func prev() { spinner.startAnimating(); IosPlayback.shared.zap(delta: -1); showControls() }
-    @objc private func next() { spinner.startAnimating(); IosPlayback.shared.zap(delta: 1); showControls() }
+    @objc private func prevChannel() { spinner.startAnimating(); IosPlayback.shared.zap(delta: -1); showControls() }
+    @objc private func nextChannel() { spinner.startAnimating(); IosPlayback.shared.zap(delta: 1); showControls() }
 
     @objc private func rotate() { setOrientation(isLandscape ? .portrait : .landscapeRight) }
 
