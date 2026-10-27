@@ -59,13 +59,11 @@ import io.github.novatv.play.Route
 import io.github.novatv.play.Tab
 import io.github.novatv.play.data.Channel
 import io.github.novatv.play.data.Programme
-import io.github.novatv.play.ui.AddSourceScreen
 import io.github.novatv.play.ui.Icon
 import io.github.novatv.play.ui.LeaguesScreen
 import io.github.novatv.play.ui.SettingsScreen
 import io.github.novatv.play.ui.SportsScreen
 import io.github.novatv.play.ui.Text
-import io.github.novatv.play.ui.WelcomeScreen
 import io.github.novatv.play.ui.clock
 import io.github.novatv.play.ui.nowNext
 import io.github.novatv.play.ui.playChannel
@@ -85,7 +83,7 @@ fun PhoneRoot() {
     val state by App.repo.state.collectAsState()
     Box(Modifier.fillMaxSize().background(P.bg)) {
         if (state.source == null && nav.stack.isEmpty()) {
-            TvCanvas { WelcomeScreen(nav) }
+            PhoneWelcome(nav)
             return@Box
         }
         val top = nav.stack.lastOrNull()
@@ -97,7 +95,7 @@ fun PhoneRoot() {
                 Route.Menu -> AppMenu(nav)
                 Route.SearchSettings -> SearchSettings(nav)
                 Route.Settings -> Pushed(nav) { TvCanvas { SettingsScreen(nav) } }
-                Route.AddSource -> Pushed(nav) { TvCanvas { AddSourceScreen(nav) } }
+                Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> Pushed(nav) { TvCanvas { LeaguesScreen(nav) } }
             }
             return@Box
@@ -133,13 +131,13 @@ fun PhoneRoot() {
 private fun TabBar(nav: Nav, modifier: Modifier) {
     Row(
         modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(36.dp)).background(Color(0xF21C1C1E)).border(1.dp, P.line, RoundedCornerShape(36.dp)).padding(5.dp),
+            .clip(RoundedCornerShape(36.dp)).background(Color(0xB0000000)).glass(RoundedCornerShape(36.dp), strength = 1.4f).padding(5.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         for ((t, icon) in phoneTabs) {
             val on = nav.tab == t
             Column(
-                Modifier.weight(1f).clip(RoundedCornerShape(30.dp)).background(if (on) Color(0xFF0B0B0D) else Color.Transparent)
+                Modifier.weight(1f).then(if (on) Modifier.glass(RoundedCornerShape(30.dp), strength = 0.8f) else Modifier)
                     .tap { nav.tab = t }.padding(vertical = 7.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -157,7 +155,7 @@ fun TopBar(nav: Nav, right: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         RoundIcon(Icons.Rounded.Person, onClick = { nav.push(Route.Menu) })
         Spacer(Modifier.weight(1f))
-        Row(Modifier.clip(RoundedCornerShape(20.dp)).tap { nav.push(Route.Menu) }.padding(horizontal = 12.dp, vertical = 6.dp),
+        Row(Modifier.glass(RoundedCornerShape(22.dp)).tap { nav.push(Route.Menu) }.padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(st.source?.name ?: "NovaPlay", style = P.head, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
             Spacer(Modifier.width(6.dp))
@@ -187,24 +185,15 @@ fun Pushed(nav: Nav, content: @Composable () -> Unit) {
 @Composable
 private fun PhoneHome(nav: Nav) {
     val st by App.repo.state.collectAsState()
-    val sports by App.repo.sports.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(Unit) { App.repo.refreshSports(5 * 60_000L) }
     val store = App.store
     val prefix = App.repo.channelKeyPrefix()
     val favChannels = remember(st.index, store.favourites) { st.index?.channelsFor(store.favourites.filter { it.startsWith(prefix) })?.sortedBy { it.number }.orEmpty() }
     val recent = remember(st.index, store.recentChannels) { st.index?.channelsFor(store.recentChannels.filter { it.startsWith(prefix) }).orEmpty() }
-    val live = remember(sports) { sports.events.filter { it.state == io.github.novatv.play.sports.State.LIVE && io.github.novatv.play.sports.Follow.shows(it) }.take(15) }
     LazyColumn(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { TopBar(nav) }
         item {
             val h = io.github.novatv.play.platform.Time.hourOfDay()
             Text(when { h < 12 -> "Good morning"; h < 18 -> "Good afternoon"; else -> "Good evening" }, style = P.large, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-        }
-        if (live.isNotEmpty()) item {
-            RowTitle("Live sports (${live.size})") { nav.tab = Tab.SPORTS }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
-                items(live, key = { it.id }) { e -> TvCanvasItem { io.github.novatv.play.ui.EventCard(e, onClick = { nav.tab = Tab.SPORTS }) } }
-            }
         }
         val resume = store.continueWatching
         if (resume.isNotEmpty()) item {
@@ -229,12 +218,6 @@ private fun PhoneHome(nav: Nav) {
                 onSeeAll = { nav.tab = Tab.SERIES }) }
         }
     }
-}
-
-/** A sports card (drawn for the TV's canvas) at a phone-friendly size. */
-@Composable
-private fun TvCanvasItem(content: @Composable () -> Unit) {
-    Box(Modifier.width(290.dp).height(132.dp)) { TvCanvas(content) }
 }
 
 @Composable

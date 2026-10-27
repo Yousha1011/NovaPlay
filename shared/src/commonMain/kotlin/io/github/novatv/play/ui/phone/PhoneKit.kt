@@ -66,6 +66,15 @@ object P {
     val caps = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = dim, letterSpacing = 1.5.sp)
 }
 
+/**
+ * Glass, as on iOS: a translucent fill that is lighter at the top, and a bright rim fading towards the bottom. Drawn
+ * (Compose cannot blur what lies behind it), over the black background it reads as frosted glass.
+ */
+fun Modifier.glass(shape: androidx.compose.ui.graphics.Shape, strength: Float = 1f): Modifier = this
+    .clip(shape)
+    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.16f * strength), Color.White.copy(alpha = 0.06f * strength))))
+    .border(1.dp, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.38f), Color.White.copy(alpha = 0.06f))), shape)
+
 /** A tap without the Android ripple (the phone's own look has none). */
 @Composable
 fun Modifier.tap(onClick: () -> Unit): Modifier = clickable(remember { MutableInteractionSource() }, null, onClick = onClick)
@@ -73,7 +82,7 @@ fun Modifier.tap(onClick: () -> Unit): Modifier = clickable(remember { MutableIn
 /** A round dark button with an icon, as at the top of every iPhone screen. */
 @Composable
 fun RoundIcon(icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier, size: Dp = 44.dp, tint: Color = Color.White) {
-    Box(modifier.size(size).clip(CircleShape).background(P.card).border(1.dp, P.line, CircleShape).tap(onClick), contentAlignment = Alignment.Center) {
+    Box(modifier.size(size).glass(CircleShape).tap(onClick), contentAlignment = Alignment.Center) {
         Icon(icon, size = size * 0.48f, tint = tint)
     }
 }
@@ -84,7 +93,7 @@ fun Chips(labels: List<Pair<String, String>>, picked: String?, onPick: (String) 
     LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
         items(labels, key = { it.first }) { (id, label) ->
             val on = id == picked
-            Box(Modifier.clip(RoundedCornerShape(50)).background(if (on) Color.White else P.card).border(1.dp, if (on) Color.White else P.line, RoundedCornerShape(50))
+            Box((if (on) Modifier.clip(RoundedCornerShape(50)).background(Color.White) else Modifier.glass(RoundedCornerShape(50)))
                 .tap { onPick(id) }.padding(horizontal = 18.dp, vertical = 9.dp)) {
                 Text(label, style = P.head.copy(color = if (on) P.red else P.text), maxLines = 1)
             }

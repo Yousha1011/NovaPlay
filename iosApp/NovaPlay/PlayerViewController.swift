@@ -662,20 +662,31 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     // MARK: Controls
 
+    /// Whether the controls are meant to be on screen; taps toggle it (a fade in progress must not undo a tap).
+    private var controlsShown = true
+
     private func showControls(stay: Bool = false) {
         guard drawer.isHidden else { return }
+        controlsShown = true
+        controls.layer.removeAllAnimations()
         controls.isHidden = false
         controls.alpha = 1
         if locked { setLockedLook(); return }
         hideTimer?.invalidate()
-        if !stay { hideTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
-            UIView.animate(withDuration: 0.25) { self?.controls.alpha = 0 } completion: { _ in self?.controls.isHidden = true }
-        } }
+        if !stay { hideTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in self?.hideControls() } }
+    }
+
+    private func hideControls() {
+        hideTimer?.invalidate()
+        controlsShown = false
+        UIView.animate(withDuration: 0.25) { self.controls.alpha = 0 } completion: { _ in
+            if !self.controlsShown { self.controls.isHidden = true }
+        }
     }
 
     @objc private func tapped() {
         if !drawer.isHidden { closeDrawer(); return }
-        if controls.isHidden || controls.alpha < 1 { showControls() } else { controls.isHidden = true }
+        if controlsShown { hideControls() } else { showControls() }
     }
 
     @objc private func close() {
