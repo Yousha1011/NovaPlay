@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -97,6 +98,9 @@ fun SportsScreen(nav: Nav) {
     val shown = remember(list, tab) { if (tab == SportsTab.UPCOMING) list else list.sortedWith(compareBy({ it.state != State.LIVE }, { it.start })) }
     val present = remember(sports) { sports.events.filter { Follow.shows(it) }.map { it.league.sport }.toSet() }
 
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+    val roomy = maxWidth >= WIDE
+    val columns = if (maxWidth < NARROW) 1 else 2
     Row(Modifier.fillMaxSize().padding(start = 28.dp, top = 30.dp, end = 30.dp)) {
         Column(Modifier.weight(1f)) {
             Header("Sports", if (sports.loading && sports.events.isEmpty()) "Loading matches…"
@@ -118,7 +122,7 @@ fun SportsScreen(nav: Nav) {
                 shown.isEmpty() -> Message(
                     when (tab) { SportsTab.LIVE -> "Nothing live right now"; SportsTab.MINE -> "No matches for your teams"; else -> "No matches" },
                     when (tab) { SportsTab.MINE -> "Open a match and star a team to follow it."; SportsTab.LIVE -> "Try Today or Upcoming."; else -> null })
-                else -> LazyVerticalGrid(GridCells.Fixed(2), contentPadding = PaddingValues(bottom = 50.dp, end = 8.dp),
+                else -> LazyVerticalGrid(GridCells.Fixed(columns), contentPadding = PaddingValues(bottom = 50.dp, end = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(shown, key = { it.id }) { e ->
                         EventCard(e, onClick = { selected = e; popup = e }, fill = true, favourite = e.teams.any { isFavTeam(e, it) },
@@ -127,10 +131,11 @@ fun SportsScreen(nav: Nav) {
                 }
             }
         }
-        if (tab != SportsTab.CHANNELS) {
+        if (tab != SportsTab.CHANNELS && roomy) {
             Spacer(Modifier.width(22.dp))
             EventPanel(selected?.let { s -> sports.events.firstOrNull { it.id == s.id } ?: s }, st.epgVersion) { favVersion++ }
         }
+    }
     }
     popup?.let { e -> ChannelsPopup(e, st.epgVersion) { popup = null } }
 }
@@ -149,7 +154,7 @@ private fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit)
     var focused by remember { mutableStateOf(false) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.width(760.dp).fillMaxHeight(0.86f).clip(RoundedCornerShape(22.dp)).background(C.panel).padding(28.dp)) {
+        Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.94f).fillMaxHeight(0.86f).clip(RoundedCornerShape(22.dp)).background(C.panel).padding(28.dp)) {
             Text(listOfNotNull(e.league.name, e.subtitle).distinct().joinToString(" · "), style = T.tiny)
             Spacer(Modifier.height(6.dp))
             Text(e.title, style = T.h1, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -303,8 +308,10 @@ fun LeaguesScreen(nav: Nav) {
     // Opens on the first sport in the list.
     val firstSport = remember { androidx.compose.ui.focus.FocusRequester() }
     AutoFocus(firstSport)
-    Row(Modifier.fillMaxSize().padding(start = 50.dp, top = 36.dp, end = 40.dp)) {
-        Column(Modifier.width(330.dp)) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+    val narrow = maxWidth < NARROW
+    Row(Modifier.fillMaxSize().padding(start = if (narrow) 20.dp else 50.dp, top = 36.dp, end = if (narrow) 16.dp else 40.dp)) {
+        Column(Modifier.width(if (narrow) 200.dp else 330.dp)) {
             Header("Choose sports", "OK turns a sport on or off")
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 items(Sport.entries.toList(), key = { it.name }) { sp ->
@@ -336,6 +343,7 @@ fun LeaguesScreen(nav: Nav) {
         }
         Spacer(Modifier.width(30.dp))
         SportPicks(cur, v) { v++ }
+    }
     }
 }
 

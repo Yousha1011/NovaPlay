@@ -74,8 +74,10 @@ fun LiveScreen(nav: Nav) {
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 30.dp, end = 30.dp)) {
         Header("Live TV", "${group.name} · ${group.channels.size} channels")
         SourceStatus()
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val catWidth = if (maxWidth < NARROW) 170.dp else 300.dp
         Row(Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.width(300.dp).fillMaxHeight(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(Modifier.width(catWidth).fillMaxHeight(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 itemsIndexed(groups, key = { _, g -> g.id }) { i, g ->
                     val active = g.id == group.id
                     // Moving onto a category shows its channels straight away, like a TV's channel list.
@@ -103,6 +105,7 @@ fun LiveScreen(nav: Nav) {
                 }
             }
         }
+        }
     }
 }
 
@@ -117,7 +120,8 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit) {
             Text("${c.number}", style = T.small, modifier = Modifier.width(46.dp))
             Logo(c.logo, c.name, Modifier.size(78.dp, 50.dp))
             Spacer(Modifier.width(16.dp))
-            Column(Modifier.width(260.dp)) {
+            // Shares, rather than fixed widths, so the row also fits a phone (on a TV the name gets ~260 units as before).
+            Column(Modifier.weight(0.37f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(c.name, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     if (fav) { Spacer(Modifier.width(6.dp)); Text("★", style = T.small.copy(color = C.gold)) }
@@ -125,7 +129,7 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit) {
                 }
             }
             Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(0.63f)) {
                 if (p != null) {
                     Row {
                         Text("${clock(p.start)}  ", style = T.small.copy(color = C.accent))

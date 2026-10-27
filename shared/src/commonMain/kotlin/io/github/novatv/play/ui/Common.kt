@@ -137,14 +137,29 @@ private fun SideRow(name: String, logo: String?, score: String?, state: State) {
 
 @Composable
 fun Header(title: String, sub: String? = null, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
-    Row(modifier.fillMaxWidth().padding(bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = T.hero)
-            if (sub != null) Text(sub, style = T.small)
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth().padding(bottom = 18.dp)) {
+        if (maxWidth < NARROW) {
+            // A phone held upright: the title on its own line, the buttons under it.
+            Column {
+                Text(title, style = T.hero, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (sub != null) Text(sub, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
+            }
+        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = T.hero, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (sub != null) Text(sub, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
     }
 }
+
+/** Below this width (a phone, upright or turned) screens stack what sits side by side on a TV. */
+val NARROW = 760.dp
+/** Below this width side panels (a match's channels) give way to the main list. */
+val WIDE = 1000.dp
 
 /** A loading line or error from the active source, shown at the top of the main screens. */
 @Composable

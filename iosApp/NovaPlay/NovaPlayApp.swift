@@ -13,9 +13,25 @@ struct NovaPlayApp: SwiftUI.App {
     var body: some Scene {
         WindowGroup {
             ComposeScreen()
+                .onAppear { Orientation.startInLandscape() }
                 .ignoresSafeArea()
                 .preferredColorScheme(.dark)
                 .statusBarHidden(true)
+        }
+    }
+}
+
+/// The app opens in landscape, like other players, whatever the phone (or a host app such as LiveContainer) prefers;
+/// after that it turns with the phone.
+enum Orientation {
+    static func startInLandscape() {
+        DispatchQueue.main.async {
+            guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+            if #available(iOS 16.0, *) {
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { _ in }
+            } else {
+                UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+            }
         }
     }
 }

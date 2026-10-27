@@ -70,11 +70,30 @@ class PlayRequest(
     val userAgent: String,
     val logo: String?,
     val bufferMs: Int,
+    /** Live TV: the channel's name without its number, what is on now and next, and its category. */
+    val channelName: String,
+    val nowTitle: String,
+    val nextTitle: String,
+    /** Progress through the programme on now, 0 to 1 (-1 when unknown), and its times ("14:00 – 15:30"). */
+    val nowProgress: Float,
+    val nowTimes: String,
+    val categoryId: String,
+    val categoryName: String,
+    val favourite: Boolean,
 )
+
+/** One programme in a channel's guide, for the Swift player's list. */
+class GuideRow(val title: String, val times: String, val desc: String, val live: Boolean)
+
+/** A channel card in "More from..." and the More Channels drawer. */
+class ChannelCard(val id: String, val name: String, val logo: String?, val now: String, val playing: Boolean)
+
+class CategoryTab(val id: String, val name: String)
 
 /**
  * The bridge to the Swift player: Kotlin resolves streams (Stalker portals hand out links on request), keeps watch
- * progress and zaps through channels; Swift shows the picture.
+ * progress and zaps through channels; Swift shows the picture and the controls. Blocking calls (guide, lists) are
+ * meant for a background queue.
  */
 object IosPlayback {
     /** Set by Swift: shows (or switches) the player. */
@@ -100,6 +119,47 @@ object IosPlayback {
     }
 
     fun isLive(): Boolean = item is PlayItem.Live
+
+    private fun channel() = (item as? PlayItem.Live)?.let { it.channels.getOrNull(index) }
+
+    /** Today's and tomorrow's programmes on the channel playing. */
+    fun guide(): List<GuideRow> {
+        val c = channel() ?: return emptyList()
+        val key = App.repo.epg.key(c) ?: return emptyList()
+        val now = nowMs()
+        return App.repo.epg.programmes(key, now - 3600_000L, now + 24 * 3600_000L).filter { it.stop > now - 60_000L }.map { p ->
+            GuideRow(p.title, "${clock(p.start)} – ${clock(p.stop)}", p.desc.orEmpty(), now in p.start until p.stop)
+        }
+    }
+
+    /** The live categories, in the playlist's order. */
+    fun categories(): List<CategoryTab> = App.repo.state.value.lib.liveCategories.map { CategoryTab(it.id, it.name) }
+
+    /** Channels of [categoryId], with what is on now (the first [withGuide] look up the guide). */
+    fun channelsIn(categoryId: String, withGuide: Int = 40): List<ChannelCard> {
+        val list = App.repo.state.value.index?.channelsByCat?.get(categoryId).orEmpty()
+        val playing = channel()?.id
+        return list.mapIndexed { i, c ->
+            val now = if (i < withGuide) try { App.repo.nowNext(c).firstOrNull()?.title.orEmpty() } catch (e: Exception) { "" } else ""
+            ChannelCard(c.id, c.name, c.logo, now, c.id == playing)
+        }
+    }
+
+    /** Plays channel [channelId] of [categoryId]; zapping then moves through that category. */
+    fun playIn(categoryId: String, channelId: String) {
+        val list = App.repo.state.value.index?.channelsByCat?.get(categoryId) ?: return
+        val i = list.indexOfFirst { it.id == channelId }
+        if (i < 0) return
+        item = PlayItem.Live(list, i)
+        index = i
+        resolve()
+    }
+
+    /** Adds or removes the channel playing from favourites; returns whether it is one now. */
+    fun toggleFavourite(): Boolean {
+        val c = channel() ?: return false
+        return App.store.toggleFavourite(App.repo.channelKey(c))
+    }
 
     fun saveProgress(posMs: Long, durMs: Long) {
         val v = item as? PlayItem.Vod ?: return
@@ -137,11 +197,19 @@ object IosPlayback {
                     val c = it.channels[i]
                     App.store.addRecentChannel(App.repo.channelKey(c)); App.store.lastChannel = App.repo.channelKey(c)
                     val nn: List<Programme> = withContext(IO) { try { App.repo.nowNext(c) } catch (e: Exception) { emptyList() } }
-                    val sub = nn.firstOrNull()?.let { p -> "${clock(p.start)} – ${clock(p.stop)}  ${p.title}" } ?: "No guide information"
-                    PlayRequest("${c.number}  ${c.name}", sub, url, true, 0L, Http.UA, c.logo, App.store.bufferMs)
+                    val p = nn.firstOrNull(); val n = nn.getOrNull(1)
+                    val now = nowMs()
+                    val cat = App.repo.state.value.lib.liveCategories.firstOrNull { k -> k.id == c.categoryId }?.name.orEmpty()
+                    PlayRequest("${c.number}  ${c.name}", p?.let { q -> "${clock(q.start)} – ${clock(q.stop)}  ${q.title}" } ?: "No information",
+                        url, true, 0L, Http.UA, c.logo, App.store.bufferMs,
+                        c.name, p?.title ?: "No information", n?.let { q -> "Next  ${clock(q.start)}  ${q.title}" } ?: "No information",
+                        p?.let { q -> ((now - q.start).toFloat() / (q.stop - q.start).coerceAtLeast(1)).coerceIn(0f, 1f) } ?: -1f,
+                        p?.let { q -> "${clock(q.start)} – ${clock(q.stop)}" }.orEmpty(),
+                        c.categoryId, cat, App.store.isFavourite(App.repo.channelKey(c)))
                 }
                 is PlayItem.Vod -> PlayRequest(it.title, it.series?.name ?: "", url, false, App.store.progress(it.key)?.first ?: 0L,
-                    Http.UA, it.movie?.poster ?: it.series?.poster, App.store.bufferMs)
+                    Http.UA, it.movie?.poster ?: it.series?.poster, App.store.bufferMs,
+                    it.title, it.series?.name ?: "", "", -1f, "", "", "", false)
             }
             presenter?.invoke(req)
         }

@@ -11,14 +11,16 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 
 /**
- * The iPhone shows the TV's canvas, landscape, 960 units wide (a little larger than the TV's 1280, as the screen is
- * held closer), clear of the notch and the home bar.
+ * The iPhone shows the TV's canvas 960 units wide in landscape (a little larger than the TV's 1280, as the screen is
+ * held closer) and 600 upright, clear of the notch and the home bar.
  */
 @Composable
 actual fun NovaTheme(content: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         val d = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(constraints.maxWidth / 960f, d.fontScale)) { content() }
+        // Landscape: 960 units across. Upright: 600, so text stays readable on the narrow screen.
+        val canvas = if (constraints.maxWidth > constraints.maxHeight) 960f else 600f
+        CompositionLocalProvider(LocalDensity provides Density(constraints.maxWidth / canvas, d.fontScale)) { content() }
     }
 }
 
