@@ -63,7 +63,6 @@ import io.github.novatv.play.Tab
 import io.github.novatv.play.data.Channel
 import io.github.novatv.play.data.Programme
 import io.github.novatv.play.ui.Icon
-import io.github.novatv.play.ui.LeaguesScreen
 import io.github.novatv.play.ui.SettingsScreen
 import io.github.novatv.play.ui.Text
 import io.github.novatv.play.ui.clock
@@ -101,7 +100,7 @@ fun PhoneRoot() {
                 Route.Appearance -> Appearance(nav)
                 Route.Settings -> Pushed(nav) { TvCanvas { SettingsScreen(nav) } }
                 Route.AddSource -> PhoneAddSource(nav)
-                Route.Leagues -> Pushed(nav) { TvCanvas { LeaguesScreen(nav) } }
+                Route.Leagues -> PhoneLeagues(nav)
                 is Route.Match -> MatchPage(nav, top.event)
             } } }
             return@Box
