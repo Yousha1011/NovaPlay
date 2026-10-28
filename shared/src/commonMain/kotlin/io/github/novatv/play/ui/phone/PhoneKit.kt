@@ -90,12 +90,12 @@ object P {
     var serif: FontFamily = FontFamily.Serif
     var sans: FontFamily = FontFamily.Default
 
-    val large get() = TextStyle(fontFamily = serif, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = text)
-    val title get() = TextStyle(fontFamily = serif, fontSize = 23.sp, fontWeight = FontWeight.Bold, color = text)
-    val head get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = text)
+    val large get() = TextStyle(fontFamily = serif, fontSize = 34.sp, fontWeight = FontWeight.Normal, color = text)
+    val title get() = TextStyle(fontFamily = serif, fontSize = 23.sp, fontWeight = FontWeight.Normal, color = text)
+    val head get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.Normal, color = text)
     val body get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.Normal, color = text, lineHeight = 23.sp)
-    val small get() = TextStyle(fontFamily = sans, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = dim)
-    val caps get() = TextStyle(fontFamily = sans, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = dim, letterSpacing = 1.8.sp)
+    val small get() = TextStyle(fontFamily = sans, fontSize = 13.sp, fontWeight = FontWeight.Normal, color = dim)
+    val caps get() = TextStyle(fontFamily = sans, fontSize = 12.sp, fontWeight = FontWeight.Normal, color = dim, letterSpacing = 1.8.sp)
 }
 
 /** Loads the app's fonts and the saved theme; called once at the top of the iPhone app. */

@@ -198,11 +198,8 @@ private fun TabBar(nav: Nav, modifier: Modifier) {
 /** The tab now open flows in from the side it lies on (left or right of the last one), as water would. */
 @Composable
 private fun Modifier.tabFlow(t: Tab): Modifier {
-    val i = phoneTabs.indexOfFirst { it.first == t }
-    val last = remember { mutableStateOf(i) }
-    val dir = if (i >= last.value) 1f else -1f
-    androidx.compose.runtime.SideEffect { last.value = i }
-    return flowIn(fromX = 0.18f * dir, key = t)
+    // Tabs just appear, with no slide.
+    return this
 }
 
 /**
