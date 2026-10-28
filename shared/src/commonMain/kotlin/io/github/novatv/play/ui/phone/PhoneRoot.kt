@@ -111,6 +111,7 @@ fun PhoneRoot() {
                 Route.Appearance -> Appearance(nav)
                 Route.Settings, Route.Configurations -> PhoneConfigurations(nav)
                 Route.Playlists -> PhonePlaylists(nav)
+                is Route.Find -> PhoneSearch(nav, top.scope)
                 Route.EpgSources -> PhoneEpgSources(nav)
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> PhoneLeagues(nav)
@@ -320,7 +321,7 @@ private fun PhoneLive(nav: Nav) {
     var tab by remember { mutableStateOf("fav") }
     val prefix = App.repo.channelKeyPrefix()
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-        TopBar(nav) { if (tab != "all") LiveButtons() }
+        TopBar(nav) { LiveButtons(nav) }
         Chips(listOf("fav" to "Favourites", "recent" to "Watch History", "all" to "All Categories"), tab, { tab = it })
         if (tab == "all") {
             // Every channel group, top to bottom, with how many channels it holds; a group opens on its own page.
@@ -358,7 +359,7 @@ private fun PhoneLive(nav: Nav) {
 fun ChannelGroupPage(nav: Nav, id: String, name: String) {
     val st by App.repo.state.collectAsState()
     val list = remember(st.index, id) { st.index?.channelsByCat?.get(id).orEmpty() }
-    Pushed(nav, right = { LiveButtons() }) {
+    Pushed(nav, right = { LiveButtons(nav) }) {
         Column {
             PageTitle(name)
             Text("${list.size} channels", style = P.small, modifier = Modifier.padding(horizontal = 16.dp))
@@ -368,21 +369,15 @@ fun ChannelGroupPage(nav: Nav, id: String, name: String) {
 }
 
 @Composable
-private fun LiveButtons() = Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-    SortButton(View.liveSort, listOf(SortBy.AZ, SortBy.ZA, SortBy.PROVIDER)) { View.liveSort = it }
+private fun LiveButtons(nav: Nav) = Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    RoundIcon(Icons.Rounded.Search, onClick = { nav.push(Route.Find("live")) })
     LayoutButton(View.liveGrid) { View.liveGrid = it }
 }
 
 /** Channels in the chosen order, as a list of rows or a grid of logos. */
 @Composable
 private fun ChannelList(channels: List<Channel>) {
-    val list = remember(channels, View.liveSort) {
-        when (View.liveSort) {
-            SortBy.AZ -> channels.sortedBy { it.name.lowercase() }
-            SortBy.ZA -> channels.sortedByDescending { it.name.lowercase() }
-            else -> channels
-        }
-    }
+    val list = channels
     if (View.liveGrid) {
         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 120.dp),

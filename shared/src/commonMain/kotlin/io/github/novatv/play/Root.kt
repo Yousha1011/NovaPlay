@@ -108,6 +108,7 @@ sealed class Route {
     data class Match(val event: io.github.novatv.play.sports.SportEvent) : Route()
     data class ChannelGroup(val id: String, val name: String) : Route()
     data object Playlists : Route()
+    data class Find(val scope: String) : Route()
     data object EpgSources : Route()
     data object Configurations : Route()
 }

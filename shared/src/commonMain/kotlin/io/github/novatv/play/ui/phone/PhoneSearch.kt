@@ -69,32 +69,68 @@ import io.github.novatv.play.ui.Text
 import io.github.novatv.play.ui.playChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.painterResource
 
 private class Found(val channels: List<Channel> = emptyList(), val movies: List<Any> = emptyList(), val series: List<Any> = emptyList())
 
-/** Search: one box for channels, films and series, recent searches under it while it is empty. */
+/** Lower case, accents and punctuation dropped, so "Café-Noir" is found by "cafe noir". */
+fun normalise(t: String): String {
+    val b = StringBuilder(t.length)
+    for (ch in t.lowercase()) {
+        val c = when (ch) {
+            in "àáâãäå" -> 'a'; in "èéêë" -> 'e'; in "ìíîï" -> 'i'; in "òóôõö" -> 'o'; in "ùúûü" -> 'u'; 'ç' -> 'c'; 'ñ' -> 'n'; 'ý', 'ÿ' -> 'y'
+            else -> if (ch.isLetterOrDigit()) ch else ' '
+        }
+        b.append(c)
+    }
+    return b.toString().split(' ').filter { it.isNotEmpty() }.joinToString(" ")
+}
+
+/** Every word of the query in the name, in any order; names that start with it, then hold it whole, come first. */
+fun <T> matchAll(items: List<T>, query: String, name: (T) -> String): List<T> {
+    val q = normalise(query)
+    if (q.isEmpty()) return emptyList()
+    val words = q.split(' ')
+    return items.mapNotNull { item ->
+        val n = normalise(name(item))
+        if (words.all { n.contains(it) }) item to when { n == q -> 0; n.startsWith(q) -> 1; n.contains(q) -> 2; else -> 3 } else null
+    }.sortedWith(compareBy({ it.second }, { name(it.first).length })).map { it.first }
+}
+
+/**
+ * Search: one box for channels, films and series, recent searches under it while it is empty. With a [scope] ("live",
+ * "movies" or "series") it is a page of its own that searches just that, the keyboard up at once.
+ */
 @Composable
-fun PhoneSearch(nav: Nav) {
+fun PhoneSearch(nav: Nav, scope: String? = null) {
+    if (scope != null) { Pushed(nav, brand = true) { SearchBody(nav, scope) }; return }
+    SearchBody(nav, null)
+}
+
+@Composable
+private fun SearchBody(nav: Nav, scope: String?) {
     var q by remember { mutableStateOf("") }
-    var typing by remember { mutableStateOf(false) }
+    var typing by remember { mutableStateOf(scope != null) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    if (scope != null) androidx.compose.runtime.LaunchedEffect(Unit) { delay(300); runCatching { focus.requestFocus() } }
     var historyVersion by remember { mutableIntStateOf(0) }
     val found by produceState(Found(), q) {
         delay(250)
-        val s = q.trim().lowercase()
-        if (s.length < 2) { value = Found(); return@produceState }
+        if (normalise(q).isEmpty()) { value = Found(); return@produceState }
         val lib = App.repo.state.value.lib
         value = withContext(Dispatchers.Default) {
-            Found(lib.channels.filter { it.name.lowercase().contains(s) }.take(60),
-                lib.movies.filter { it.name.lowercase().contains(s) }.take(40),
-                lib.series.filter { it.name.lowercase().contains(s) }.take(40))
+            Found(if (scope == null || scope == "live") matchAll(lib.channels, q) { it.name }.take(200) else emptyList(),
+                if (scope == null || scope == "movies") matchAll(lib.movies, q) { it.name }.take(200) else emptyList(),
+                if (scope == null || scope == "series") matchAll(lib.series, q) { it.name }.take(200) else emptyList())
         }
     }
     fun saveSearch(text: String) { App.store.addSearch(text); historyVersion++ }
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-        if (!typing) {
+        if (scope != null) PageTitle(when (scope) { "live" -> "Search channels"; "movies" -> "Search movies"; else -> "Search TV shows" })
+        else if (!typing) {
             TopBar(nav) { RoundIcon(Icons.Rounded.Settings, onClick = { nav.push(Route.SearchSettings) }) }
             PageTitle("Search")
         }
@@ -105,16 +141,16 @@ fun PhoneSearch(nav: Nav) {
                 Spacer(Modifier.width(10.dp))
                 Box(Modifier.weight(1f)) {
                     if (q.isEmpty()) Text("Search", style = P.body.copy(color = P.dim))
-                    BasicTextField(q, { q = it }, Modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) typing = true },
+                    BasicTextField(q, { q = it }, Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { if (it.isFocused) typing = true },
                         singleLine = true, textStyle = P.body, cursorBrush = SolidColor(P.blue),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { saveSearch(q) }))
                 }
             }
-            if (typing) { Spacer(Modifier.width(10.dp)); RoundIcon(Icons.Rounded.Close, onClick = { q = ""; typing = false }, size = 50.dp) }
+            if (typing) { Spacer(Modifier.width(10.dp)); RoundIcon(Icons.Rounded.Close, onClick = { if (scope != null && q.isEmpty()) nav.pop() else { q = ""; typing = scope != null } }, size = 50.dp) }
         }
         val s = q.trim()
         when {
-            s.length < 2 && typing -> {
+            normalise(s).isEmpty() && typing -> {
                 val history = remember(historyVersion) { App.store.searchHistory }
                 LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp)) {
                     items(history, key = { it }) { h ->
@@ -128,7 +164,7 @@ fun PhoneSearch(nav: Nav) {
                     }
                 }
             }
-            s.length < 2 -> Empty(Icons.Rounded.Search, "Content Search", "Search for channels, programmes, movies and TV shows")
+            normalise(s).isEmpty() -> Empty(Icons.Rounded.Search, "Content Search", "Search for channels, programmes, movies and TV shows")
             found.channels.isEmpty() && found.movies.isEmpty() && found.series.isEmpty() -> Empty(Icons.Rounded.Search, "No results", "Nothing matches \"$s\".")
             else -> LazyColumn(contentPadding = PaddingValues(bottom = 120.dp)) {
                 if (found.channels.isNotEmpty()) {
@@ -139,8 +175,19 @@ fun PhoneSearch(nav: Nav) {
                         }
                     }
                 }
-                item { PosterRow("Movies (${found.movies.size})", found.movies, { saveSearch(s); open(nav, it) }, null) }
-                item { PosterRow("TV Shows (${found.series.size})", found.series, { saveSearch(s); open(nav, it) }, null) }
+                if (scope != null && found.channels.isEmpty()) {
+                    // Searching one kind of media: every match as a grid of posters, three across.
+                    val all = found.movies + found.series
+                    items(all.chunked(3), key = { r -> "r" + r.joinToString { nameOf(it) + posterOf(it) } }) { row ->
+                        Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            for (m in row) Poster(nameOf(m), posterOf(m), ratingOf(m), onClick = { saveSearch(s); open(nav, m) }, modifier = Modifier.weight(1f))
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                } else {
+                    if (found.movies.isNotEmpty()) item { PosterRow("Movies (${found.movies.size})", found.movies, { saveSearch(s); open(nav, it) }, null) }
+                    if (found.series.isNotEmpty()) item { PosterRow("TV Shows (${found.series.size})", found.series, { saveSearch(s); open(nav, it) }, null) }
+                }
             }
         }
     }

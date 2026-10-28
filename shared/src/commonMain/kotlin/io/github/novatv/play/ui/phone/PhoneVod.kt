@@ -80,6 +80,7 @@ import io.github.novatv.play.ui.duration
 import io.github.novatv.play.ui.nextEpisode
 import io.github.novatv.play.ui.playEpisode
 import kotlinx.coroutines.withContext
+import androidx.compose.material.icons.rounded.Search
 
 
 private fun keyOf(it: Any) = if (it is Movie) App.repo.movieKey(it) else App.repo.seriesKey(it as Series)
@@ -105,10 +106,7 @@ fun PhoneVod(nav: Nav, series: Boolean) {
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         TopBar(nav) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SortButton(order, listOf(SortBy.AZ, SortBy.ZA, SortBy.RATING, SortBy.ADDED)) { order = it }
-                LayoutButton(View.grid) { View.grid = it }
-            }
+            RoundIcon(Icons.Rounded.Search, onClick = { nav.push(Route.Find(if (series) "series" else "movies")) })
         }
         Chips(chips, chip, { chip = if (chip == it) null else it }, Modifier.padding(vertical = 8.dp))
         val c = chip
@@ -147,25 +145,6 @@ private fun sorted(l: List<Any>, o: SortBy): List<Any> = when (o) {
 @Composable
 private fun Grid(nav: Nav, list: List<Any>, empty: String) {
     if (list.isEmpty()) { Empty(Icons.Rounded.Movie, empty, null); return }
-    if (!View.grid) {
-        // A list: the poster small at the left, the title, year and rating beside it.
-        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(list, key = { keyOf(it) }) { m ->
-                Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { open(nav, m) }.padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Poster(nameOf(m), posterOf(m), null, onClick = { open(nav, m) }, modifier = Modifier.width(64.dp))
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(nameOf(m), style = P.head, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        val year = (m as? Movie)?.year ?: (m as? Series)?.year
-                        val r = ratingOf(m)?.toFloatOrNull()?.takeIf { it > 0f }
-                        Text(listOfNotNull(year, r?.let { "★ " + (kotlin.math.round(it * 10) / 10f) }).joinToString("  ·  "), style = P.small)
-                    }
-                }
-            }
-        }
-        return
-    }
     LazyVerticalGrid(GridCells.Adaptive(108.dp), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(list, key = { keyOf(it) }) { m -> Poster(nameOf(m), posterOf(m), ratingOf(m), onClick = { open(nav, m) }) }
