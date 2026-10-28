@@ -91,7 +91,7 @@ object P {
     var sans: FontFamily = FontFamily.Default
 
     val large get() = TextStyle(fontFamily = serif, fontSize = 34.sp, fontWeight = FontWeight.Bold, color = text)
-    val title get() = TextStyle(fontFamily = serif, fontSize = 23.sp, fontWeight = FontWeight.SemiBold, color = text)
+    val title get() = TextStyle(fontFamily = serif, fontSize = 23.sp, fontWeight = FontWeight.Bold, color = text)
     val head get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = text)
     val body get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.Normal, color = text, lineHeight = 23.sp)
     val small get() = TextStyle(fontFamily = sans, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = dim)
@@ -101,16 +101,9 @@ object P {
 /** Loads the app's fonts and the saved theme; called once at the top of the iPhone app. */
 @Composable
 fun PhoneStyle() {
-    P.serif = FontFamily(
-        org.jetbrains.compose.resources.Font(Res.font.playfair_display_600, FontWeight.SemiBold),
-        org.jetbrains.compose.resources.Font(Res.font.playfair_display_700, FontWeight.Bold),
-    )
-    P.sans = FontFamily(
-        org.jetbrains.compose.resources.Font(Res.font.manrope_400, FontWeight.Normal),
-        org.jetbrains.compose.resources.Font(Res.font.manrope_500, FontWeight.Medium),
-        org.jetbrains.compose.resources.Font(Res.font.manrope_600, FontWeight.SemiBold),
-        org.jetbrains.compose.resources.Font(Res.font.manrope_700, FontWeight.Bold),
-    )
+    // The iPhone's own San Francisco, as in IM Player, for headings and text alike.
+    P.serif = FontFamily.Default
+    P.sans = FontFamily.Default
     androidx.compose.runtime.LaunchedEffect(Unit) {
         P.themes.firstOrNull { it.id == io.github.novatv.play.App.store.phoneTheme }?.let { P.theme = it }
     }
