@@ -194,7 +194,7 @@ fun AddSourceScreen(nav: Nav) {
 private fun Label(t: String) = Text(t, style = T.small, modifier = Modifier.padding(bottom = 6.dp, start = 4.dp))
 
 /** Countries as TheSportsDB names them; "" is any. */
-private val COUNTRIES = listOf("", "United Kingdom", "Ireland", "United States", "Canada", "Pakistan", "India", "Bangladesh",
+internal val COUNTRIES = listOf("", "United Kingdom", "Ireland", "United States", "Canada", "Pakistan", "India", "Bangladesh",
     "United Arab Emirates", "Saudi Arabia", "Qatar", "Australia", "New Zealand", "South Africa", "Germany", "France", "Spain",
     "Italy", "Netherlands", "Portugal", "Turkey", "Brazil", "Mexico")
 

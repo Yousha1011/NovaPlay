@@ -95,16 +95,23 @@ fun PhoneRoot() {
             return@Box
         }
         val top = nav.stack.lastOrNull()
+        val shown = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        val opened = nav.stack.size > shown.intValue
+        androidx.compose.runtime.SideEffect { shown.intValue = nav.stack.size }
         if (top != null) {
-            // Each page flows in from the right, like a drop running across the screen.
-            key(nav.stack.size, top) { Box(Modifier.fillMaxSize().flowIn(fromX = 0.35f)) { when (top) {
+            // A page flows in from the right when it is opened, like a drop running across the screen; one opened
+            // from the App Menu, or one gone back to, just appears, as the tabs do.
+            val fromMenu = nav.stack.size >= 2 && nav.stack[nav.stack.size - 2] == Route.Menu
+            key(nav.stack.size, top) { Box(Modifier.fillMaxSize().then(if (opened && !fromMenu) Modifier.flowIn(fromX = 0.35f) else Modifier)) { when (top) {
                 is Route.MovieDetail -> PhoneDetail(nav, movie = top.movie)
                 is Route.SeriesDetail -> PhoneDetail(nav, series = top.series)
                 is Route.SeeAll -> SeeAll(nav, top.title, top.items)
                 Route.Menu -> AppMenu(nav)
                 Route.SearchSettings -> SearchSettings(nav)
                 Route.Appearance -> Appearance(nav)
-                Route.Settings -> Pushed(nav) { TvCanvas { SettingsScreen(nav) } }
+                Route.Settings, Route.Configurations -> PhoneConfigurations(nav)
+                Route.Playlists -> PhonePlaylists(nav)
+                Route.EpgSources -> PhoneEpgSources(nav)
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> PhoneLeagues(nav)
                 is Route.Match -> MatchPage(nav, top.event)
@@ -227,12 +234,7 @@ fun TopBar(nav: Nav, right: @Composable () -> Unit = {}) {
     val st by App.repo.state.collectAsState()
     Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp).height(46.dp)) {
         RoundIcon(Icons.Rounded.Person, onClick = { nav.push(Route.Menu) }, modifier = Modifier.align(Alignment.CenterStart))
-        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.foundation.Image(org.jetbrains.compose.resources.painterResource(io.github.novatv.play.res.Res.drawable.logo_mark), "NovaPlay",
-                Modifier.size(34.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("NovaPlay", style = P.title.copy(fontSize = 25.sp))
-        }
+        Brand(Modifier.align(Alignment.Center))
         Box(Modifier.align(Alignment.CenterEnd)) { right() }
     }
     if (st.loading || st.status.isNotBlank() || st.error != null) {
@@ -242,12 +244,16 @@ fun TopBar(nav: Nav, right: @Composable () -> Unit = {}) {
     }
 }
 
-/** A page over the tabs with a round back button at its top left. */
+/** A page over the tabs: a round back button at its top left, the NovaPlay logo in the middle, an optional action right. */
 @Composable
-fun Pushed(nav: Nav, content: @Composable () -> Unit) {
+fun Pushed(nav: Nav, brand: Boolean = true, right: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().background(P.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
-        Box(Modifier.fillMaxSize().padding(top = 56.dp)) { content() }
-        RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() }, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
+        Box(Modifier.fillMaxSize().padding(top = 62.dp)) { content() }
+        Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(46.dp)) {
+            RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() }, modifier = Modifier.align(Alignment.CenterStart))
+            if (brand) Brand(Modifier.align(Alignment.Center))
+            Box(Modifier.align(Alignment.CenterEnd)) { right() }
+        }
     }
 }
 
@@ -314,7 +320,7 @@ private fun PhoneLive(nav: Nav) {
     var tab by remember { mutableStateOf("fav") }
     val prefix = App.repo.channelKeyPrefix()
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-        TopBar(nav)
+        TopBar(nav) { if (tab != "all") LiveButtons() }
         Chips(listOf("fav" to "Favourites", "recent" to "Watch History", "all" to "All Categories"), tab, { tab = it })
         if (tab == "all") {
             // Every channel group, top to bottom, with how many channels it holds; a group opens on its own page.
@@ -352,9 +358,9 @@ private fun PhoneLive(nav: Nav) {
 fun ChannelGroupPage(nav: Nav, id: String, name: String) {
     val st by App.repo.state.collectAsState()
     val list = remember(st.index, id) { st.index?.channelsByCat?.get(id).orEmpty() }
-    Pushed(nav) {
+    Pushed(nav, right = { LiveButtons() }) {
         Column {
-            Text(name, style = P.large.copy(fontSize = 28.sp), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            PageTitle(name)
             Text("${list.size} channels", style = P.small, modifier = Modifier.padding(horizontal = 16.dp))
             ChannelList(list)
         }
@@ -362,7 +368,38 @@ fun ChannelGroupPage(nav: Nav, id: String, name: String) {
 }
 
 @Composable
-private fun ChannelList(list: List<Channel>) {
+private fun LiveButtons() = Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    SortButton(View.liveSort, listOf(SortBy.AZ, SortBy.ZA, SortBy.PROVIDER)) { View.liveSort = it }
+    LayoutButton(View.liveGrid) { View.liveGrid = it }
+}
+
+/** Channels in the chosen order, as a list of rows or a grid of logos. */
+@Composable
+private fun ChannelList(channels: List<Channel>) {
+    val list = remember(channels, View.liveSort) {
+        when (View.liveSort) {
+            SortBy.AZ -> channels.sortedBy { it.name.lowercase() }
+            SortBy.ZA -> channels.sortedByDescending { it.name.lowercase() }
+            else -> channels
+        }
+    }
+    if (View.liveGrid) {
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 120.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(list.size, key = { list[it].id }) { i ->
+                val c = list[i]
+                Column(Modifier.glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { playChannel(list, i) }.padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    ChannelLogo(c.logo, c.name, Modifier.fillMaxWidth().height(56.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text(c.name, style = P.small.copy(color = Color.White), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+        }
+        return
+    }
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(list.size, key = { list[it].id }) { i -> PhoneChannelRow(list[i]) { playChannel(list, i) } }
     }

@@ -132,16 +132,19 @@ fun PhoneAddSource(nav: Nav) {
                 else { App.repo.addSource(name, type, url, user, pass, mac, epg); nav.stack.clear() }
             }
         }
-        RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() }, modifier = Modifier.padding(start = 16.dp, top = 6.dp))
+        Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(46.dp)) {
+            RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() }, modifier = Modifier.align(Alignment.CenterStart))
+            Brand(Modifier.align(Alignment.Center))
+        }
     }
 }
 
 @Composable
-private fun FieldLabel(text: String) = Text(text, style = P.head.copy(color = P.dim), modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+internal fun FieldLabel(text: String) = Text(text, style = P.head.copy(color = P.dim), modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
 
 /** A labelled text box at the phone's size (press and hold in it to paste). */
 @Composable
-private fun Field(label: String, value: String, hint: String, keyboard: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
+internal fun Field(label: String, value: String, hint: String, keyboard: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
     Column {
         FieldLabel(label)
         Row(Modifier.fillMaxWidth().height(54.dp).glass(RoundedCornerShape(16.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {

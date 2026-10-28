@@ -46,6 +46,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import coil3.compose.AsyncImage
 import io.github.novatv.play.res.Res
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.ViewAgenda
+import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.Check
+import io.github.novatv.play.res.logo_mark
 import io.github.novatv.play.res.playfair_display_600
 import io.github.novatv.play.res.playfair_display_700
 import io.github.novatv.play.res.manrope_400
@@ -90,7 +95,7 @@ object P {
     var serif: FontFamily = FontFamily.Serif
     var sans: FontFamily = FontFamily.Default
 
-    val large get() = TextStyle(fontFamily = serif, fontSize = 34.sp, fontWeight = FontWeight.Normal, color = text)
+    val large get() = TextStyle(fontFamily = serif, fontSize = 30.sp, fontWeight = FontWeight.Normal, color = text)
     val title get() = TextStyle(fontFamily = serif, fontSize = 23.sp, fontWeight = FontWeight.Normal, color = text)
     val head get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.Normal, color = text)
     val body get() = TextStyle(fontFamily = sans, fontSize = 16.sp, fontWeight = FontWeight.Normal, color = text, lineHeight = 23.sp)
@@ -225,3 +230,67 @@ fun TvCanvas(content: @Composable () -> Unit) {
         CompositionLocalProvider(LocalDensity provides Density(constraints.maxWidth / canvas, d.fontScale)) { content() }
     }
 }
+
+/** The NovaPlay logo and name, in bold, as at the top of every page. */
+@Composable
+fun Brand(modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.Image(org.jetbrains.compose.resources.painterResource(Res.drawable.logo_mark), "NovaPlay", Modifier.size(34.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("NovaPlay", style = P.title.copy(fontSize = 25.sp, fontWeight = FontWeight.Bold))
+    }
+}
+
+/** A page's heading, the same size on every page. */
+@Composable
+fun PageTitle(text: String, modifier: Modifier = Modifier) =
+    Text(text, style = P.large.copy(fontSize = 30.sp), maxLines = 2, overflow = TextOverflow.Ellipsis,
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+
+/** A section label over a group of cards. */
+@Composable
+fun SectionLabel(text: String) = Text(text.uppercase(), style = P.caps, modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp))
+
+class MenuOption(val label: String, val selected: Boolean = false, val icon: ImageVector? = null, val onClick: () -> Unit)
+
+/** A round glass button that opens a frosted menu of options under it. */
+@Composable
+fun MenuButton(icon: ImageVector, options: List<MenuOption>) {
+    var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    Box {
+        RoundIcon(icon, onClick = { open = true })
+        if (open) androidx.compose.ui.window.Popup(alignment = Alignment.TopEnd, offset = androidx.compose.ui.unit.IntOffset(0, 140),
+            onDismissRequest = { open = false }, properties = androidx.compose.ui.window.PopupProperties(focusable = true)) {
+            Column(Modifier.width(260.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xF0262628)).border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(28.dp))
+                .padding(vertical = 10.dp)) {
+                for (o in options) Row(Modifier.fillMaxWidth().tap { open = false; o.onClick() }.padding(horizontal = 18.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(30.dp)) {
+                        if (o.icon != null) Icon(o.icon, size = 22.dp) else if (o.selected) Icon(androidx.compose.material.icons.Icons.Rounded.Check, size = 20.dp)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(o.label, style = P.body.copy(fontSize = 18.sp, color = if (o.icon != null && o.selected) P.blue else Color.White), maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+enum class SortBy(val label: String) { AZ("Sort A -> Z"), ZA("Sort Z -> A"), RATING("Sort by Rating"), ADDED("Sort by Recently Added"), PROVIDER("Sort by Provider Order") }
+
+/** How the phone lists titles and channels: in a list or a grid. Kept for the session. */
+object View {
+    var grid by androidx.compose.runtime.mutableStateOf(true)
+    var liveGrid by androidx.compose.runtime.mutableStateOf(false)
+    var liveSort by androidx.compose.runtime.mutableStateOf(SortBy.PROVIDER)
+}
+
+@Composable
+fun LayoutButton(grid: Boolean, set: (Boolean) -> Unit) = MenuButton(if (grid) androidx.compose.material.icons.Icons.Rounded.GridView else androidx.compose.material.icons.Icons.Rounded.ViewAgenda, listOf(
+    MenuOption("List", !grid, androidx.compose.material.icons.Icons.Rounded.ViewAgenda) { set(false) },
+    MenuOption("Grid", grid, androidx.compose.material.icons.Icons.Rounded.GridView) { set(true) },
+))
+
+@Composable
+fun SortButton(current: SortBy, choices: List<SortBy>, set: (SortBy) -> Unit) =
+    MenuButton(androidx.compose.material.icons.Icons.Rounded.SwapVert, choices.map { s -> MenuOption(s.label, s == current) { set(s) } })

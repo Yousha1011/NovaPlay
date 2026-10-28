@@ -95,12 +95,8 @@ fun PhoneSearch(nav: Nav) {
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         if (!typing) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(Icons.Rounded.Person, onClick = { nav.push(Route.Menu) })
-                Spacer(Modifier.weight(1f))
-                RoundIcon(Icons.Rounded.Settings, onClick = { nav.push(Route.SearchSettings) })
-            }
-            Text("Search", style = P.large, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            TopBar(nav) { RoundIcon(Icons.Rounded.Settings, onClick = { nav.push(Route.SearchSettings) }) }
+            PageTitle("Search")
         }
         Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(25.dp)).background(P.card).border(1.dp, P.line, RoundedCornerShape(25.dp))
@@ -200,7 +196,7 @@ private fun Switch(on: Boolean) {
 @Composable
 fun AppMenu(nav: Nav) {
     val st by App.repo.state.collectAsState()
-    Pushed(nav) {
+    Pushed(nav, brand = false) {
         LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item {
                 Text("App Menu", style = P.large, modifier = Modifier.padding(vertical = 8.dp))
@@ -216,9 +212,9 @@ fun AppMenu(nav: Nav) {
             }
             item {
                 Group(listOf(
-                    MenuItem(Icons.Rounded.List, "Playlist Manager") { nav.push(Route.Settings) },
+                    MenuItem(Icons.Rounded.List, "Playlist Manager") { nav.push(Route.Playlists) },
                     MenuItem(Icons.Rounded.Add, "Add a playlist") { nav.push(Route.AddSource) },
-                    MenuItem(Icons.Rounded.Event, "EPG Sources") { nav.push(Route.Settings) },
+                    MenuItem(Icons.Rounded.Event, "EPG Sources") { nav.push(Route.EpgSources) },
                 ))
             }
             item {
@@ -226,7 +222,7 @@ fun AppMenu(nav: Nav) {
                     MenuItem(Icons.Rounded.SportsSoccer, "Choose sports") { nav.push(Route.Leagues) },
                     MenuItem(Icons.Rounded.Search, "Search Settings") { nav.push(Route.SearchSettings) },
                     MenuItem(Icons.Rounded.Palette, "Appearance") { nav.push(Route.Appearance) },
-                    MenuItem(Icons.Rounded.Tune, "Configurations") { nav.push(Route.Settings) },
+                    MenuItem(Icons.Rounded.Tune, "Configurations") { nav.push(Route.Configurations) },
                 ))
             }
             item {

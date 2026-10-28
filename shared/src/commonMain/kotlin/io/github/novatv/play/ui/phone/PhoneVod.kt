@@ -81,7 +81,6 @@ import io.github.novatv.play.ui.nextEpisode
 import io.github.novatv.play.ui.playEpisode
 import kotlinx.coroutines.withContext
 
-private enum class Order(val label: String) { ADDED("Recently added"), AZ("A–Z"), RATING("Top rated") }
 
 private fun keyOf(it: Any) = if (it is Movie) App.repo.movieKey(it) else App.repo.seriesKey(it as Series)
 
@@ -93,7 +92,7 @@ fun PhoneVod(nav: Nav, series: Boolean) {
     val st by App.repo.state.collectAsState()
     val idx = st.index
     var chip by remember(series) { mutableStateOf<String?>(null) }
-    var order by remember(series) { mutableStateOf(Order.ADDED) }
+    var order by remember(series) { mutableStateOf(SortBy.ADDED) }
     val word = if (series) "TV Shows" else "Movies"
     val cats = if (series) st.lib.seriesCategories else st.lib.movieCategories
     val all: List<Any> = remember(idx, series) { (if (series) idx?.seriesByAdded else idx?.moviesByAdded).orEmpty() }
@@ -105,7 +104,12 @@ fun PhoneVod(nav: Nav, series: Boolean) {
     val chips = listOf("fav" to "Favorites", "hist" to "Watched History", "all" to "All $word") + cats.map { it.id to it.name }
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-        TopBar(nav) { RoundIcon(Icons.Rounded.SwapVert, onClick = { order = Order.entries[(order.ordinal + 1) % Order.entries.size] }) }
+        TopBar(nav) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SortButton(order, listOf(SortBy.AZ, SortBy.ZA, SortBy.RATING, SortBy.ADDED)) { order = it }
+                LayoutButton(View.grid) { View.grid = it }
+            }
+        }
         Chips(chips, chip, { chip = if (chip == it) null else it }, Modifier.padding(vertical = 8.dp))
         val c = chip
         if (c != null) {
@@ -118,27 +122,50 @@ fun PhoneVod(nav: Nav, series: Boolean) {
         }
         LazyColumn(contentPadding = PaddingValues(bottom = 120.dp)) {
             if (all.isNotEmpty()) item { Hero(nav, all.take(8)) }
-            if (watched.isNotEmpty()) item { PosterRow("Watched History (${watched.size})", watched, { open(nav, it) }, { nav.push(Route.SeeAll("Watched History", watched)) }) }
-            if (favs.isNotEmpty()) item { PosterRow("Favorites (${favs.size})", favs, { open(nav, it) }, { nav.push(Route.SeeAll("Favorites", favs)) }) }
-            item { PosterRow("All $word (${io.github.novatv.play.platform.grouped(all.size)})", all, { open(nav, it) }, { chip = "all" }) }
+            if (watched.isNotEmpty()) item { PosterRow("Watched History (${watched.size})", sorted(watched, order), { open(nav, it) }, { nav.push(Route.SeeAll("Watched History", watched)) }) }
+            if (favs.isNotEmpty()) item { PosterRow("Favorites (${favs.size})", sorted(favs, order), { open(nav, it) }, { nav.push(Route.SeeAll("Favorites", favs)) }) }
+            item { PosterRow("All $word (${io.github.novatv.play.platform.grouped(all.size)})", sorted(all, order), { open(nav, it) }, { chip = "all" }) }
             items(cats.take(40), key = { it.id }) { cat ->
                 val list: List<Any> = (if (series) idx?.seriesByCat?.get(cat.id) else idx?.moviesByCat?.get(cat.id)).orEmpty()
-                PosterRow("${cat.name} (${list.size})", list, { open(nav, it) }, { chip = cat.id })
+                PosterRow("${cat.name} (${list.size})", sorted(list, order), { open(nav, it) }, { chip = cat.id })
             }
         }
     }
 }
 
-private fun sorted(l: List<Any>, o: Order): List<Any> = when (o) {
-    Order.ADDED -> l
-    Order.AZ -> l.sortedBy { nameOf(it).lowercase() }
-    Order.RATING -> l.sortedByDescending { ratingOf(it)?.toFloatOrNull() ?: 0f }
+private fun addedOf(it: Any) = (it as? Movie)?.added ?: (it as? Series)?.added ?: 0L
+
+private fun sorted(l: List<Any>, o: SortBy): List<Any> = when (o) {
+    SortBy.AZ -> l.sortedBy { nameOf(it).lowercase() }
+    SortBy.ZA -> l.sortedByDescending { nameOf(it).lowercase() }
+    SortBy.RATING -> l.sortedByDescending { ratingOf(it)?.toFloatOrNull() ?: 0f }
+    SortBy.ADDED -> l.sortedByDescending { addedOf(it) }
+    SortBy.PROVIDER -> l
 }
 
 /** Posters in three columns. */
 @Composable
 private fun Grid(nav: Nav, list: List<Any>, empty: String) {
     if (list.isEmpty()) { Empty(Icons.Rounded.Movie, empty, null); return }
+    if (!View.grid) {
+        // A list: the poster small at the left, the title, year and rating beside it.
+        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(list, key = { keyOf(it) }) { m ->
+                Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { open(nav, m) }.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Poster(nameOf(m), posterOf(m), null, onClick = { open(nav, m) }, modifier = Modifier.width(64.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(nameOf(m), style = P.head, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        val year = (m as? Movie)?.year ?: (m as? Series)?.year
+                        val r = ratingOf(m)?.toFloatOrNull()?.takeIf { it > 0f }
+                        Text(listOfNotNull(year, r?.let { "★ " + (kotlin.math.round(it * 10) / 10f) }).joinToString("  ·  "), style = P.small)
+                    }
+                }
+            }
+        }
+        return
+    }
     LazyVerticalGrid(GridCells.Adaptive(108.dp), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(list, key = { keyOf(it) }) { m -> Poster(nameOf(m), posterOf(m), ratingOf(m), onClick = { open(nav, m) }) }
@@ -150,7 +177,7 @@ private fun Grid(nav: Nav, list: List<Any>, empty: String) {
 fun SeeAll(nav: Nav, title: String, items: List<Any>) {
     Pushed(nav) {
         Column {
-            Text(title, style = P.large, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            PageTitle(title)
             Grid(nav, items, "Nothing here")
         }
     }
@@ -319,11 +346,13 @@ fun PhoneDetail(nav: Nav, movie: Movie? = null, series: Series? = null) {
                 }
             } else if (!Tmdb.enabled) item {
                 Text("Add a TMDB key in Settings for trailers, ratings, reviews and cast.", style = P.small,
-                    modifier = Modifier.padding(16.dp).tap { nav.push(Route.Settings) })
+                    modifier = Modifier.padding(16.dp).tap { nav.push(Route.Configurations) })
             }
         }
-        RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() },
-            modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(start = 16.dp, top = 6.dp))
+        Box(Modifier.windowInsetsPadding(WindowInsets.statusBars).fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(46.dp)) {
+            RoundIcon(Icons.AutoMirrored.Rounded.ArrowBack, onClick = { nav.pop() }, modifier = Modifier.align(Alignment.CenterStart))
+            Brand(Modifier.align(Alignment.Center))
+        }
     }
 }
 
