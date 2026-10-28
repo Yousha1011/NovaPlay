@@ -1,4 +1,4 @@
-package io.github.novatv.play.desktop
+﻿package io.github.novatv.play.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -45,7 +45,27 @@ object Desktop : Host {
     override fun toast(msg: String) { message = msg to System.nanoTime() }
 }
 
+/** Raised by a second launch of the app: the open window comes to the front instead of a new one opening. */
+private var wake by mutableStateOf(0)
+
+/**
+ * Only one NovaPlay runs at a time. The first holds a local port; a later launch finds it taken, tells the first one
+ * to show itself, and quits.
+ */
+private fun firstInstance(): Boolean {
+    val port = 47123
+    return try {
+        val server = java.net.ServerSocket(port, 5, java.net.InetAddress.getLoopbackAddress())
+        Thread({ while (true) runCatching { server.accept().use { wake++ } } }, "single-instance").apply { isDaemon = true }.start()
+        true
+    } catch (e: java.io.IOException) {
+        runCatching { java.net.Socket(java.net.InetAddress.getLoopbackAddress(), port).close() }
+        false
+    }
+}
+
 fun main() {
+    if (!firstInstance()) return
     App.start(Desktop)
     application {
         val window = rememberWindowState(size = DpSize(1440.dp, 860.dp))
@@ -64,6 +84,12 @@ fun main() {
                 }
             },
         ) {
+            val frame = this@Window.window
+            LaunchedEffect(wake) {
+                if (wake == 0) return@LaunchedEffect
+                if (window.isMinimized) window.isMinimized = false
+                frame.toFront(); frame.requestFocus()
+            }
             Box(Modifier.fillMaxSize().background(C.bg)) {
                 NovaTheme {
                     Root()
