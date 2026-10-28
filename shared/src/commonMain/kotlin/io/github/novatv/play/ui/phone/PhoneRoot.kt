@@ -98,6 +98,27 @@ fun PhoneRoot() {
         val shown = remember { androidx.compose.runtime.mutableIntStateOf(0) }
         val opened = nav.stack.size > shown.intValue
         androidx.compose.runtime.SideEffect { shown.intValue = nav.stack.size }
+        // The visited tabs stay built so switching back is instant.
+        val visited = remember { mutableStateListOf<Tab>() }
+        if (nav.tab !in phoneTabs.map { it.first }) nav.tab = Tab.HOME
+        if (visited.lastOrNull() != nav.tab) { visited.remove(nav.tab); visited.add(nav.tab); while (visited.size > 4) visited.removeAt(0) }
+        val hide = Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }
+        Box(if (top != null) hide else Modifier.fillMaxSize()) {
+            for (t in visited) key(t) {
+                Box(if (t == nav.tab) Modifier.fillMaxSize().tabFlow(t) else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
+                    when (t) {
+                        Tab.HOME -> PhoneHome(nav)
+                        Tab.LIVE -> PhoneLive(nav)
+                        Tab.SPORTS -> PhoneSports(nav)
+                        Tab.MOVIES -> PhoneVod(nav, series = false)
+                        Tab.SERIES -> PhoneVod(nav, series = true)
+                        Tab.SEARCH -> PhoneSearch(nav)
+                        else -> {}
+                    }
+                }
+            }
+        }
+        if (top == null) TabBar(nav, Modifier.align(Alignment.BottomCenter))
         if (top != null) {
             // A page flows in from the right when it is opened, like a drop running across the screen; one opened
             // from the App Menu, or one gone back to, just appears, as the tabs do.
@@ -118,28 +139,7 @@ fun PhoneRoot() {
                 is Route.Match -> MatchPage(nav, top.event)
                 is Route.ChannelGroup -> ChannelGroupPage(nav, top.id, top.name)
             } } }
-            return@Box
         }
-        // The visited tabs stay built so switching back is instant.
-        val visited = remember { mutableStateListOf<Tab>() }
-        if (nav.tab !in phoneTabs.map { it.first }) nav.tab = Tab.HOME
-        if (visited.lastOrNull() != nav.tab) { visited.remove(nav.tab); visited.add(nav.tab); while (visited.size > 4) visited.removeAt(0) }
-        Box(Modifier.fillMaxSize()) {
-            for (t in visited) key(t) {
-                Box(if (t == nav.tab) Modifier.fillMaxSize().tabFlow(t) else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
-                    when (t) {
-                        Tab.HOME -> PhoneHome(nav)
-                        Tab.LIVE -> PhoneLive(nav)
-                        Tab.SPORTS -> PhoneSports(nav)
-                        Tab.MOVIES -> PhoneVod(nav, series = false)
-                        Tab.SERIES -> PhoneVod(nav, series = true)
-                        Tab.SEARCH -> PhoneSearch(nav)
-                        else -> {}
-                    }
-                }
-            }
-        }
-        TabBar(nav, Modifier.align(Alignment.BottomCenter))
     }
 }
 

@@ -156,8 +156,11 @@ private fun SideLine(s: Side, state: State) {
 @Composable
 private fun TeamLogo(s: Side, size: androidx.compose.ui.unit.Dp) {
     Box(Modifier.size(size).clip(CircleShape).background(Color(0x14FFFFFF)), contentAlignment = Alignment.Center) {
-        if (s.logo != null) AsyncImage(s.logo, s.name, Modifier.size(size * 0.82f), contentScale = ContentScale.Fit)
-        else Text(initials(s.name), style = P.small)
+        // The initials until the logo arrives, and for good when there is none or it will not load.
+        var loaded by remember(s.logo) { mutableStateOf(false) }
+        if (!loaded) Text(initials(s.name), style = if (size > 40.dp) P.head else P.small.copy(fontSize = 11.sp, color = Color.White))
+        if (s.logo != null) AsyncImage(s.logo, s.name, Modifier.size(size * 0.82f), contentScale = ContentScale.Fit,
+            onSuccess = { loaded = true }, onError = { loaded = false })
     }
 }
 
@@ -183,14 +186,20 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                     Spacer(Modifier.height(16.dp))
                     if (e.home != null && e.away != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            BigSide(e.home, Modifier.weight(1f))
-                            Column(Modifier.width(110.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                if (e.state == State.PRE) Text(clock(e.start), style = P.large.copy(fontSize = 30.sp))
-                                else Text("${e.home.score ?: "-"} : ${e.away.score ?: "-"}", style = P.large.copy(fontSize = 30.sp), maxLines = 1)
+                            // Short scores sit together in the middle; long ones (cricket's 168/9 (79.4 ov)) go under each side.
+                            val short = (e.home.score?.length ?: 1) <= 4 && (e.away.score?.length ?: 1) <= 4
+                            val apart = e.state != State.PRE && !short
+                            BigSide(e.home, Modifier.weight(1f), if (apart) e.home.score else null)
+                            Column(Modifier.width(120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                val centred = Modifier.fillMaxWidth()
+                                if (e.state == State.PRE) Text(clock(e.start), style = P.large.copy(fontSize = 30.sp), textAlign = TextAlign.Center, modifier = centred)
+                                else if (apart) Text("vs", style = P.title.copy(color = P.dim), textAlign = TextAlign.Center, modifier = centred)
+                                else Text("${e.home.score ?: "-"} : ${e.away.score ?: "-"}", style = P.large.copy(fontSize = 30.sp), maxLines = 1,
+                                    textAlign = TextAlign.Center, modifier = centred)
                                 Text(if (e.state == State.PRE) dayLabel(e.start) else e.detail, style = P.small.copy(color = if (e.state == State.LIVE) Color(0xFFFF3B4E) else P.dim),
                                     maxLines = 2, textAlign = TextAlign.Center)
                             }
-                            BigSide(e.away, Modifier.weight(1f))
+                            BigSide(e.away, Modifier.weight(1f), if (apart) e.away.score else null)
                         }
                     } else {
                         Text(e.title, style = P.title, textAlign = TextAlign.Center)
@@ -250,10 +259,11 @@ fun MatchPage(nav: Nav, start: SportEvent) {
 }
 
 @Composable
-private fun BigSide(s: Side, modifier: Modifier) {
+private fun BigSide(s: Side, modifier: Modifier, score: String? = null) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         TeamLogo(s, 64.dp)
         Spacer(Modifier.height(8.dp))
         Text(s.short, style = P.head, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
+        if (score != null) Text(score, style = P.title.copy(fontSize = 20.sp), maxLines = 2, textAlign = TextAlign.Center)
     }
 }
