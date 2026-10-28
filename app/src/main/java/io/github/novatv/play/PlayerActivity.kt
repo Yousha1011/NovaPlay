@@ -1,4 +1,4 @@
-package io.github.novatv.play
+﻿package io.github.novatv.play
 
 import android.annotation.SuppressLint
 import android.net.Uri
@@ -16,6 +16,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -113,6 +115,7 @@ class PlayerActivity : ComponentActivity() {
     private var tracks by mutableStateOf<Tracks?>(null)
     private var resize by mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT)
     private var playerView: PlayerView? = null
+    private var inPip by mutableStateOf(false)
 
     private var hideJob: Job? = null
     private var startJob: Job? = null
@@ -152,6 +155,7 @@ class PlayerActivity : ComponentActivity() {
             }
         })
         (item as? PlayItem.Live)?.let { channelIndex = it.channelIndex }
+        if (canPip() && android.os.Build.VERSION.SDK_INT >= 31) setPictureInPictureParams(pipParams())
         setContent { NovaTheme { Screen() } }
         startCurrent()
         // Position ticker and periodic progress saving.
@@ -163,6 +167,44 @@ class PlayerActivity : ComponentActivity() {
                 delay(1000)
             }
         }
+    }
+
+    /** Another title picked while the player sits in its corner window: play that one instead. */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        saveProgress()
+        item = App.pending ?: return
+        (item as? PlayItem.Live)?.let { channelIndex = it.channelIndex }
+        retried = false
+        startCurrent()
+    }
+
+    // ---------------------------------------------------------------- picture in picture (phones)
+
+    private fun pipParams() = android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).apply {
+        if (android.os.Build.VERSION.SDK_INT >= 31) setAutoEnterEnabled(PHONE).setSeamlessResizeEnabled(true)
+    }.build()
+
+    private fun canPip() = PHONE && android.os.Build.VERSION.SDK_INT >= 26 &&
+        packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    /** Shrinks the player into a small window in a corner; it keeps playing over other apps. */
+    private fun minimise() {
+        if (!canPip()) return
+        showInfo = false; showList = false; showTracks = false
+        runCatching { enterPictureInPictureMode(pipParams()) }
+    }
+
+    // Home while watching: off to the corner (Android 12 and later do it on their own with auto-enter).
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (canPip() && android.os.Build.VERSION.SDK_INT < 31 && player.isPlaying) minimise()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip = isInPictureInPictureMode
+        if (inPip) { showInfo = false; showList = false; showTracks = false }
     }
 
     private val live get() = item as? PlayItem.Live
@@ -235,7 +277,7 @@ class PlayerActivity : ComponentActivity() {
         val series = v.series
         if (next != null && series != null) {
             Toast.makeText(this, "Next: S${next.season} E${next.number}", Toast.LENGTH_SHORT).show()
-            item = PlayItem.Vod(App.repo.episodeKey(series, next), "${series.name} · S${next.season} E${next.number}", episode = next,
+            item = PlayItem.Vod(App.repo.episodeKey(series, next), "${series.name} Â· S${next.season} E${next.number}", episode = next,
                 series = series, nextEpisodes = v.nextEpisodes.drop(1))
             startCurrent()
         } else finish()
@@ -291,6 +333,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         saveProgress()
+        // The corner window was closed: stop for good.
+        if (inPip) { finish(); return }
         if (::player.isInitialized) player.pause()
     }
 
@@ -319,13 +363,22 @@ class PlayerActivity : ComponentActivity() {
                 }
             }, update = { it.resizeMode = resize }, modifier = Modifier.fillMaxSize())
 
+            if (inPip) return@Box
+            // Phones: a tap shows the details, and a button in the corner minimises the player.
+            if (PHONE) Box(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
+                if (showInfo) showInfo = false else flashInfo()
+            })
+            if (PHONE && canPip()) Box(Modifier.align(Alignment.TopEnd).padding(20.dp).size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Color(0x80000000)).clickable { minimise() }, contentAlignment = Alignment.Center) {
+                io.github.novatv.play.ui.Icon(androidx.compose.material.icons.Icons.Rounded.PictureInPictureAlt, size = 26.dp, tint = Color.White)
+            }
             if (loading && error == null) Spinner(Modifier.align(Alignment.Center), 56.dp)
             error?.let {
                 Column(Modifier.align(Alignment.Center).clip(RoundedCornerShape(18.dp)).background(Color(0xE0101520)).padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(it, style = T.h2)
                     Spacer(Modifier.height(6.dp))
-                    Text(if (item is PlayItem.Live) "OK to try again · Up/Down for another channel" else "OK to try again · Back to leave", style = T.small)
+                    Text(if (item is PlayItem.Live) "OK to try again Â· Up/Down for another channel" else "OK to try again Â· Back to leave", style = T.small)
                 }
             }
             AnimatedVisibility(showInfo, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
@@ -353,7 +406,7 @@ class PlayerActivity : ComponentActivity() {
                     }
                     if (p != null) {
                         Spacer(Modifier.height(6.dp))
-                        Text("${clock(p.start)} – ${clock(p.stop)}   ${p.title}", style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${clock(p.start)} â€“ ${clock(p.stop)}   ${p.title}", style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.height(8.dp))
                         Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f), Modifier.width(520.dp))
                         if (n != null) { Spacer(Modifier.height(8.dp)); Text("Next  ${clock(n.start)}  ${n.title}", style = T.small, maxLines = 1) }
@@ -361,7 +414,7 @@ class PlayerActivity : ComponentActivity() {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(clock(t), style = T.h1)
-                    Text("◀ channels   ▲▼ zap   ☰ audio", style = T.tiny)
+                    Text("â—€ channels   â–²â–¼ zap   â˜° audio", style = T.tiny)
                 }
             }
         }
@@ -372,7 +425,7 @@ class PlayerActivity : ComponentActivity() {
         Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE05070C)))).padding(start = 60.dp, end = 60.dp, top = 80.dp, bottom = 40.dp)) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (playing) "▶" else "❚❚", style = T.h1, modifier = Modifier.width(52.dp))
+                    Text(if (playing) "â–¶" else "âšâš", style = T.h1, modifier = Modifier.width(52.dp))
                     Text(title, style = T.h1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text(clock(System.currentTimeMillis()), style = T.h2)
                 }
@@ -382,7 +435,7 @@ class PlayerActivity : ComponentActivity() {
                 Row {
                     Text(duration(position), style = T.small)
                     Spacer(Modifier.weight(1f))
-                    Text("◀ ▶ seek   ▲ audio & subtitles   " + (if (length > 0) "-${duration(length - position)}" else ""), style = T.small)
+                    Text("â—€ â–¶ seek   â–² audio & subtitles   " + (if (length > 0) "-${duration(length - position)}" else ""), style = T.small)
                 }
             }
         }
@@ -433,7 +486,7 @@ class PlayerActivity : ComponentActivity() {
                 for (g in groups) for (k in 0 until g.length) {
                     val f = g.getTrackFormat(k)
                     val name = listOfNotNull(f.label, f.language?.let { java.util.Locale(it).displayLanguage }, f.channelCount.takeIf { it > 0 }?.let { "$it ch" })
-                        .distinct().joinToString(" · ").ifBlank { "Track ${k + 1}" }
+                        .distinct().joinToString(" Â· ").ifBlank { "Track ${k + 1}" }
                     item {
                         Choice(name, g.isTrackSelected(k)) {
                             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
@@ -452,7 +505,7 @@ class PlayerActivity : ComponentActivity() {
             color = if (on) C.accent.copy(alpha = 0.25f) else Color.Transparent) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(label, style = T.body, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (on) Text("✓", style = T.h2.copy(color = C.accent))
+                if (on) Text("âœ“", style = T.h2.copy(color = C.accent))
             }
         }
     }

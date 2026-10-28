@@ -32,8 +32,13 @@
 
         <activity
             android:name=".PlayerActivity"
-            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=".player"
+            android:excludeFromRecents="true"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
             android:screenOrientation="sensorLandscape"
             android:theme="@style/AppTheme" />
     </application>
