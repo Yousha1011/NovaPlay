@@ -1,8 +1,8 @@
-package io.github.novatv.play.ui.phone
+﻿package io.github.novatv.play.ui.phone
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -125,13 +125,17 @@ fun Modifier.glass(shape: androidx.compose.ui.graphics.Shape, strength: Float = 
 
 /** A tap without the Android ripple (the phone's own look has none). */
 @Composable
-fun Modifier.tap(onClick: () -> Unit): Modifier {
+fun Modifier.tap(onClick: () -> Unit): Modifier = tapHold(null, onClick)
+
+/** A tap, and something else when held. */
+@Composable
+fun Modifier.tapHold(onLongClick: (() -> Unit)?, onClick: () -> Unit): Modifier {
     // Pressed things squish a little and spring back, like pressing a drop of water.
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val k by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.95f else 1f,
         androidx.compose.animation.core.spring(dampingRatio = 0.45f, stiffness = 500f), label = "squish")
-    return graphicsLayer { scaleX = k; scaleY = k }.clickable(src, null, onClick = onClick)
+    return graphicsLayer { scaleX = k; scaleY = k }.combinedClickable(src, null, onLongClick = onLongClick, onClick = onClick)
 }
 
 /** A round dark button with an icon, as at the top of every iPhone screen. */
@@ -158,8 +162,9 @@ fun Chips(labels: List<Pair<String, String>>, picked: String?, onPick: (String) 
 
 /** A poster with its rating in a blue corner tab. */
 @Composable
-fun Poster(title: String, image: String?, rating: String?, onClick: () -> Unit, modifier: Modifier = Modifier, progress: Float? = null) {
-    Box(modifier.aspectRatio(2f / 3f).clip(RoundedCornerShape(16.dp)).background(P.card).tap(onClick)) {
+fun Poster(title: String, image: String?, rating: String?, onClick: () -> Unit, modifier: Modifier = Modifier, progress: Float? = null,
+           onLongClick: (() -> Unit)? = null) {
+    Box(modifier.aspectRatio(2f / 3f).clip(RoundedCornerShape(16.dp)).background(P.card).tapHold(onLongClick, onClick)) {
         Text(initials(title), style = P.title.copy(color = P.dim), modifier = Modifier.align(Alignment.Center))
         if (!image.isNullOrBlank()) AsyncImage(image, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         val r = rating?.toFloatOrNull()
@@ -191,10 +196,10 @@ fun PosterRow(title: String, items: List<Any>, onOpen: (Any) -> Unit, onSeeAll: 
 }
 
 @Composable
-fun RowTitle(title: String, onSeeAll: (() -> Unit)?) {
+fun RowTitle(title: String, onSeeAll: (() -> Unit)?, action: String = "See All") {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 34.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = P.title, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (onSeeAll != null) Text("See All", style = P.head.copy(color = P.red), modifier = Modifier.padding(start = 12.dp).tap(onSeeAll))
+        if (onSeeAll != null) Text(action, style = P.head.copy(color = P.red), modifier = Modifier.padding(start = 12.dp).tap(onSeeAll))
     }
 }
 
@@ -294,3 +299,19 @@ fun LayoutButton(grid: Boolean, set: (Boolean) -> Unit) = MenuButton(if (grid) a
 @Composable
 fun SortButton(current: SortBy, choices: List<SortBy>, set: (SortBy) -> Unit) =
     MenuButton(androidx.compose.material.icons.Icons.Rounded.SwapVert, choices.map { s -> MenuOption(s.label, s == current) { set(s) } })
+
+/** What a held title or channel offers: a frosted card in the middle of the screen. */
+@Composable
+fun ItemMenu(title: String, options: List<MenuOption>, onDismiss: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.width(280.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xF0262628)).border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(28.dp))
+            .padding(vertical = 10.dp)) {
+            Text(title, style = P.small, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+            for (o in options) Row(Modifier.fillMaxWidth().tap { onDismiss(); o.onClick() }.padding(horizontal = 18.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                if (o.icon != null) { Icon(o.icon, size = 22.dp, tint = if (o.selected) P.red else Color.White); Spacer(Modifier.width(12.dp)) }
+                Text(o.label, style = P.body.copy(fontSize = 18.sp, color = if (o.selected) P.red else Color.White), maxLines = 1)
+            }
+        }
+    }
+}

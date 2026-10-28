@@ -1,4 +1,7 @@
-package io.github.novatv.play.ui.phone
+﻿package io.github.novatv.play.ui.phone
+
+import io.github.novatv.play.ui.dust
+import androidx.compose.material.icons.rounded.Delete
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -267,15 +270,23 @@ private fun PhoneHome(nav: Nav) {
     val store = App.store
     val prefix = App.repo.channelKeyPrefix()
     val favChannels = remember(st.index, store.favourites) { st.index?.channelsFor(store.favourites.filter { it.startsWith(prefix) })?.sortedBy { it.number }.orEmpty() }
-    val recent = remember(st.index, store.recentChannels) { st.index?.channelsFor(store.recentChannels.filter { it.startsWith(prefix) }).orEmpty() }
+    val rev = io.github.novatv.play.ui.History.rev
+    val recent = remember(st.index, store.recentChannels, rev) { st.index?.channelsFor(store.recentChannels.filter { it.startsWith(prefix) }).orEmpty() }
     LazyColumn(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { TopBar(nav) }
         val resume = store.continueWatching
-        if (resume.isNotEmpty()) item {
-            RowTitle("Continue watching", null)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
+        if (resume.isNotEmpty()) item(key = "continue") {
+            // Hold a title to remove it, or Clear All; either crumbles away into dust.
+            var all by remember { mutableStateOf(false) }
+            var gone by remember { mutableStateOf(setOf<String>()) }
+            var ask by remember { mutableStateOf<io.github.novatv.play.data.Store.Resume?>(null) }
+            ask?.let { r -> ItemMenu(r.title, listOf(MenuOption("Remove from Continue watching", true, Icons.Rounded.Delete) { gone = gone + r.key })) { ask = null } }
+            RowTitle("Continue watching", { all = true }, "Clear All")
+            LazyRow(Modifier.dust(all) { store.clearContinue(); io.github.novatv.play.ui.History.rev++ },
+                horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
                 items(resume, key = { it.key }) { r ->
-                    Poster(r.title, r.poster, null, progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, modifier = Modifier.width(126.dp), onClick = {
+                    Poster(r.title, r.poster, null, progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onLongClick = { ask = r },
+                        modifier = Modifier.width(126.dp).dust(r.key in gone) { store.removeContinue(r.key); io.github.novatv.play.ui.History.rev++ }, onClick = {
                         val m = st.lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }
                         val s = st.lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }
                         when { m != null -> nav.push(Route.MovieDetail(m)); s != null -> nav.push(Route.SeriesDetail(s)) }
@@ -284,7 +295,7 @@ private fun PhoneHome(nav: Nav) {
             }
         }
         if (favChannels.isNotEmpty()) item { ChannelStrip("Favourite channels", favChannels) }
-        if (recent.isNotEmpty()) item { ChannelStrip("Recently watched", recent) }
+        if (recent.isNotEmpty()) item(key = "recent") { ChannelStrip("Recently watched", recent, clearable = true) }
         val idx = st.index
         if (idx != null) {
             item { PosterRow("New movies", idx.moviesByAdded.take(20), onOpen = { nav.push(Route.MovieDetail(it as io.github.novatv.play.data.Movie)) },
@@ -296,13 +307,20 @@ private fun PhoneHome(nav: Nav) {
 }
 
 @Composable
-private fun ChannelStrip(title: String, list: List<Channel>) {
-    RowTitle(title, null)
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
+private fun ChannelStrip(title: String, list: List<Channel>, clearable: Boolean = false) {
+    // Recently watched: hold a channel to remove it, or Clear All; either crumbles away into dust.
+    var all by remember { mutableStateOf(false) }
+    var gone by remember { mutableStateOf(setOf<String>()) }
+    var ask by remember { mutableStateOf<Channel?>(null) }
+    ask?.let { c -> ItemMenu(c.name, listOf(MenuOption("Remove from $title", true, Icons.Rounded.Delete) { gone = gone + c.id })) { ask = null } }
+    RowTitle(title, if (clearable) ({ all = true }) else null, "Clear All")
+    LazyRow(Modifier.dust(all) { App.store.clearRecentChannels(); io.github.novatv.play.ui.History.rev++ },
+        horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
         items(list.size, key = { list[it].id }) { i ->
             val c = list[i]
             val p = nowNext(c).firstOrNull()
-            Column(Modifier.width(150.dp).clip(RoundedCornerShape(16.dp)).background(P.card).tap { playChannel(list, i) }.padding(12.dp),
+            Column(Modifier.width(150.dp).dust(c.id in gone) { App.store.removeRecentChannel(App.repo.channelKey(c)); io.github.novatv.play.ui.History.rev++ }
+                .clip(RoundedCornerShape(16.dp)).background(P.card).tapHold(if (clearable) ({ ask = c }) else null) { playChannel(list, i) }.padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 ChannelLogo(c.logo, c.name, Modifier.size(84.dp, 56.dp))
                 Spacer(Modifier.height(8.dp))

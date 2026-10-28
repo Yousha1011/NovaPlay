@@ -20,6 +20,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -49,10 +51,11 @@ fun HomeScreen(nav: Nav) {
     // Looked up by id in the library's index: no work per channel.
     val prefix = App.repo.channelKeyPrefix()
     val favChannels = remember(st.index, store.favourites) { st.index?.channelsFor(store.favourites.filter { it.startsWith(prefix) })?.sortedBy { it.number }.orEmpty() }
-    val recent = remember(st.index, store.recentChannels) { st.index?.channelsFor(store.recentChannels.filter { it.startsWith(prefix) }).orEmpty() }
+    val rev = History.rev
+    val recent = remember(st.index, store.recentChannels, rev) { st.index?.channelsFor(store.recentChannels.filter { it.startsWith(prefix) }).orEmpty() }
     val liveSports = remember(sports) { sports.events.filter { it.state == State.LIVE && io.github.novatv.play.sports.Follow.shows(it) }.take(15) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val resume = remember(lib) { store.continueWatching }
+    val resume = remember(lib, rev) { store.continueWatching }
     val newMovies = remember(st.index) { st.index?.moviesByAdded?.take(20).orEmpty() }
     val newSeries = remember(st.index) { st.index?.seriesByAdded?.take(20).orEmpty() }
     val first = remember { FocusRequester() }
@@ -83,12 +86,18 @@ fun HomeScreen(nav: Nav) {
                 }
             }
         }
-        if (resume.isNotEmpty()) item {
+        if (resume.isNotEmpty()) item(key = "continue") {
+            var all by remember { mutableStateOf(false) }
+            var gone by remember { mutableStateOf(setOf<String>()) }
+            var ask by remember { mutableStateOf<io.github.novatv.play.data.Store.Resume?>(null) }
+            ask?.let { r -> RemoveDialog(r.title, "Continue watching", onRemove = { gone = gone + r.key }, onDismiss = { ask = null }) }
             Column {
-                SectionTitle("Continue watching")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ClearableTitle("Continue watching") { all = true }
+                LazyRow(Modifier.dust(all) { store.clearContinue(); History.rev++ }, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(resume, key = { it.key }) { r ->
-                        PosterCard(r.title, r.poster, "${duration(r.dur - r.pos)} left", modifier = Modifier.width(150.dp),
+                        PosterCard(r.title, r.poster, "${duration(r.dur - r.pos)} left",
+                            modifier = Modifier.width(150.dp).dust(r.key in gone) { store.removeContinue(r.key); History.rev++ },
+                            onLongClick = { ask = r },
                             progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onClick = {
                                 val movie = lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }
                                 val series = lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }
@@ -102,7 +111,7 @@ fun HomeScreen(nav: Nav) {
             }
         }
         if (favChannels.isNotEmpty()) item { ChannelRow("Favourite channels", favChannels, Modifier.focusRequester(first)) }
-        if (recent.isNotEmpty()) item { ChannelRow("Recently watched", recent) }
+        if (recent.isNotEmpty()) item(key = "recent") { RecentRow(recent) }
         if (newMovies.isNotEmpty()) item {
             Column {
                 SectionTitle("New movies")
@@ -126,6 +135,34 @@ fun HomeScreen(nav: Nav) {
         }
         if (favChannels.isEmpty() && recent.isEmpty() && lib.channels.isNotEmpty()) item {
             Text("Tip: hold OK on a channel to add it to your favourites. They show up here.", style = T.small)
+        }
+    }
+}
+
+/** A section title with a Clear all button beside it. */
+@Composable
+private fun ClearableTitle(text: String, onClear: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionTitle(text)
+        Pill("Clear all", onClick = onClear, modifier = Modifier.padding(bottom = 10.dp))
+    }
+}
+
+/** Recently watched channels: hold OK on one to remove it, or clear them all. */
+@Composable
+private fun RecentRow(list: List<io.github.novatv.play.data.Channel>) {
+    var all by remember { mutableStateOf(false) }
+    var gone by remember { mutableStateOf(setOf<String>()) }
+    var ask by remember { mutableStateOf<io.github.novatv.play.data.Channel?>(null) }
+    ask?.let { c -> RemoveDialog(c.name, "Recently watched", onRemove = { gone = gone + c.id }, onDismiss = { ask = null }) }
+    Column {
+        ClearableTitle("Recently watched") { all = true }
+        LazyRow(Modifier.dust(all) { App.store.clearRecentChannels(); History.rev++ }, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(list.size, key = { list[it].id }) { i ->
+                val c = list[i]
+                ChannelCard(c, onClick = { playChannel(list, i) }, onLongClick = { ask = c },
+                    modifier = Modifier.dust(c.id in gone) { App.store.removeRecentChannel(App.repo.channelKey(c)); History.rev++ })
+            }
         }
     }
 }

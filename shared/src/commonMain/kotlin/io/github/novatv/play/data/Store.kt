@@ -63,6 +63,17 @@ class Store(private val sp: Prefs = Prefs()) {
             }
         }
 
+    /** Drops one title from Continue watching, and its saved place with it. */
+    fun removeContinue(key: String) {
+        put("continue", JSONArray(continueWatching.filter { it.key != key }.map { it.toJson() }))
+        put("progress", obj("progress").also { it.remove(key) })
+    }
+
+    fun clearContinue() { put("continue", JSONArray()); put("progress", JSONObject()) }
+
+    fun removeRecentChannel(key: String) { recentChannels = recentChannels.filter { it != key } }
+    fun clearRecentChannels() { recentChannels = emptyList() }
+
     // ---------- Sports ----------
 
     /** Followed leagues (Sports catalogue ids); empty means all. */
