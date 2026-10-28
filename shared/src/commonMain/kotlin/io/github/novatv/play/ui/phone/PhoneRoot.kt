@@ -53,6 +53,12 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.graphicsLayer
 import io.github.novatv.play.res.logo_mark
@@ -102,6 +108,7 @@ fun PhoneRoot() {
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> PhoneLeagues(nav)
                 is Route.Match -> MatchPage(nav, top.event)
+                is Route.ChannelGroup -> ChannelGroupPage(nav, top.id, top.name)
             } } }
             return@Box
         }
@@ -129,35 +136,62 @@ fun PhoneRoot() {
 }
 
 /**
- * A floating capsule of tabs. The open tab sits on a glass drop that runs to the next tab like water: it stretches while
- * it moves and settles with a little wobble.
+ * A floating capsule of tabs with a glass drop on the open one. Press and slide along the bar and the drop follows the
+ * finger, swelling into a lens with a rainbow rim; let go and it settles on the nearest tab with a wobble. A tap
+ * sends it flowing to that tab.
  */
 @Composable
 private fun TabBar(nav: Nav, modifier: Modifier) {
     val index = phoneTabs.indexOfFirst { it.first == nav.tab }.coerceAtLeast(0)
-    val pos by androidx.compose.animation.core.animateFloatAsState(index.toFloat(),
-        androidx.compose.animation.core.spring(dampingRatio = 0.62f, stiffness = 260f), label = "drop")
-    // How far the drop still has to go: it stretches by that much, so it looks pulled along.
-    val stretch = kotlin.math.abs(index - pos).coerceAtMost(1f)
+    val pos = remember { androidx.compose.animation.core.Animatable(index.toFloat()) }
+    var dragging by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val drop = androidx.compose.animation.core.spring<Float>(dampingRatio = 0.6f, stiffness = 260f)
+    androidx.compose.runtime.LaunchedEffect(index) { if (!dragging) pos.animateTo(index.toFloat(), drop) }
+    val swell by androidx.compose.animation.core.animateFloatAsState(if (dragging) 1f else 0f,
+        androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 300f), label = "swell")
+    // While it flows between tabs it stretches by how far it still has to go.
+    val stretch = if (dragging) 0f else kotlin.math.abs(index - pos.value).coerceAtMost(1f)
+
     androidx.compose.foundation.layout.BoxWithConstraints(
-        modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(36.dp)).background(Color(0xB0000000)).glass(RoundedCornerShape(36.dp), strength = 1.4f).padding(5.dp),
+        modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().height(68.dp),
     ) {
         val itemW = maxWidth / phoneTabs.size
-        val dropW = itemW * (1f + 0.45f * stretch)
-        val dropX = itemW * pos - (dropW - itemW) / 2
-        Box(Modifier.offset(x = dropX).width(dropW).height(58.dp).graphicsLayer { scaleY = 1f - 0.12f * stretch }
-            .glass(RoundedCornerShape(30.dp), strength = 1.1f))
-        Row(Modifier.fillMaxWidth()) {
+        val itemPx = with(androidx.compose.ui.platform.LocalDensity.current) { itemW.toPx() }
+        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(36.dp)).background(Color(0xB0000000)).glass(RoundedCornerShape(36.dp), strength = 1.4f))
+        Row(Modifier.fillMaxSize().padding(5.dp)
+            .pointerInput(itemPx) {
+                detectHorizontalDragGestures(
+                    onDragStart = { o -> dragging = true; scope.launch { pos.snapTo((o.x / itemPx - 0.5f).coerceIn(0f, phoneTabs.size - 1f)) } },
+                    onHorizontalDrag = { ch, _ -> scope.launch { pos.snapTo((ch.position.x / itemPx - 0.5f).coerceIn(0f, phoneTabs.size - 1f)) } },
+                    onDragEnd = {
+                        val to = kotlin.math.round(pos.value).toInt().coerceIn(0, phoneTabs.size - 1)
+                        dragging = false
+                        nav.tab = phoneTabs[to].first
+                        scope.launch { pos.animateTo(to.toFloat(), drop) }
+                    },
+                    onDragCancel = { dragging = false; scope.launch { pos.animateTo(index.toFloat(), drop) } },
+                )
+            }) {
             for ((t, icon) in phoneTabs) {
                 val on = nav.tab == t
-                Column(Modifier.weight(1f).height(58.dp).tap { nav.tab = t },
+                Column(Modifier.weight(1f).fillMaxHeight().tap { nav.tab = t },
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(icon, size = 25.dp, tint = if (on) P.blue else Color.White)
                     Text(label(t), style = P.small.copy(color = if (on) P.blue else Color.White), maxLines = 1)
                 }
             }
         }
+        // The drop itself, over the icons (it is clear, so they show through it).
+        val w = itemW * (1f + 0.45f * stretch + 0.35f * swell)
+        val x = 5.dp + itemW * pos.value - (w - itemW) / 2 - 5.dp * pos.value / (phoneTabs.size - 1) * 2
+        Box(Modifier.offset(x = x, y = (-6).dp * swell).width(w).height(58.dp + 18.dp * swell).align(Alignment.CenterStart)
+            .graphicsLayer { scaleY = 1f - 0.12f * stretch }
+            .clip(RoundedCornerShape(34.dp))
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f + 0.06f * swell), Color.White.copy(alpha = 0.03f))))
+            .border(1.5.dp, androidx.compose.ui.graphics.Brush.sweepGradient(
+                listOf(Color(0x99FFFFFF), Color(0x6649D6FF).copy(alpha = 0.4f * swell + 0.15f), Color(0x66FF5AD7).copy(alpha = 0.4f * swell + 0.1f),
+                    Color(0x66FFD54F).copy(alpha = 0.4f * swell + 0.1f), Color(0x99FFFFFF))), RoundedCornerShape(34.dp)))
     }
 }
 
@@ -190,25 +224,19 @@ fun Modifier.flowIn(fromX: Float, key: Any? = Unit): Modifier {
     }
 }
 
-/** The NovaPlay logo and name on the left; the playlist and the app menu on the right. */
+/** The app menu on the left, the NovaPlay logo and name in the middle, an optional action on the right. */
 @Composable
 fun TopBar(nav: Nav, right: @Composable () -> Unit = {}) {
     val st by App.repo.state.collectAsState()
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        androidx.compose.foundation.Image(org.jetbrains.compose.resources.painterResource(io.github.novatv.play.res.Res.drawable.logo_mark), "NovaPlay",
-            Modifier.size(38.dp))
-        Spacer(Modifier.width(10.dp))
-        Text("NovaPlay", style = P.title.copy(fontSize = 26.sp))
-        Spacer(Modifier.weight(1f))
-        right()
-        Spacer(Modifier.width(10.dp))
-        Row(Modifier.glass(RoundedCornerShape(22.dp)).tap { nav.push(Route.Menu) }.padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(30.dp).clip(CircleShape).background(P.card2), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Person, size = 18.dp) }
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp).height(46.dp)) {
+        RoundIcon(Icons.Rounded.Person, onClick = { nav.push(Route.Menu) }, modifier = Modifier.align(Alignment.CenterStart))
+        Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.foundation.Image(org.jetbrains.compose.resources.painterResource(io.github.novatv.play.res.Res.drawable.logo_mark), "NovaPlay",
+                Modifier.size(34.dp))
             Spacer(Modifier.width(8.dp))
-            Text(st.source?.name ?: "Add", style = P.head.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
-            Icon(Icons.Rounded.KeyboardArrowDown, size = 18.dp, tint = P.dim)
+            Text("NovaPlay", style = P.title.copy(fontSize = 25.sp))
         }
+        Box(Modifier.align(Alignment.CenterEnd)) { right() }
     }
     if (st.loading || st.status.isNotBlank() || st.error != null) {
         Text(st.error?.let { "Could not load: $it" } ?: st.status.ifBlank { st.epgStatus.orEmpty() },
@@ -286,27 +314,60 @@ private fun ChannelStrip(title: String, list: List<Channel>) {
 private fun PhoneLive(nav: Nav) {
     val st by App.repo.state.collectAsState()
     val idx = st.index
-    var cat by remember { mutableStateOf("fav") }
-    val chips = remember(st.lib) { listOf("fav" to "Favorites", "recent" to "Watched History") + st.lib.liveCategories.map { it.id to it.name } }
+    var tab by remember { mutableStateOf("fav") }
     val prefix = App.repo.channelKeyPrefix()
-    val list = remember(idx, cat, App.store.favourites, App.store.recentChannels) {
-        when (cat) {
-            "fav" -> idx?.channelsFor(App.store.favourites.filter { it.startsWith(prefix) })?.sortedBy { it.number }
-            "recent" -> idx?.channelsFor(App.store.recentChannels.filter { it.startsWith(prefix) })
-            else -> idx?.channelsByCat?.get(cat)
-        }.orEmpty()
-    }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         TopBar(nav)
-        Chips(chips, cat, { cat = it }, Modifier.padding(vertical = 8.dp))
-        if (list.isEmpty()) {
-            Empty(Icons.Rounded.Tv, if (cat == "fav") "No favourite channels" else "No channels here",
-                if (cat == "fav") "Open a channel and tap the heart to add it." else null)
+        Chips(listOf("fav" to "Favourites", "recent" to "Watch History", "all" to "All Categories"), tab, { tab = it })
+        if (tab == "all") {
+            // Every channel group, top to bottom, with how many channels it holds; a group opens on its own page.
+            val groups = remember(st.lib, idx) {
+                st.lib.liveCategories.map { Triple(it.id, it.name, idx?.channelsByCat?.get(it.id)?.size ?: 0) }.filter { it.third > 0 }
+            }
+            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(groups, key = { it.first }) { (id, name, n) ->
+                    Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { nav.push(Route.ChannelGroup(id, name)) }
+                        .padding(horizontal = 18.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(name, style = P.head.copy(fontSize = 17.sp), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("$n", style = P.small)
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, size = 22.dp, tint = P.dim)
+                    }
+                }
+            }
             return@Column
         }
-        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(list.size, key = { list[it].id }) { i -> PhoneChannelRow(list[i]) { playChannel(list, i) } }
+        val list = remember(idx, tab, App.store.favourites, App.store.recentChannels) {
+            if (tab == "fav") idx?.channelsFor(App.store.favourites.filter { it.startsWith(prefix) })?.sortedBy { it.number }.orEmpty()
+            else idx?.channelsFor(App.store.recentChannels.filter { it.startsWith(prefix) }).orEmpty()
         }
+        if (list.isEmpty()) {
+            Empty(Icons.Rounded.Tv, if (tab == "fav") "No favourite channels" else "Nothing watched yet",
+                if (tab == "fav") "Open a channel and tap the heart to add it." else "Channels you watch show up here.")
+            return@Column
+        }
+        ChannelList(list)
+    }
+}
+
+/** A channel group's own page: its channels, top to bottom. */
+@Composable
+fun ChannelGroupPage(nav: Nav, id: String, name: String) {
+    val st by App.repo.state.collectAsState()
+    val list = remember(st.index, id) { st.index?.channelsByCat?.get(id).orEmpty() }
+    Pushed(nav) {
+        Column {
+            Text(name, style = P.large.copy(fontSize = 28.sp), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            Text("${list.size} channels", style = P.small, modifier = Modifier.padding(horizontal = 16.dp))
+            ChannelList(list)
+        }
+    }
+}
+
+@Composable
+private fun ChannelList(list: List<Channel>) {
+    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(list.size, key = { list[it].id }) { i -> PhoneChannelRow(list[i]) { playChannel(list, i) } }
     }
 }
 

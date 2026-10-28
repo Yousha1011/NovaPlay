@@ -106,6 +106,7 @@ sealed class Route {
     data object SearchSettings : Route()
     data object Appearance : Route()
     data class Match(val event: io.github.novatv.play.sports.SportEvent) : Route()
+    data class ChannelGroup(val id: String, val name: String) : Route()
 }
 
 /**
