@@ -55,6 +55,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.dp
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import io.github.novatv.play.ui.Look
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
@@ -219,10 +221,15 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     var pendingTab by remember { mutableStateOf<Tab?>(null) }
     val scope = rememberCoroutineScope()
-    val w = if (focused) 210.dp else 84.dp
+    // On a TV the rail opens while it has focus; with a mouse, while the pointer is over it, so it closes as soon as
+    // the mouse moves away even if a menu item was clicked.
+    val hover = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val open = if (App.device == Device.TV) focused else hovered
+    val w = if (open) 210.dp else 84.dp
     Column(
-        Modifier.graphicsLayer().width(w).fillMaxHeight()
-            .background(Brush.horizontalGradient(listOf(Color(0xF0060910), if (focused) Color(0xE0060910) else Color.Transparent)))
+        Modifier.graphicsLayer().width(w).fillMaxHeight().hoverable(hover)
+            .background(Brush.horizontalGradient(listOf(Color(0xF0060910), if (open) Color(0xE0060910) else Color.Transparent)))
             .onFocusChanged { if (focused != it.hasFocus) { focused = it.hasFocus; onFocus(it.hasFocus) } }
             // Right goes to the page's first option, not to whatever sits beside the menu item.
             .onPreviewKeyEvent { k ->
@@ -235,7 +242,7 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
         // The logo, with the name beside it while the rail is open.
         Row(Modifier.padding(start = 2.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             Image(painterResource(Res.drawable.logo_mark), "NovaPlay", Modifier.size(52.dp))
-            if (focused) { Spacer(Modifier.width(10.dp)); Text("NovaPlay", style = T.h2) }
+            if (open) { Spacer(Modifier.width(10.dp)); Text("NovaPlay", style = T.h2) }
         }
         for (t in Tab.entries) {
             val selected = nav.tab == t
@@ -258,7 +265,7 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(t.icon, size = 24.dp, tint = fg)
-                if (focused) {
+                if (open) {
                     Spacer(Modifier.width(14.dp))
                     Text(t.label, style = T.body.copy(color = if (itemFocused) fg else C.text), maxLines = 1)
                 }
