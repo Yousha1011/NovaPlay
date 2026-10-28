@@ -50,7 +50,9 @@ actual fun Tile(
         scale = ClickableSurfaceDefaults.scale(focusedScale = scale),
         colors = ClickableSurfaceDefaults.colors(containerColor = color, contentColor = C.text, focusedContainerColor = focusedColor,
             focusedContentColor = focusedContent, pressedContainerColor = focusedColor, pressedContentColor = focusedContent),
-        border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = 0.9f)), shape = shape)),
+        border = ClickableSurfaceDefaults.border(
+            border = if (Look.modern) Border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), shape = shape) else Border.None,
+            focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = 0.9f)), shape = shape)),
         content = content,
     )
 }

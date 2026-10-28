@@ -39,14 +39,13 @@ fun SearchScreen(nav: Nav) {
     val box = remember { FocusRequester() }
     val res by produceState(Results(), q) {
         delay(250)
-        val s = q.trim().lowercase()
-        if (s.length < 2) { value = Results(); return@produceState }
+        if (io.github.novatv.play.ui.phone.normalise(q).isEmpty()) { value = Results(); return@produceState }
         val lib = App.repo.state.value.lib
         value = withContext(Dispatchers.Default) {
             Results(
-                lib.channels.filter { it.name.lowercase().contains(s) }.take(40),
-                lib.movies.filter { it.name.lowercase().contains(s) }.take(40),
-                lib.series.filter { it.name.lowercase().contains(s) }.take(40),
+                io.github.novatv.play.ui.phone.matchAll(lib.channels, q) { it.name }.take(80),
+                io.github.novatv.play.ui.phone.matchAll(lib.movies, q) { it.name }.take(80),
+                io.github.novatv.play.ui.phone.matchAll(lib.series, q) { it.name }.take(80),
             )
         }
     }

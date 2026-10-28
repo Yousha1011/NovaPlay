@@ -257,7 +257,9 @@ private fun EventPanel(e: SportEvent?, epgVersion: Int, modifier: Modifier = Mod
 private fun Team(s: Side, modifier: Modifier, score: String? = null) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-            if (s.logo != null) AsyncImage(s.logo, null, Modifier.size(60.dp)) else Text(initials(s.name), style = T.h1.copy(color = C.dim))
+            var loaded by remember(s.logo) { mutableStateOf(false) }
+            if (!loaded) Text(initials(s.name), style = T.h1.copy(color = C.dim))
+            if (s.logo != null) AsyncImage(s.logo, null, Modifier.size(60.dp), onSuccess = { loaded = true }, onError = { loaded = false })
         }
         Spacer(Modifier.height(6.dp))
         Text(s.short, style = T.body, maxLines = 2, overflow = TextOverflow.Ellipsis)

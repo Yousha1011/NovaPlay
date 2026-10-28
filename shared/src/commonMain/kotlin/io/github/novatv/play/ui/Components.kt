@@ -143,6 +143,7 @@ fun duration(ms: Long): String {
 fun Backdrop(modifier: Modifier = Modifier) {
     // Drawn into its own layer once and reused: two full-screen gradients redrawn every frame were costly on a Fire TV.
     Canvas(modifier.fillMaxSize().graphicsLayer()) {
+        if (Look.modern) { drawRect(Brush.verticalGradient(listOf(C.bg2, C.bg))); return@Canvas }
         drawRect(C.bg)
         drawCircle(Brush.radialGradient(listOf(C.accent.copy(alpha = 0.16f), Color.Transparent), center = Offset(size.width * 0.85f, 0f), radius = size.width * 0.6f),
             radius = size.width * 0.6f, center = Offset(size.width * 0.85f, 0f))

@@ -86,6 +86,7 @@ private fun label(t: Tab) = when (t) { Tab.SERIES -> "TV Shows"; else -> t.label
 /** The iPhone app: a screen per tab, a floating tab bar, and pages pushed over them with a back button. */
 @Composable
 fun PhoneRoot() {
+    io.github.novatv.play.ImageLoaderSetup()
     PhoneStyle()
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()

@@ -129,6 +129,17 @@ fun SettingsScreen(nav: Nav) {
         item { Text("Scores and fixtures come from ESPN. Each match lists the channels showing it from TheSportsDB, SportMonks and ESPN, " +
             "and NovaPlay finds them in your playlist through your TV guide and channel names.", style = T.small) }
 
+        if (Look.modern) {
+            item { SectionTitle("Appearance", Modifier.padding(top = 16.dp)) }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(io.github.novatv.play.ui.phone.P.themes) { t ->
+                        Pill(t.name, onClick = { io.github.novatv.play.ui.phone.P.theme = t; App.store.phoneTheme = t.id; v++ },
+                            selected = remember(v) { io.github.novatv.play.ui.phone.P.theme.id == t.id })
+                    }
+                }
+            }
+        }
         item { SectionTitle("About", Modifier.padding(top = 16.dp)) }
         item { Text("NovaPlay 1.0 · a player for your own playlists. It does not provide any channels or content.", style = T.small) }
     }

@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
@@ -17,6 +17,20 @@ android {
         versionName = "1.0"
     }
 
+    // Two apps from one source: the Fire TV app, and the phone app with the iPhone's screens.
+    flavorDimensions += "form"
+    productFlavors {
+        create("tv") {
+            dimension = "form"
+            manifestPlaceholders["mainOrientation"] = "landscape"
+        }
+        create("phone") {
+            dimension = "form"
+            applicationIdSuffix = ".phone"
+            manifestPlaceholders["mainOrientation"] = "portrait"
+        }
+    }
+
     buildTypes {
         // Minified so the icon set and libraries stay small; signed with the debug key for sideloading.
         release {
@@ -31,7 +45,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = false; checkReleaseBuilds = false }
 }
 

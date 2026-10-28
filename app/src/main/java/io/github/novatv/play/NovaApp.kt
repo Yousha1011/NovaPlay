@@ -12,14 +12,16 @@ import io.github.novatv.play.platform.appContext
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-/** The Fire TV app: starts the shared app with the TV's player and messages. */
+/** The Fire TV or phone app: starts the shared app with the Android player and messages. */
 class NovaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         appContext = this
         migratePrefs()
+        // The Fire TV wears the iPhone's look (themes, glass, lighter type).
+        io.github.novatv.play.ui.Look.modern = !PHONE
         App.start(object : Host {
-            override val device = Device.TV
+            override val device = if (PHONE) Device.PHONE else Device.TV
             override fun play(item: PlayItem) {
                 startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }

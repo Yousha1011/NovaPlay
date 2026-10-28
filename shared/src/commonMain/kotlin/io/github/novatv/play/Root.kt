@@ -55,6 +55,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.dp
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import io.github.novatv.play.ui.Look
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
@@ -132,6 +133,16 @@ class Nav {
 /** The whole app: the menu, the tabs and the screens opened over them. */
 @Composable
 fun Root() {
+    ImageLoaderSetup()
+    if (Look.modern) androidx.compose.runtime.LaunchedEffect(Unit) {
+        io.github.novatv.play.ui.phone.P.themes.firstOrNull { it.id == App.store.phoneTheme }?.let { io.github.novatv.play.ui.phone.P.theme = it }
+    }
+    RootBody()
+}
+
+/** Logos and posters: a memory cache sized for a TV and a 250 MB disk cache. */
+@Composable
+fun ImageLoaderSetup() {
     setSingletonImageLoaderFactory { ctx ->
         // Logos and posters: a memory cache sized for a TV and a 250 MB disk cache.
         ImageLoader.Builder(ctx)
@@ -140,6 +151,10 @@ fun Root() {
             .diskCache { DiskCache.Builder().directory(cacheDir() / "images").maxSizeBytes(250L * 1024 * 1024).build() }
             .build()
     }
+}
+
+@Composable
+private fun RootBody() {
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
     var railFocused by remember { mutableStateOf(false) }
@@ -153,22 +168,9 @@ fun Root() {
             return@Box
         }
         val top = nav.stack.lastOrNull()
-        if (top != null) {
-            when (top) {
-                is Route.MovieDetail -> DetailScreen(nav, movie = top.movie)
-                is Route.SeriesDetail -> DetailScreen(nav, series = top.series)
-                Route.AddSource -> AddSourceScreen(nav)
-                Route.Leagues -> LeaguesScreen(nav)
-                else -> {} // iPhone-only screens never open on a TV or PC
-            }
-            // A remote has Back; with a mouse or a finger the screen needs a button.
-            if (App.device != Device.TV) Pill("Back", onClick = { nav.pop() }, icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                modifier = Modifier.align(Alignment.BottomStart).padding(24.dp))
-            return@Box
-        }
         // The rail floats over the screen: it widens over the content instead of pushing it, so opening it
         // doesn't lay the whole screen out again on every frame.
-        Box(Modifier.fillMaxSize()) {
+        Box(if (top != null) Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} } else Modifier.fillMaxSize()) {
             // The last few tabs stay built, hidden, so going back to one is instant. Hidden ones stay measured (so they
             // show without laying out their rows again, which took ~90 ms) but are not placed: not drawn, not focusable;
             // only [KEEP_TABS] are kept, to stay well inside the Fire TV's memory.
@@ -195,6 +197,18 @@ fun Root() {
                 }
             }
             Rail(nav) { railFocused = it }
+        }
+        if (top != null) {
+            when (top) {
+                is Route.MovieDetail -> DetailScreen(nav, movie = top.movie)
+                is Route.SeriesDetail -> DetailScreen(nav, series = top.series)
+                Route.AddSource -> AddSourceScreen(nav)
+                Route.Leagues -> LeaguesScreen(nav)
+                else -> {} // iPhone-only screens never open on a TV or PC
+            }
+            // A remote has Back; with a mouse or a finger the screen needs a button.
+            if (App.device != Device.TV) Pill("Back", onClick = { nav.pop() }, icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                modifier = Modifier.align(Alignment.BottomStart).padding(24.dp))
         }
     }
 }
