@@ -87,6 +87,7 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
  */
 @Composable
 actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit) {
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     AndroidView(
         modifier = modifier.height(54.dp),
         factory = { ctx ->
@@ -106,6 +107,17 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
                 paint(false)
                 background = bg
                 setOnFocusChangeListener { _, f -> paint(f) }
+                // The remote: Left and Right move the cursor as usual; Up and Down go to the controls around the box,
+                // and Back lets go of it so the screen's own Back runs (it used to keep all three).
+                setOnKeyListener { v, code, e ->
+                    when (fieldKey(code, e.action)) {
+                        FieldKey.UP -> focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Up)
+                        FieldKey.DOWN -> focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+                        FieldKey.BACK -> { v.clearFocus(); false }
+                        FieldKey.SWALLOW -> true
+                        FieldKey.EDIT -> false
+                    }
+                }
                 addTextChangedListener(object : android.text.TextWatcher {
                     override fun afterTextChanged(s: android.text.Editable?) { onChange(s?.toString() ?: "") }
                     override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -143,6 +155,17 @@ actual fun NovaTheme(content: @Composable () -> Unit) {
             content = content,
         )
     }
+}
+
+/** What a key does in a TV text box. */
+enum class FieldKey { EDIT, UP, DOWN, BACK, SWALLOW }
+
+/** Up/Down leave the box when pressed (their release is swallowed), Back lets go of it, everything else edits text. */
+fun fieldKey(keyCode: Int, action: Int): FieldKey = when (keyCode) {
+    android.view.KeyEvent.KEYCODE_DPAD_UP -> if (action == android.view.KeyEvent.ACTION_DOWN) FieldKey.UP else FieldKey.SWALLOW
+    android.view.KeyEvent.KEYCODE_DPAD_DOWN -> if (action == android.view.KeyEvent.ACTION_DOWN) FieldKey.DOWN else FieldKey.SWALLOW
+    android.view.KeyEvent.KEYCODE_BACK -> FieldKey.BACK
+    else -> FieldKey.EDIT
 }
 
 @Composable

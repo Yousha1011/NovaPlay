@@ -101,7 +101,7 @@ fun LiveScreen(nav: Nav) {
         // The info panel needs room: shown only when the list keeps at least ~520 units.
         val panel = maxWidth - catWidth >= 900.dp
         Row(Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.width(catWidth).fillMaxHeight(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            LazyColumn(Modifier.width(catWidth).fillMaxHeight().rememberFocusInList(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 itemsIndexed(groups, key = { _, g -> g.id }) { i, g ->
                     val active = g.id == group.id
                     // Moving onto a category shows its channels straight away, like a TV's channel list.
@@ -126,7 +126,7 @@ fun LiveScreen(nav: Nav) {
                         Text("CHANNEL", style = T.tiny.copy(letterSpacing = 1.4.sp), modifier = Modifier.weight(1f))
                         Text("ON NOW · ${clock(now())}", style = T.tiny.copy(letterSpacing = 1.4.sp))
                     }
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    LazyColumn(Modifier.fillMaxSize().rememberFocusInList(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
                             ChannelLine(c, onClick = { playChannel(group.channels, i) }, onLongClick = {
                                 val on = App.store.toggleFavourite(App.repo.channelKey(c))

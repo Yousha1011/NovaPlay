@@ -55,6 +55,12 @@ kotlin {
             implementation("androidx.tv:tv-material:1.0.0")
             implementation("androidx.activity:activity-compose:1.9.3")
         }
+        val desktopTest by getting {
+            dependencies {
+                implementation(compose.desktop.uiTestJUnit4)
+                implementation(compose.desktop.currentOs)
+            }
+        }
         val desktopMain by getting {
             dependsOn(jvmShared)
             dependsOn(screenMain)
@@ -71,6 +77,8 @@ android {
     namespace = "io.github.novatv.play.shared"
     compileSdk = 35
     defaultConfig { minSdk = 25 }
+    // Unit tests run on a plain JVM: Android calls such as logging return defaults instead of failing.
+    testOptions { unitTests.isReturnDefaultValues = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

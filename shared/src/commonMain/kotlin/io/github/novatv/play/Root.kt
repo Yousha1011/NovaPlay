@@ -81,6 +81,8 @@ import io.github.novatv.play.ui.LeaguesScreen
 import io.github.novatv.play.ui.LiveScreen
 import io.github.novatv.play.ui.Pill
 import io.github.novatv.play.ui.S
+import io.github.novatv.play.ui.enterAt
+import io.github.novatv.play.ui.rememberFocus
 import io.github.novatv.play.ui.clock
 import io.github.novatv.play.ui.now
 import androidx.compose.ui.text.font.FontWeight
@@ -215,9 +217,10 @@ private fun RootBody() {
             Box(Modifier.fillMaxSize().padding(start = S.rail).graphicsLayer()) {
                 for (t in visited) key(t) {
                     // Each page is a focus group that remembers where focus was: Right from the rail, or Back from a
-                    // detail page, lands on the item last used instead of the page's first one.
-                    Box(if (t == nav.tab) Modifier.fillMaxSize().focusRequester(nav.page(t)).focusRestorer().focusGroup()
-                        else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
+                    // detail page, lands on the item last used instead of the page's first one. Hidden pages keep the
+                    // same group (only their placement changes), so they remember it while another tab is open too.
+                    Box(Modifier.rememberFocus(nav.page(t))
+                        .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
                         when (t) {
                             Tab.HOME -> HomeScreen(nav)
                             Tab.LIVE -> LiveScreen(nav)
@@ -273,6 +276,8 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
                     if (k.type != KeyEventType.KeyDown || k.key != Key.DirectionRight) false
                     else try { nav.page(nav.tab).requestFocus(); true } catch (e: Exception) { false }
                 }
+                // Focus coming in (Left or Back from a page) lands on the open tab's icon.
+                .enterAt(nav.railFocus)
                 .padding(vertical = 22.dp, horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
