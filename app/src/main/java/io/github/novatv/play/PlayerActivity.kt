@@ -17,6 +17,17 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -116,6 +127,18 @@ class PlayerActivity : ComponentActivity() {
     private var resize by mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT)
     private var playerView: PlayerView? = null
     private var inPip by mutableStateOf(false)
+    /** The toolbar under the info bar (Play/Pause, Favourite, Audio, Aspect, Channels, Multi-view). */
+    private var showControls by mutableStateOf(false)
+
+    // Multi-view: a second, muted-until-chosen stream beside the first. Only where the decoder can run two at once.
+    private var player2: ExoPlayer? = null
+    private var multi by mutableStateOf(false)
+    private var channel2 by mutableIntStateOf(0)
+    private var active by mutableIntStateOf(0)
+    private var picking by mutableStateOf(false)
+    private var loading2 by mutableStateOf(false)
+    private var error2 by mutableStateOf<String?>(null)
+    private var startJob2: Job? = null
 
     private var hideJob: Job? = null
     private var startJob: Job? = null
@@ -125,16 +148,7 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         item = App.pending ?: run { finish(); return }
-        val buffer = App.store.bufferMs
-        val load = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(maxOf(15_000, buffer * 3), maxOf(50_000, buffer * 8), buffer.coerceAtMost(15_000), buffer)
-            .build()
-        val data = OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA)
-        player = ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER))
-            .setLoadControl(load)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(data))
-            .build()
+        player = buildPlayer(light = false)
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
@@ -167,6 +181,95 @@ class PlayerActivity : ComponentActivity() {
                 delay(1000)
             }
         }
+    }
+
+    /** An ExoPlayer with NovaPlay's buffer setting; [light] keeps a smaller buffer for multi-view's second stream. */
+    private fun buildPlayer(light: Boolean): ExoPlayer {
+        val buffer = App.store.bufferMs
+        val load = if (light) DefaultLoadControl.Builder().setBufferDurationsMs(8_000, 20_000, 1_500, 3_000).build()
+            else DefaultLoadControl.Builder()
+                .setBufferDurationsMs(maxOf(15_000, buffer * 3), maxOf(50_000, buffer * 8), buffer.coerceAtMost(15_000), buffer)
+                .build()
+        val data = OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA)
+        return ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER))
+            .setLoadControl(load)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(data))
+            .build()
+    }
+
+    private fun mediaItem(url: String) = MediaItem.Builder().setUri(Uri.parse(url)).apply {
+        val path = url.substringBefore('?').lowercase()
+        when {
+            path.endsWith(".m3u8") || path.contains("/hls/") -> setMimeType(MimeTypes.APPLICATION_M3U8)
+            path.endsWith(".mpd") -> setMimeType(MimeTypes.APPLICATION_MPD)
+            path.endsWith(".ts") -> setMimeType(MimeTypes.VIDEO_MP2T)
+        }
+    }.build()
+
+    // ---------------------------------------------------------------- multi-view
+
+    /**
+     * Why two streams can't play here, or null when they can: the device must not be a low-memory one, and a hardware
+     * decoder for the current stream's format must allow two instances (many Fire TV sticks allow one).
+     */
+    private fun multiViewProblem(): String? {
+        val am = getSystemService(android.app.ActivityManager::class.java)
+        if (am.isLowRamDevice || am.memoryClass < 192) return "This device has too little memory to play two channels."
+        val mime = player.videoFormat?.sampleMimeType ?: MimeTypes.VIDEO_H264
+        val decoders = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, true) } }
+            .filter { android.os.Build.VERSION.SDK_INT < 29 || it.isHardwareAccelerated }
+        val most = decoders.maxOfOrNull { runCatching { it.getCapabilitiesForType(mime).maxSupportedInstances }.getOrDefault(1) } ?: 0
+        return if (most < 2) "This device's video decoder can only play one channel at a time." else null
+    }
+
+    /** Multi-view: checks the device, then opens the channel list to pick the second channel. */
+    private fun startMulti() {
+        if (live == null) return
+        multiViewProblem()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show(); return }
+        showControls = false; showInfo = false
+        picking = true; showList = true
+    }
+
+    private fun startSecond(index: Int) {
+        val l = live ?: return
+        channel2 = index.mod(l.channels.size)
+        val p2 = player2 ?: buildPlayer(light = true).also { np ->
+            player2 = np
+            np.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    loading2 = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
+                    if (state == Player.STATE_READY) error2 = null
+                }
+                override fun onPlayerError(e: PlaybackException) { error2 = "This channel would not play" }
+            })
+        }
+        multi = true
+        useView(active)
+        startJob2?.cancel()
+        error2 = null; loading2 = true
+        startJob2 = lifecycleScope.launch {
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(l.channels[channel2]) } catch (e: Exception) { null } }
+            if (url == null) { error2 = "Could not get the stream address"; loading2 = false; return@launch }
+            p2.setMediaItem(mediaItem(url)); p2.prepare(); p2.playWhenReady = true
+        }
+    }
+
+    /** Sound follows the chosen view; the other one plays muted. */
+    private fun useView(a: Int) {
+        active = a
+        player.volume = if (a == 0) 1f else 0f
+        player2?.volume = if (a == 1) 1f else 0f
+    }
+
+    /** Leaves multi-view, keeping [keep] (0 or 1) full screen. */
+    private fun endMulti(keep: Int) {
+        startJob2?.cancel()
+        player2?.release(); player2 = null
+        multi = false; picking = false
+        player.volume = 1f; active = 0
+        if (keep == 1) { channelIndex = channel2; zap(0) }
     }
 
     /** Another title picked while the player sits in its corner window: play that one instead. */
@@ -227,15 +330,7 @@ class PlayerActivity : ComponentActivity() {
                 } catch (e: Exception) { null }
             }
             if (url == null) { error = "Could not get the stream address"; loading = false; return@launch }
-            val mi = MediaItem.Builder().setUri(Uri.parse(url)).apply {
-                val path = url.substringBefore('?').lowercase()
-                when {
-                    path.endsWith(".m3u8") || path.contains("/hls/") -> setMimeType(MimeTypes.APPLICATION_M3U8)
-                    path.endsWith(".mpd") -> setMimeType(MimeTypes.APPLICATION_MPD)
-                    path.endsWith(".ts") -> setMimeType(MimeTypes.VIDEO_MP2T)
-                }
-            }.build()
-            player.setMediaItem(mi)
+            player.setMediaItem(mediaItem(url))
             if (it is PlayItem.Vod) App.store.progress(it.key)?.let { p -> player.seekTo(p.first) }
             player.prepare()
             player.playWhenReady = true
@@ -251,7 +346,7 @@ class PlayerActivity : ComponentActivity() {
     private fun flashInfo(ms: Long = 5000) {
         showInfo = true
         hideJob?.cancel()
-        hideJob = lifecycleScope.launch { delay(ms); if (playing || item is PlayItem.Live) showInfo = false }
+        hideJob = lifecycleScope.launch { delay(ms); if (playing || item is PlayItem.Live) { showInfo = false; showControls = false } }
     }
 
     private fun zap(delta: Int) {
@@ -265,10 +360,14 @@ class PlayerActivity : ComponentActivity() {
 
     private fun jumpTo(index: Int) {
         val l = live ?: return
-        channelIndex = index.coerceIn(0, l.channels.lastIndex)
         showList = false
+        if (picking) { picking = false; startSecond(index); return }
+        channelIndex = index.coerceIn(0, l.channels.lastIndex)
         zap(0)
     }
+
+    /** Shows the toolbar and keeps it up while it is being used. */
+    private fun openControls() { showControls = true; flashInfo(10_000) }
 
     private fun onEnded() {
         val v = item as? PlayItem.Vod ?: return
@@ -277,7 +376,7 @@ class PlayerActivity : ComponentActivity() {
         val series = v.series
         if (next != null && series != null) {
             Toast.makeText(this, "Next: S${next.season} E${next.number}", Toast.LENGTH_SHORT).show()
-            item = PlayItem.Vod(App.repo.episodeKey(series, next), "${series.name} Â· S${next.season} E${next.number}", episode = next,
+            item = PlayItem.Vod(App.repo.episodeKey(series, next), "${series.name} · S${next.season} E${next.number}", episode = next,
                 series = series, nextEpisodes = v.nextEpisodes.drop(1))
             startCurrent()
         } else finish()
@@ -297,12 +396,30 @@ class PlayerActivity : ComponentActivity() {
         flashInfo()
     }
 
-    /** Keys go to the player first; the channel list and track panels take over the D-pad while open. */
+    /**
+     * Keys go to the player first; the channel list, track panel and toolbar take over the D-pad while open.
+     * Live: Up/Down zap, Left opens channels, OK opens the toolbar. Films: OK plays/pauses, Left/Right seek, Down opens
+     * the toolbar. Multi-view: Left/Right pick the view with sound, Up/Down change its channel, OK or Back keep it full screen.
+     */
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
-        if (showList || showTracks) {
+        if (showList || showTracks || showControls) {
             if (e.keyCode == KeyEvent.KEYCODE_BACK || e.keyCode == KeyEvent.KEYCODE_MENU) {
-                if (e.action == KeyEvent.ACTION_UP) { showList = false; showTracks = false }
+                if (e.action == KeyEvent.ACTION_UP) {
+                    if (showList || showTracks) { showList = false; showTracks = false; picking = false } else { showControls = false; showInfo = false }
+                }
                 return true
+            }
+            if (showControls && e.action == KeyEvent.ACTION_DOWN) flashInfo(10_000)
+            return super.dispatchKeyEvent(e)
+        }
+        if (multi) {
+            if (e.action == KeyEvent.ACTION_UP) return e.keyCode != KeyEvent.KEYCODE_HOME || super.dispatchKeyEvent(e)
+            when (e.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> { useView(0); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { useView(1); return true }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { if (active == 0) zap(-1) else startSecond(channel2 - 1); return true }
+                KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (active == 0) zap(1) else startSecond(channel2 + 1); return true }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BACK -> { endMulti(active); return true }
             }
             return super.dispatchKeyEvent(e)
         }
@@ -313,14 +430,14 @@ class PlayerActivity : ComponentActivity() {
         val isLive = item is PlayItem.Live
         when (e.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { if (isLive) zap(-1) else { showTracks = true }; return true }
-            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (isLive) zap(1) else flashInfo(); return true }
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (isLive) zap(1) else openControls(); return true }
             KeyEvent.KEYCODE_DPAD_LEFT -> { if (isLive) showList = true else seek(-10_000L * (1 + e.repeatCount / 5)); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { if (isLive) flashInfo() else seek(10_000L * (1 + e.repeatCount / 5)); return true }
             KeyEvent.KEYCODE_MEDIA_REWIND -> { seek(-30_000); return true }
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { seek(30_000); return true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                 if (error != null) { retried = false; startCurrent(); return true }
-                if (isLive && e.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) { if (showInfo) showInfo = false else flashInfo(8000) }
+                if (isLive && e.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) openControls()
                 else { if (player.isPlaying) player.pause() else player.play(); flashInfo(if (player.isPlaying) 3000 else 600_000) }
                 return true
             }
@@ -336,16 +453,19 @@ class PlayerActivity : ComponentActivity() {
         // The corner window was closed: stop for good.
         if (inPip) { finish(); return }
         if (::player.isInitialized) player.pause()
+        player2?.pause()
     }
 
     override fun onStart() {
         super.onStart()
         if (::player.isInitialized && player.playbackState != Player.STATE_IDLE) player.play()
+        player2?.play()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         if (::player.isInitialized) player.release()
+        player2?.release(); player2 = null
     }
 
     // ---------------------------------------------------------------- UI
@@ -353,7 +473,7 @@ class PlayerActivity : ComponentActivity() {
     @Composable
     private fun Screen() {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
-            AndroidView(factory = { ctx ->
+            if (multi) MultiView() else AndroidView(factory = { ctx ->
                 PlayerView(ctx).apply {
                     useController = false
                     player = this@PlayerActivity.player
@@ -364,25 +484,25 @@ class PlayerActivity : ComponentActivity() {
             }, update = { it.resizeMode = resize }, modifier = Modifier.fillMaxSize())
 
             if (inPip) return@Box
-            // Phones: a tap shows the details, and a button in the corner minimises the player.
-            if (PHONE) Box(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
-                if (showInfo) showInfo = false else flashInfo()
+            // Phones: a tap shows the details and toolbar, and a button in the corner minimises the player.
+            if (PHONE && !multi) Box(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
+                if (showInfo) { showInfo = false; showControls = false } else openControls()
             })
-            if (PHONE && canPip()) Box(Modifier.align(Alignment.TopEnd).padding(20.dp).size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
+            if (PHONE && canPip() && !multi) Box(Modifier.align(Alignment.TopEnd).padding(20.dp).size(48.dp).clip(androidx.compose.foundation.shape.CircleShape)
                 .background(Color(0x80000000)).clickable { minimise() }, contentAlignment = Alignment.Center) {
                 io.github.novatv.play.ui.Icon(androidx.compose.material.icons.Icons.Rounded.PictureInPictureAlt, size = 26.dp, tint = Color.White)
             }
-            if (loading && error == null) Spinner(Modifier.align(Alignment.Center), 56.dp)
-            error?.let {
-                Column(Modifier.align(Alignment.Center).clip(RoundedCornerShape(18.dp)).background(Color(0xE0101520)).padding(28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(it, style = T.h2)
-                    Spacer(Modifier.height(6.dp))
-                    Text(if (item is PlayItem.Live) "OK to try again Â· Up/Down for another channel" else "OK to try again Â· Back to leave", style = T.small)
+            if (!multi) {
+                if (loading && error == null) Spinner(Modifier.align(Alignment.Center), 56.dp)
+                error?.let {
+                    Column(Modifier.align(Alignment.Center).clip(RoundedCornerShape(14.dp)).background(Color(0xE0101318)).padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(it, style = T.h2)
+                        Spacer(Modifier.height(6.dp))
+                        Text(if (item is PlayItem.Live) "OK to try again · Up/Down for another channel" else "OK to try again · Back to leave", style = T.small)
+                    }
                 }
-            }
-            AnimatedVisibility(showInfo, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
-                if (item is PlayItem.Live) LiveInfo() else VodInfo()
+                AnimatedVisibility(showInfo, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) { Overlay() }
             }
             AnimatedVisibility(showList, enter = slideInHorizontally { -it } + fadeIn(), exit = slideOutHorizontally { -it } + fadeOut()) { ChannelList() }
             AnimatedVisibility(showTracks, enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut(),
@@ -390,56 +510,155 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** "1080p · H264 · AAC 2.0": what the stream actually is, from the decoder's formats. */
+    private fun techLine(): String? {
+        val v = player.videoFormat; val a = player.audioFormat
+        fun codec(m: String?) = when {
+            m == null -> null
+            m.contains("avc") -> "H264"; m.contains("hevc") -> "HEVC"; m.contains("av01") -> "AV1"; m.contains("vp9") -> "VP9"
+            m.contains("mp4a") || m.contains("aac") -> "AAC"; m.contains("eac3") -> "E-AC3"; m.contains("ac3") -> "AC3"; m.contains("mpeg") -> "MP2"
+            else -> m.substringAfter('/').uppercase()
+        }
+        return listOfNotNull(v?.height?.takeIf { it > 0 }?.let { "${it}p" }, codec(v?.sampleMimeType),
+            listOfNotNull(codec(a?.sampleMimeType), a?.channelCount?.takeIf { it > 0 }?.let { if (it == 6) "5.1" else "$it.0" }).joinToString(" ").ifBlank { null })
+            .joinToString(" · ").ifBlank { null }
+    }
+
+    /** The info layer: a top bar (channel or title, tech details, clock) and the bottom bar with progress and toolbar. */
     @Composable
-    private fun LiveInfo() {
-        val c = channel ?: return
-        val p = epg.firstOrNull(); val n = epg.getOrNull(1)
+    private fun Overlay() {
         val t = System.currentTimeMillis()
-        Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE05070C)))).padding(start = 60.dp, end = 60.dp, top = 80.dp, bottom = 40.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${c.number}", style = T.hero.copy(color = C.dim), modifier = Modifier.width(110.dp))
-                Logo(c.logo, c.name, Modifier.size(120.dp, 80.dp))
-                Spacer(Modifier.width(24.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(c.name, style = T.h1); Spacer(Modifier.width(12.dp)); Badge("LIVE")
+        val c = channel
+        Box(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color(0xCC05070A), Color.Transparent)))
+                .padding(start = 48.dp, end = 48.dp, top = 28.dp, bottom = 50.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (c != null) {
+                    Logo(c.logo, c.name, Modifier.size(64.dp, 42.dp)); Spacer(Modifier.width(16.dp))
+                    if (c.number > 0) { Text("${c.number}", style = T.hero); Spacer(Modifier.width(14.dp)) }
+                    Text(c.name, style = T.h1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(14.dp)); io.github.novatv.play.ui.LiveMark()
+                } else Text(title, style = T.h1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Spacer(Modifier.weight(1f))
+                techLine()?.let {
+                    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(Color(0x99000000)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                        Text(it, style = T.tiny.copy(color = C.dim))
                     }
-                    if (p != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Text("${clock(p.start)} â€“ ${clock(p.stop)}   ${p.title}", style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(8.dp))
-                        Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f), Modifier.width(520.dp))
-                        if (n != null) { Spacer(Modifier.height(8.dp)); Text("Next  ${clock(n.start)}  ${n.title}", style = T.small, maxLines = 1) }
-                    } else Text("No guide information", style = T.small)
+                    Spacer(Modifier.width(20.dp))
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(clock(t), style = T.h1)
-                    Text("â—€ channels   â–²â–¼ zap   â˜° audio", style = T.tiny)
-                }
+                Text(clock(t), style = T.h2)
+            }
+            Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xF205070A))))
+                .padding(start = 48.dp, end = 48.dp, top = 70.dp, bottom = 28.dp)) {
+                if (c != null) LiveBar(t) else VodBar()
+                Spacer(Modifier.height(18.dp))
+                if (showControls || PHONE) Toolbar() else Text(
+                    if (c != null) "OK  Toolbar     ◀  Channels     ▲▼  Zap     ☰  Audio & subtitles" else "OK  Play/Pause     ◀ ▶  Seek     ▼  Toolbar     ▲  Audio & subtitles",
+                    style = T.tiny)
             }
         }
     }
 
     @Composable
-    private fun VodInfo() {
-        Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE05070C)))).padding(start = 60.dp, end = 60.dp, top = 80.dp, bottom = 40.dp)) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (playing) "â–¶" else "âšâš", style = T.h1, modifier = Modifier.width(52.dp))
-                    Text(title, style = T.h1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text(clock(System.currentTimeMillis()), style = T.h2)
-                }
-                Spacer(Modifier.height(14.dp))
-                Bar(if (length > 0) position.toFloat() / length else 0f, Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                Row {
-                    Text(duration(position), style = T.small)
-                    Spacer(Modifier.weight(1f))
-                    Text("â—€ â–¶ seek   â–² audio & subtitles   " + (if (length > 0) "-${duration(length - position)}" else ""), style = T.small)
-                }
+    private fun LiveBar(t: Long) {
+        val p = epg.firstOrNull(); val n = epg.getOrNull(1)
+        if (p == null) { Text("No guide information for this channel", style = T.body.copy(color = C.dim)); return }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(p.title, style = T.hero, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            Spacer(Modifier.width(20.dp))
+            Text("${clock(p.start)} – ${clock(p.stop)}  ·  ${((p.stop - t) / 60_000).coerceAtLeast(0)} min left", style = T.small, maxLines = 1)
+            Spacer(Modifier.weight(1f))
+            if (n != null) {
+                Text("UP NEXT  ", style = T.tiny.copy(letterSpacing = androidx.compose.ui.unit.TextUnit(1.4f, androidx.compose.ui.unit.TextUnitType.Sp)))
+                Text("${clock(n.start)}  ${n.title}", style = T.small.copy(color = C.text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(320.dp))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f), Modifier.fillMaxWidth())
+        Spacer(Modifier.height(6.dp))
+        Row { Text(clock(p.start), style = T.tiny); Spacer(Modifier.weight(1f)); Text(clock(p.stop), style = T.tiny) }
+    }
+
+    @Composable
+    private fun VodBar() {
+        Bar(if (length > 0) position.toFloat() / length else 0f, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        Row {
+            Text(duration(position), style = T.small)
+            Spacer(Modifier.weight(1f))
+            if (length > 0) Text("-${duration(length - position)}", style = T.small)
+        }
+    }
+
+    /** The toolbar: only actions that work here. Focus starts on Play/Pause. */
+    @Composable
+    private fun Toolbar() {
+        val first = remember { FocusRequester() }
+        LaunchedEffect(Unit) { if (!PHONE) repeat(5) { try { first.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(50) } } }
+        val c = channel
+        var favs by remember { mutableIntStateOf(0) }
+        val I = androidx.compose.material.icons.Icons.Rounded
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                io.github.novatv.play.ui.Pill(if (playing) "Pause" else "Play", primary = true, modifier = Modifier.focusRequester(first),
+                    icon = if (playing) I.Pause else I.PlayArrow, onClick = { if (player.isPlaying) player.pause() else player.play() })
+            }
+            if (c != null) item {
+                val key = App.repo.channelKey(c)
+                val fav = remember(favs, c) { App.store.isFavourite(key) }
+                io.github.novatv.play.ui.Pill(if (fav) "Favourited" else "Favourite", selected = fav, icon = if (fav) I.Star else I.StarBorder,
+                    onClick = { App.store.toggleFavourite(key); favs++ })
+            }
+            if (c == null) item { io.github.novatv.play.ui.Pill("Start over", icon = I.Replay, onClick = { player.seekTo(0) }) }
+            item { io.github.novatv.play.ui.Pill("Audio & subtitles", icon = I.Subtitles, onClick = { showControls = false; showTracks = true }) }
+            item {
+                val names = mapOf(AspectRatioFrameLayout.RESIZE_MODE_FIT to "Fit", AspectRatioFrameLayout.RESIZE_MODE_ZOOM to "Fill", AspectRatioFrameLayout.RESIZE_MODE_FILL to "Stretch")
+                io.github.novatv.play.ui.Pill("Aspect: ${names[resize] ?: "Fit"}", icon = I.AspectRatio, onClick = {
+                    resize = when (resize) { AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL; else -> AspectRatioFrameLayout.RESIZE_MODE_FIT }
+                })
+            }
+            if (c != null) {
+                item { io.github.novatv.play.ui.Pill("Channels", icon = I.List, onClick = { showControls = false; showList = true }) }
+                if (!PHONE) item { io.github.novatv.play.ui.Pill("Multi-view", icon = I.GridView, onClick = { startMulti() }) }
             }
         }
     }
+
+    /** Two channels side by side; the one with sound has a cyan frame. */
+    @Composable
+    private fun MultiView() {
+        val l = live ?: return
+        Column(Modifier.fillMaxSize().padding(24.dp)) {
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                for (i in 0..1) {
+                    val c = l.channels.getOrNull(if (i == 0) channelIndex else channel2)
+                    Box(Modifier.weight(1f).androidxAspect().clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF0B0E13))
+                        .then(if (active == i) Modifier.androidxBorder(3.dp, C.accent) else Modifier.androidxBorder(1.dp, C.line))) {
+                        AndroidView(factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = false
+                                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                            }
+                        }, update = { v -> v.player = if (i == 0) player else player2 }, modifier = Modifier.fillMaxSize().padding(3.dp))
+                        if (i == 0 && loading || i == 1 && loading2) Spinner(Modifier.align(Alignment.Center), 40.dp)
+                        (if (i == 0) error else error2)?.let { Text(it, style = T.small.copy(color = C.text), modifier = Modifier.align(Alignment.Center)) }
+                        if (c != null) Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))
+                            .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (c.number > 0) { Text("${c.number}", style = T.h2); Spacer(Modifier.width(10.dp)) }
+                            Text(c.name, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            if (active == i) Text("♪", style = T.h2.copy(color = C.accent))
+                        }
+                    }
+                }
+            }
+            Text("◀ ▶  Sound     ▲▼  Change channel     OK / BACK  Full screen", style = T.tiny, modifier = Modifier.align(Alignment.End))
+        }
+    }
+
+    private fun Modifier.androidxAspect() = this.then(Modifier.aspectRatio(16f / 9f))
+    private fun Modifier.androidxBorder(w: androidx.compose.ui.unit.Dp, c: Color) = this.then(Modifier.border(w, c, RoundedCornerShape(10.dp)))
 
     @Composable
     private fun ChannelList() {
@@ -449,6 +668,7 @@ class PlayerActivity : ComponentActivity() {
         LaunchedEffect(Unit) { repeat(5) { try { focus.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(50) } } }
         LazyColumn(Modifier.width(460.dp).fillMaxHeight().background(Color(0xF00A0E17)), state = state,
             contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (picking) item { Text("Pick the second channel", style = T.h2, modifier = Modifier.padding(start = 6.dp, bottom = 8.dp)) }
             itemsIndexed(l.channels, key = { _, c -> c.id }) { i, c ->
                 Tile({ jumpTo(i) }, Modifier.fillMaxWidth().height(58.dp).let { if (i == channelIndex) it.focusRequester(focus) else it },
                     shape = RoundedCornerShape(10.dp), scale = 1.02f, color = if (i == channelIndex) C.accent.copy(alpha = 0.25f) else Color.Transparent) {
@@ -486,7 +706,7 @@ class PlayerActivity : ComponentActivity() {
                 for (g in groups) for (k in 0 until g.length) {
                     val f = g.getTrackFormat(k)
                     val name = listOfNotNull(f.label, f.language?.let { java.util.Locale(it).displayLanguage }, f.channelCount.takeIf { it > 0 }?.let { "$it ch" })
-                        .distinct().joinToString(" Â· ").ifBlank { "Track ${k + 1}" }
+                        .distinct().joinToString(" · ").ifBlank { "Track ${k + 1}" }
                     item {
                         Choice(name, g.isTrackSelected(k)) {
                             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
@@ -505,7 +725,7 @@ class PlayerActivity : ComponentActivity() {
             color = if (on) C.accent.copy(alpha = 0.25f) else Color.Transparent) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(label, style = T.body, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (on) Text("âœ“", style = T.h2.copy(color = C.accent))
+                if (on) Text("✓", style = T.h2.copy(color = C.accent))
             }
         }
     }
