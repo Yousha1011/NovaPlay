@@ -27,7 +27,7 @@ import io.github.novatv.play.platform.IO
 import io.github.novatv.play.platform.logW
 import io.github.novatv.play.platform.SafeMap
 
-/** The active source's library, its guide and the Sports feed, shared by every screen. */
+/** The active source's library and its guide, shared by every screen; Sports is in [SportsRepository]. */
 class Repo(val store: Store, val epg: Epg) {
     data class LibState(
         val source: Source? = null,
@@ -42,13 +42,12 @@ class Repo(val store: Store, val epg: Epg) {
         val epgStatus: String? = null,
     )
 
-    data class SportsState(val events: List<SportEvent> = emptyList(), val loading: Boolean = false, val updatedAt: Long = 0L)
-
     private val scope = CoroutineScope(SupervisorJob() + IO)
     private val _state = MutableStateFlow(LibState())
     val state: StateFlow<LibState> = _state
-    private val _sports = MutableStateFlow(SportsState())
-    val sports: StateFlow<SportsState> = _sports
+    /** The Sports feed lives in its own repository; these keep the screens' calls as they were. */
+    val sportsRepo = SportsRepository(scope)
+    val sports: StateFlow<SportsRepository.SportsState> get() = sportsRepo.state
 
     @Volatile var provider: Provider? = null
         private set
@@ -163,29 +162,9 @@ class Repo(val store: Store, val epg: Epg) {
 
     // ---------- Sports ----------
 
-    private var sportsJob: Job? = null
-
     /** Reloads the followed leagues' matches; skipped when the last load is younger than [minAgeMs]. */
-    fun refreshSports(minAgeMs: Long = 60_000L) {
-        if (sportsJob?.isActive == true) return
-        if (nowMs() - _sports.value.updatedAt < minAgeMs) return
-        sportsJob = scope.launch {
-            _sports.update { it.copy(loading = true) }
-            val leagues = io.github.novatv.play.sports.Follow.leaguesToFetch()
-            val gate = Semaphore(6)
-            val all = leagues.map { l -> async { gate.withPermit { Espn.fetch(l) } } }.awaitAll().flatten()
-            _sports.value = SportsState(all.distinctBy { it.id }.sortedBy { it.start }, false, nowMs())
-        }
-    }
-
-    private val sportCache = SafeMap<io.github.novatv.play.sports.Sport, Pair<Long, List<SportEvent>>>()
+    fun refreshSports(minAgeMs: Long = 60_000L) = sportsRepo.refresh(minAgeMs)
 
     /** Two weeks of [sport]'s matches, for picking its competitions and clubs (cached for an hour). */
-    suspend fun sportCatalog(sport: io.github.novatv.play.sports.Sport): List<SportEvent> = kotlinx.coroutines.withContext(IO) {
-        sportCache[sport]?.let { if (nowMs() - it.first < 3600_000L) return@withContext it.second }
-        val gate = Semaphore(6)
-        val list = Catalog.leagues.filter { it.sport == sport }.map { l -> async { gate.withPermit { Espn.fetch(l, 14) } } }.awaitAll().flatten()
-        sportCache[sport] = nowMs() to list
-        list
-    }
+    suspend fun sportCatalog(sport: io.github.novatv.play.sports.Sport): List<SportEvent> = sportsRepo.catalog(sport)
 }

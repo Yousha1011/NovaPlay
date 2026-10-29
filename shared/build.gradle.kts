@@ -46,7 +46,10 @@ kotlin {
             implementation("io.coil-kt.coil3:coil-compose:3.2.0")
             implementation("io.coil-kt.coil3:coil-network-ktor3:3.2.0")
         }
-        commonTest.dependencies { implementation(kotlin("test")) }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+        }
         androidMain.dependencies {
             implementation("io.ktor:ktor-client-okhttp:3.1.3")
             implementation("androidx.tv:tv-material:1.0.0")
