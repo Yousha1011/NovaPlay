@@ -79,6 +79,12 @@ import io.github.novatv.play.ui.Icon
 import io.github.novatv.play.ui.LeaguesScreen
 import io.github.novatv.play.ui.LiveScreen
 import io.github.novatv.play.ui.Pill
+import io.github.novatv.play.ui.S
+import io.github.novatv.play.ui.clock
+import io.github.novatv.play.ui.now
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.foundation.focusGroup
 import io.github.novatv.play.ui.SearchScreen
 import io.github.novatv.play.ui.SettingsScreen
 import io.github.novatv.play.ui.SportsScreen
@@ -182,9 +188,12 @@ private fun RootBody() {
                 while (visited.size > KEEP_TABS) visited.removeAt(0)
             }
             // Separate drawing layers for the page and the menu: the menu's focus animation then repaints only the menu.
-            Box(Modifier.fillMaxSize().padding(start = 84.dp).graphicsLayer()) {
+            Box(Modifier.fillMaxSize().padding(start = S.rail).graphicsLayer()) {
                 for (t in visited) key(t) {
-                    Box(if (t == nav.tab) Modifier.fillMaxSize().focusRequester(nav.page(t)) else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
+                    // Each page is a focus group that remembers where focus was: Right from the rail, or Back from a
+                    // detail page, lands on the item last used instead of the page's first one.
+                    Box(if (t == nav.tab) Modifier.fillMaxSize().focusRequester(nav.page(t)).focusRestorer().focusGroup()
+                        else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }) {
                         when (t) {
                             Tab.HOME -> HomeScreen(nav)
                             Tab.LIVE -> LiveScreen(nav)
@@ -215,7 +224,10 @@ private fun RootBody() {
     }
 }
 
-/** The left rail: icons only, widening to show labels while it has focus. Focusing an item opens its tab. */
+/**
+ * The left rail: a narrow column of icons with a cyan bar beside the open tab. While it has focus (or the mouse is over
+ * it) it widens over the page to show labels. Focusing an item opens its tab.
+ */
 @Composable
 private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
@@ -226,53 +238,58 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
     val hover = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val open = if (App.device == Device.TV) focused else hovered
-    val w = if (open) 210.dp else 84.dp
-    Column(
-        Modifier.graphicsLayer().width(w).fillMaxHeight().hoverable(hover)
-            .background(Brush.horizontalGradient(listOf(Color(0xF0060910), if (open) Color(0xE0060910) else Color.Transparent)))
-            .onFocusChanged { if (focused != it.hasFocus) { focused = it.hasFocus; onFocus(it.hasFocus) } }
-            // Right goes to the page's first option, not to whatever sits beside the menu item.
-            .onPreviewKeyEvent { k ->
-                if (k.type != KeyEventType.KeyDown || k.key != Key.DirectionRight) false
-                else try { nav.page(nav.tab).requestFocus(); true } catch (e: Exception) { false }
+    Row(Modifier.fillMaxHeight()) {
+        Column(
+            Modifier.graphicsLayer().width(if (open) S.railOpen else S.rail).fillMaxHeight().hoverable(hover)
+                .background(if (open) C.rail.copy(alpha = 0.97f) else C.rail)
+                .onFocusChanged { if (focused != it.hasFocus) { focused = it.hasFocus; onFocus(it.hasFocus) } }
+                // Right goes back into the page (where focus last was), not to whatever sits beside the menu item.
+                .onPreviewKeyEvent { k ->
+                    if (k.type != KeyEventType.KeyDown || k.key != Key.DirectionRight) false
+                    else try { nav.page(nav.tab).requestFocus(); true } catch (e: Exception) { false }
+                }
+                .padding(vertical = 22.dp, horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // NovaPlay's mark, with the name beside it while the rail is open.
+            Row(Modifier.padding(start = 4.dp, bottom = 26.dp).height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(Res.drawable.logo_mark), "NovaPlay", Modifier.size(40.dp))
+                if (open) { Spacer(Modifier.width(10.dp)); Text("NovaPlay", style = T.h2, maxLines = 1) }
             }
-            .padding(vertical = 28.dp, horizontal = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // The logo, with the name beside it while the rail is open.
-        Row(Modifier.padding(start = 2.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(Res.drawable.logo_mark), "NovaPlay", Modifier.size(52.dp))
-            if (open) { Spacer(Modifier.width(10.dp)); Text("NovaPlay", style = T.h2) }
-        }
-        for (t in Tab.entries) {
-            val selected = nav.tab == t
-            // A plain focusable row: no grow, border or glow animation, just an instant colour swap. The animated
-            // focus effect cost 70-80 ms frames on a Fire TV every time focus moved.
-            var itemFocused by remember { mutableStateOf(false) }
-            val fg = when { itemFocused -> Color(0xFF0B0E14); selected -> C.accent; else -> C.dim }
-            Row(
-                Modifier.fillMaxWidth().height(50.dp)
-                    .let { if (selected) it.focusRequester(nav.railFocus) else it }
-                    .onFocusChanged {
-                        itemFocused = it.isFocused
-                        // Opens the tab once focus rests on it, so moving through the menu doesn't build every screen on the way.
-                        if (it.isFocused) { pendingTab = t; scope.launch { delay(150); if (pendingTab == t && nav.tab != t) nav.tab = t } }
+            for (t in Tab.entries) {
+                val selected = nav.tab == t
+                // A plain focusable row with instant colour swaps: animated focus effects cost 70-80 ms frames on a Fire TV.
+                var itemFocused by remember { mutableStateOf(false) }
+                val fg = when { itemFocused -> C.onAccent; selected -> C.accent; else -> C.dim }
+                Row(
+                    Modifier.fillMaxWidth().height(46.dp)
+                        .let { if (selected) it.focusRequester(nav.railFocus) else it }
+                        .onFocusChanged {
+                            itemFocused = it.isFocused
+                            // Opens the tab once focus rests on it, so moving through the menu doesn't build every screen on the way.
+                            if (it.isFocused) { pendingTab = t; scope.launch { delay(150); if (pendingTab == t && nav.tab != t) nav.tab = t } }
+                        }
+                        .clickable { nav.tab = t }
+                        .background(if (itemFocused) C.accent else Color.Transparent, RoundedCornerShape(10.dp)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // The open tab's marker: a short cyan bar on the rail's left edge.
+                    Box(Modifier.width(3.dp).height(22.dp).background(if (selected && !itemFocused) C.accent else Color.Transparent, RoundedCornerShape(2.dp)))
+                    Spacer(Modifier.width(11.dp))
+                    Icon(t.icon, size = 22.dp, tint = fg)
+                    if (open) {
+                        Spacer(Modifier.width(14.dp))
+                        Text(t.label, style = T.body.copy(color = if (itemFocused) fg else if (selected) C.text else C.dim,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal), maxLines = 1)
                     }
-                    .clickable { nav.tab = t }
-                    .background(when { itemFocused -> Color(0xF2FFFFFF); selected -> C.accent.copy(alpha = 0.22f); else -> Color.Transparent },
-                        RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(t.icon, size = 24.dp, tint = fg)
-                if (open) {
-                    Spacer(Modifier.width(14.dp))
-                    Text(t.label, style = T.body.copy(color = if (itemFocused) fg else C.text), maxLines = 1)
                 }
             }
+            Spacer(Modifier.weight(1f))
+            // The time, at the foot of the rail.
+            Text(clock(now()), style = T.tiny.copy(color = C.dim), maxLines = 1, modifier = Modifier.padding(start = if (open) 14.dp else 4.dp))
         }
-        Spacer(Modifier.weight(1f))
-        Box(Modifier.size(1.dp).clip(RoundedCornerShape(1.dp)))
+        // A hairline between the rail and the page.
+        Box(Modifier.width(1.dp).fillMaxHeight().background(C.line))
     }
 }
 

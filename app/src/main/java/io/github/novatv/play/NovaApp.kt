@@ -18,8 +18,8 @@ class NovaApp : Application() {
         super.onCreate()
         appContext = this
         migratePrefs()
-        // The Fire TV wears the iPhone's look (themes, glass, lighter type).
-        io.github.novatv.play.ui.Look.modern = !PHONE
+        // TVs use the big-screen look (graphite and cyan); the phone draws its own screens with its themes.
+        io.github.novatv.play.ui.Look.modern = false
         App.start(object : Host {
             override val device = if (PHONE) Device.PHONE else Device.TV
             override fun play(item: PlayItem) {

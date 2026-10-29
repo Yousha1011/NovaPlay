@@ -47,12 +47,13 @@ actual fun Tile(
         onLongClick = onLongClick,
         modifier = modifier,
         shape = ClickableSurfaceDefaults.shape(shape = shape),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = scale),
+        // A small lift: the cyan ring does the work, so big posters don't crowd their neighbours.
+        scale = ClickableSurfaceDefaults.scale(focusedScale = minOf(scale, 1.04f)),
         colors = ClickableSurfaceDefaults.colors(containerColor = color, contentColor = C.text, focusedContainerColor = focusedColor,
             focusedContentColor = focusedContent, pressedContainerColor = focusedColor, pressedContentColor = focusedContent),
         border = ClickableSurfaceDefaults.border(
-            border = if (Look.modern) Border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), shape = shape) else Border.None,
-            focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = 0.9f)), shape = shape)),
+            border = Border(BorderStroke(1.dp, Color.White.copy(alpha = if (Look.modern) 0.14f else 0.06f)), shape = shape),
+            focusedBorder = Border(BorderStroke(S.focusWidth, if (Look.modern) Color.White.copy(alpha = 0.9f) else C.accent), inset = (-3).dp, shape = shape)),
         content = content,
     )
 }
@@ -63,11 +64,15 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
         onClick = onClick,
         modifier = modifier,
         shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(50)),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.06f),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.03f),
+        // Buttons light up cyan with dark text when focused; the primary one is cyan already and gains a white ring.
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = when { primary -> C.accent; selected -> C.accent.copy(alpha = 0.28f); else -> C.panel },
-            contentColor = C.text, focusedContainerColor = Color.White, focusedContentColor = Color(0xFF0B0E14),
+            containerColor = when { primary -> C.accent; selected -> C.accent.copy(alpha = 0.22f); else -> C.panel },
+            contentColor = if (primary) C.onAccent else C.text, focusedContainerColor = C.accent, focusedContentColor = C.onAccent,
         ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border(BorderStroke(1.dp, if (primary) Color.Transparent else C.line), shape = RoundedCornerShape(50)),
+            focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = if (primary) 0.95f else 0f)), inset = (-3).dp, shape = RoundedCornerShape(50))),
     ) {
         Row(Modifier.padding(horizontal = 18.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) { Icon(icon, size = 18.dp, tint = LocalContentColor.current); Spacer(Modifier.width(8.dp)) }

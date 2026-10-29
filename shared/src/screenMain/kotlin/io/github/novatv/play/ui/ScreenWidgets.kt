@@ -61,10 +61,10 @@ actual fun Tile(
     val lit = focused || hovered
     Box(
         modifier
-            .graphicsLayer { val s = if (lit) scale else 1f; scaleX = s; scaleY = s }
+            .graphicsLayer { val s = if (lit) minOf(scale, 1.04f) else 1f; scaleX = s; scaleY = s }
+            .then(if (focused) Modifier.border(S.focusWidth, if (Look.modern) Color.White.copy(alpha = 0.9f) else C.accent, shape) else Modifier)
             .clip(shape)
             .background(if (lit) focusedColor else color)
-            .then(if (focused) Modifier.border(2.dp, Color.White.copy(alpha = 0.9f), shape) else Modifier)
             .hoverable(src)
             .combinedClickable(interactionSource = src, indication = null, onLongClick = onLongClick, onClick = onClick),
         content = content,
@@ -77,12 +77,14 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
     val focused by src.collectIsFocusedAsState()
     val hovered by src.collectIsHoveredAsState()
     val lit = focused || hovered
-    val fg = if (lit) Color(0xFF0B0E14) else C.text
+    val fg = if (lit || primary) C.onAccent else C.text
     Row(
         modifier
-            .graphicsLayer { val s = if (lit) 1.06f else 1f; scaleX = s; scaleY = s }
+            .graphicsLayer { val s = if (lit) 1.03f else 1f; scaleX = s; scaleY = s }
+            .then(if (primary && focused) Modifier.border(2.dp, Color.White, RoundedCornerShape(50))
+                else if (!lit && !primary) Modifier.border(1.dp, C.line, RoundedCornerShape(50)) else Modifier)
             .clip(RoundedCornerShape(50))
-            .background(when { lit -> Color.White; primary -> C.accent; selected -> C.accent.copy(alpha = 0.28f); else -> C.panel })
+            .background(when { lit || primary -> C.accent; selected -> C.accent.copy(alpha = 0.22f); else -> C.panel })
             .hoverable(src)
             .combinedClickableCompat(src, onClick)
             .padding(horizontal = 18.dp, vertical = 9.dp),

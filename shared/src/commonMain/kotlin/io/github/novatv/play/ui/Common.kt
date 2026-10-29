@@ -72,25 +72,42 @@ fun AutoFocus(r: FocusRequester, key: Any? = Unit) {
     LaunchedEffect(key) { repeat(5) { try { r.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(60) } } }
 }
 
-/** A channel tile: logo, name and what is on now. */
+/**
+ * A channel tile: the logo on a plate, a LIVE mark while the guide has a programme on now, the channel's number and
+ * name, and the programme with how far through it is. Without a guide it says so rather than guessing.
+ */
 @Composable
 fun ChannelCard(c: Channel, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
     val p = nowNext(c).firstOrNull()
     val t = now()
-    Tile(onClick, modifier.width(250.dp).height(132.dp), onLongClick = onLongClick) {
-        Column(Modifier.fillMaxSize().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Logo(c.logo, c.name, Modifier.size(58.dp, 40.dp))
-                Spacer(Modifier.width(12.dp))
-                Text(c.name, style = T.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    val on = p != null && t in p.start until p.stop
+    Tile(onClick, modifier.width(240.dp).height(160.dp), onLongClick = onLongClick, shape = RoundedCornerShape(10.dp)) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().height(78.dp).background(Color(0x0DFFFFFF))) {
+                Logo(c.logo, c.name, Modifier.align(Alignment.Center).size(96.dp, 54.dp))
+                if (on) LiveMark(Modifier.align(Alignment.TopEnd).padding(8.dp))
             }
-            Spacer(Modifier.weight(1f))
-            if (p != null) {
-                Text(p.title, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(6.dp))
-                Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f))
-            } else Text("No guide", style = T.small.copy(color = C.faint))
+            Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 9.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (c.number > 0) { Text("${c.number}", style = T.small.copy(color = C.faint)); Spacer(Modifier.width(8.dp)) }
+                    Text(c.name, style = T.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(if (p != null) p.title else "No guide data", style = T.small.copy(color = if (p != null) C.dim else C.faint),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.weight(1f))
+                if (p != null && on) Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f), Modifier.fillMaxWidth())
+            }
         }
+    }
+}
+
+/** A small red "● LIVE" mark. */
+@Composable
+fun LiveMark(modifier: Modifier = Modifier) {
+    Row(modifier.clip(RoundedCornerShape(6.dp)).background(Color(0xCC1A0A0C)).padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Dot(C.live, 6.dp); Spacer(Modifier.width(5.dp))
+        Text("LIVE", style = T.tiny.copy(color = C.live, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
     }
 }
 

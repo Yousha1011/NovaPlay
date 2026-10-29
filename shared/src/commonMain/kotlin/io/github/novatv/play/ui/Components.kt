@@ -44,6 +44,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import coil3.compose.AsyncImage
 import io.github.novatv.play.platform.Time
 import io.github.novatv.play.platform.pad2
@@ -67,7 +69,7 @@ fun Logo(url: String?, name: String, modifier: Modifier = Modifier) {
 fun PosterCard(title: String, image: String?, sub: String?, onClick: () -> Unit, modifier: Modifier = Modifier,
                progress: Float? = null, onLongClick: (() -> Unit)? = null) {
     Column(modifier) {
-        Tile(onClick, Modifier.fillMaxWidth().aspectRatio(2f / 3f), onLongClick = onLongClick, scale = 1.07f) {
+        Tile(onClick, Modifier.fillMaxWidth().aspectRatio(2f / 3f), onLongClick = onLongClick, shape = RoundedCornerShape(10.dp)) {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(C.panelHi, C.panel))), contentAlignment = Alignment.Center) {
                 Text(initials(title), style = T.hero.copy(color = C.faint))
             }
@@ -75,8 +77,8 @@ fun PosterCard(title: String, image: String?, sub: String?, onClick: () -> Unit,
             if (progress != null) Bar(progress, Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp))
         }
         Spacer(Modifier.height(8.dp))
-        Text(title, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (!sub.isNullOrBlank()) Text(sub, style = T.small, maxLines = 1)
+        Text(title, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (!sub.isNullOrBlank()) Text(sub, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -98,7 +100,7 @@ fun Badge(text: String, color: Color = C.live) {
 fun SectionTitle(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
     Row(modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(text, style = T.h2)
-        if (trailing != null) Text(trailing, style = T.small)
+        if (trailing != null) Text(trailing.uppercase(), style = T.tiny.copy(letterSpacing = 1.4.sp), modifier = Modifier.padding(bottom = 3.dp))
     }
 }
 
@@ -144,11 +146,9 @@ fun Backdrop(modifier: Modifier = Modifier) {
     // Drawn into its own layer once and reused: two full-screen gradients redrawn every frame were costly on a Fire TV.
     Canvas(modifier.fillMaxSize().graphicsLayer()) {
         if (Look.modern) { drawRect(Brush.verticalGradient(listOf(C.bg2, C.bg))); return@Canvas }
+        // Flat graphite with a faint lift at the top: artwork and the cyan accent carry the colour.
         drawRect(C.bg)
-        drawCircle(Brush.radialGradient(listOf(C.accent.copy(alpha = 0.16f), Color.Transparent), center = Offset(size.width * 0.85f, 0f), radius = size.width * 0.6f),
-            radius = size.width * 0.6f, center = Offset(size.width * 0.85f, 0f))
-        drawCircle(Brush.radialGradient(listOf(C.accent2.copy(alpha = 0.10f), Color.Transparent), center = Offset(0f, size.height), radius = size.width * 0.5f),
-            radius = size.width * 0.5f, center = Offset(0f, size.height))
+        drawRect(Brush.verticalGradient(listOf(C.bg2, C.bg), endY = size.height * 0.5f), size = size.copy(height = size.height * 0.5f))
     }
 }
 

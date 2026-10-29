@@ -40,6 +40,25 @@ import androidx.compose.foundation.layout.size
 import io.github.novatv.play.platform.IO
 import io.github.novatv.play.platform.Time
 import io.github.novatv.play.res.logo
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import io.github.novatv.play.data.Details
+import io.github.novatv.play.data.Movie
+import io.github.novatv.play.data.Series
+import io.github.novatv.play.data.Store
+import kotlinx.coroutines.withContext
+
+/** What the home hero shows: the last thing watched, or else the newest film or series in the playlist. */
+private class Hero(val label: String, val movie: Movie?, val series: Series?, val resume: Store.Resume?)
 
 @Composable
 fun HomeScreen(nav: Nav) {
@@ -58,83 +77,171 @@ fun HomeScreen(nav: Nav) {
     val resume = remember(lib, rev) { store.continueWatching }
     val newMovies = remember(st.index) { st.index?.moviesByAdded?.take(20).orEmpty() }
     val newSeries = remember(st.index) { st.index?.seriesByAdded?.take(20).orEmpty() }
-    val first = remember { FocusRequester() }
+    val hero = remember(lib, resume, newMovies, newSeries) {
+        resume.firstNotNullOfOrNull { r ->
+            lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }?.let { Hero("Continue watching", it, null, r) }
+                ?: lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }?.let { Hero("Continue watching", null, it, r) }
+        } ?: newMovies.firstOrNull()?.let { Hero("New movie", it, null, null) }
+            ?: newSeries.firstOrNull()?.let { Hero("New series", null, it, null) }
+    }
+    val nothing = hero == null && favChannels.isEmpty() && recent.isEmpty() && liveSports.isEmpty() && lib.channels.isEmpty()
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 36.dp, end = 36.dp, top = 34.dp, bottom = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(30.dp)) {
-        item { Column {
-            val h = Time.hourOfDay()
-            Header(when { h < 12 -> "Good morning"; h < 18 -> "Good afternoon"; else -> "Good evening" },
-                listOfNotNull(st.source?.name, "${lib.channels.size} channels", "${lib.movies.size} movies", "${lib.series.size} series").joinToString("  ·  "))
-            SourceStatus() }
-        }
-        if (liveSports.isNotEmpty()) item {
-            Column {
-                SectionTitle("Live sports", trailing = "${liveSports.size} on now")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(liveSports, key = { it.id }) { e ->
-                        EventCard(e, onClick = {
-                            // Broadcaster lookups go to the network: off the main thread, then play the first channel found.
-                            scope.launch {
-                                val a = kotlinx.coroutines.withContext(IO) {
-                                    App.repo.matcher().airings(e, io.github.novatv.play.sports.Broadcasters.forEvent(e))
-                                }
-                                if (a.isNotEmpty()) playChannel(a.map { it.channel }, 0) else nav.tab = Tab.SPORTS
-                            }
-                        })
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        // The hero takes about half the screen whatever its size, within limits that keep small and huge TVs readable.
+        val heroHeight = (maxHeight * 0.56f).coerceIn(300.dp, 520.dp)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
+            item(key = "status") { Box(Modifier.padding(start = S.gutter, end = S.gutter, top = if (hero == null) 34.dp else 0.dp)) { SourceStatus() } }
+            if (hero != null) item(key = "hero") { HeroBanner(hero, heroHeight, nav) }
+            else if (!nothing) item(key = "header") {
+                Header(greeting(), listOfNotNull(st.source?.name, "${lib.channels.size} channels").joinToString("  ·  "), Modifier.padding(horizontal = S.gutter))
+            }
+            if (favChannels.isNotEmpty()) item(key = "fav") { ChannelRow("On now", "Favourites", favChannels) }
+            if (recent.isNotEmpty()) item(key = "recent") { RecentRow(recent) }
+            if (resume.isNotEmpty()) item(key = "continue") {
+                var all by remember { mutableStateOf(false) }
+                var gone by remember { mutableStateOf(setOf<String>()) }
+                var ask by remember { mutableStateOf<Store.Resume?>(null) }
+                ask?.let { r -> RemoveDialog(r.title, "Continue watching", onRemove = { gone = gone + r.key }, onDismiss = { ask = null }) }
+                Column {
+                    ClearableTitle("Continue watching") { all = true }
+                    LazyRow(Modifier.dust(all) { store.clearContinue(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
+                        horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                        items(resume, key = { it.key }) { r ->
+                            PosterCard(r.title, r.poster, timeLeft(r.dur - r.pos),
+                                modifier = Modifier.width(150.dp).dust(r.key in gone) { store.removeContinue(r.key); History.rev++ },
+                                onLongClick = { ask = r },
+                                progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onClick = { open(r, nav) })
+                        }
                     }
                 }
             }
-        }
-        if (resume.isNotEmpty()) item(key = "continue") {
-            var all by remember { mutableStateOf(false) }
-            var gone by remember { mutableStateOf(setOf<String>()) }
-            var ask by remember { mutableStateOf<io.github.novatv.play.data.Store.Resume?>(null) }
-            ask?.let { r -> RemoveDialog(r.title, "Continue watching", onRemove = { gone = gone + r.key }, onDismiss = { ask = null }) }
-            Column {
-                ClearableTitle("Continue watching") { all = true }
-                LazyRow(Modifier.dust(all) { store.clearContinue(); History.rev++ }, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(resume, key = { it.key }) { r ->
-                        PosterCard(r.title, r.poster, "${duration(r.dur - r.pos)} left",
-                            modifier = Modifier.width(150.dp).dust(r.key in gone) { store.removeContinue(r.key); History.rev++ },
-                            onLongClick = { ask = r },
-                            progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onClick = {
-                                val movie = lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }
-                                val series = lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }
-                                when {
-                                    movie != null -> play(PlayItem.Vod(r.key, movie.name, movie = movie))
-                                    series != null -> nav.push(Route.SeriesDetail(series))
+            if (liveSports.isNotEmpty()) item(key = "sports") {
+                Column {
+                    SectionTitle("Live sports", Modifier.padding(horizontal = S.gutter), trailing = "${liveSports.size} on now")
+                    LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                        items(liveSports, key = { it.id }) { e ->
+                            EventCard(e, onClick = {
+                                // Broadcaster lookups go to the network: off the main thread, then play the first channel found.
+                                scope.launch {
+                                    val a = kotlinx.coroutines.withContext(IO) {
+                                        App.repo.matcher().airings(e, io.github.novatv.play.sports.Broadcasters.forEvent(e))
+                                    }
+                                    if (a.isNotEmpty()) playChannel(a.map { it.channel }, 0) else nav.tab = Tab.SPORTS
                                 }
                             })
+                        }
                     }
                 }
             }
-        }
-        if (favChannels.isNotEmpty()) item { ChannelRow("Favourite channels", favChannels, Modifier.focusRequester(first)) }
-        if (recent.isNotEmpty()) item(key = "recent") { RecentRow(recent) }
-        if (newMovies.isNotEmpty()) item {
-            Column {
-                SectionTitle("New movies")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(newMovies, key = { it.id }) { m ->
-                        PosterCard(m.name, m.poster, listOfNotNull(m.year, m.rating?.let { "★ $it" }).joinToString("  "), modifier = Modifier.width(150.dp),
-                            onClick = { nav.push(Route.MovieDetail(m)) })
-                    }
+            if (newMovies.isNotEmpty()) item(key = "movies") {
+                PosterRow("New movies", newMovies, { it.id }) { m ->
+                    PosterCard(m.name, m.poster, listOfNotNull(m.year, m.rating?.let { "★ $it" }).joinToString("  ·  "), modifier = Modifier.width(150.dp),
+                        onClick = { nav.push(Route.MovieDetail(m)) })
                 }
             }
-        }
-        if (newSeries.isNotEmpty()) item {
-            Column {
-                SectionTitle("New series")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(newSeries, key = { it.id }) { s ->
-                        PosterCard(s.name, s.poster, s.year, modifier = Modifier.width(150.dp), onClick = { nav.push(Route.SeriesDetail(s)) })
-                    }
+            if (newSeries.isNotEmpty()) item(key = "series") {
+                PosterRow("New series", newSeries, { it.id }) { se ->
+                    PosterCard(se.name, se.poster, se.year, modifier = Modifier.width(150.dp), onClick = { nav.push(Route.SeriesDetail(se)) })
                 }
             }
+            if (favChannels.isEmpty() && recent.isEmpty() && lib.channels.isNotEmpty()) item(key = "tip") {
+                Text("Tip: hold OK on a channel to add it to your favourites. They show up here with what's on now.", style = T.small,
+                    modifier = Modifier.padding(horizontal = S.gutter))
+            }
         }
-        if (favChannels.isEmpty() && recent.isEmpty() && lib.channels.isNotEmpty()) item {
-            Text("Tip: hold OK on a channel to add it to your favourites. They show up here.", style = T.small)
+        // Nothing loaded yet, or a playlist with nothing in it: say so instead of an empty page.
+        if (nothing) Message(if (st.status.isNotBlank()) "Loading your playlist" else "Nothing here yet",
+            if (st.status.isNotBlank()) st.status else st.error ?: "Your playlist has no channels, movies or series.")
+    }
+}
+
+/** The big banner at the top: artwork across the right, the title, details and buttons on the left. */
+@Composable
+private fun HeroBanner(h: Hero, height: androidx.compose.ui.unit.Dp, nav: Nav) {
+    // The page's details (backdrop, plot, genre, length) load off the main thread; the playlist's own facts show meanwhile.
+    val details by produceState(Details(), h.movie, h.series) {
+        value = withContext(IO) {
+            val p = App.repo.provider ?: return@withContext Details()
+            try { if (h.movie != null) p.movieDetails(h.movie) else p.seriesDetails(h.series!!) } catch (e: Exception) { Details() }
+        }
+    }
+    val title = h.movie?.name ?: h.series?.name ?: ""
+    val art = details.backdrop ?: h.movie?.poster ?: h.series?.poster
+    val genre = details.genre?.split(',', '/')?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+    Box(Modifier.fillMaxWidth().height(height)) {
+        if (!art.isNullOrBlank()) AsyncImage(art, null, Modifier.align(Alignment.TopEnd).fillMaxWidth(0.72f).fillMaxHeight(),
+            contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
+        // Fades the artwork into the page on the left and at the bottom, so the text stays readable on any picture.
+        Box(Modifier.matchParentSize().background(Brush.horizontalGradient(0f to C.bg, 0.30f to C.bg, 0.62f to C.bg.copy(alpha = 0.55f), 1f to Color.Transparent)))
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to C.bg)))
+        Column(Modifier.align(Alignment.BottomStart).padding(start = S.gutter, bottom = 10.dp).fillMaxWidth(0.55f)) {
+            Text(listOfNotNull(h.label, genre).joinToString("  ·  ").uppercase(), style = T.eyebrow)
+            Spacer(Modifier.height(8.dp))
+            Text(title, style = T.display, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(10.dp))
+            Text(listOfNotNull(details.released?.take(4) ?: h.movie?.year ?: h.series?.year, if (h.movie != null) "Movie" else "Series", details.duration,
+                (details.rating ?: h.movie?.rating ?: h.series?.rating)?.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }).joinToString("  ·  "),
+                style = T.small, maxLines = 1)
+            val plot = details.plot ?: h.series?.plot
+            if (!plot.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(plot, style = T.body.copy(color = C.dim, lineHeight = 22.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            val r = h.resume
+            if (r != null && r.dur > 0) {
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Bar(r.pos.toFloat() / r.dur, Modifier.width(220.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(timeLeft(r.dur - r.pos), style = T.tiny.copy(color = C.dim))
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Pill(if (r != null) "Resume" else "Play", primary = true, icon = Icons.Rounded.PlayArrow, onClick = {
+                    when {
+                        r != null -> open(r, nav)
+                        h.movie != null -> play(PlayItem.Vod(App.repo.movieKey(h.movie), h.movie.name, movie = h.movie))
+                        else -> nav.push(Route.SeriesDetail(h.series!!))
+                    }
+                })
+                Pill("More info", icon = Icons.Rounded.Info, onClick = {
+                    if (h.movie != null) nav.push(Route.MovieDetail(h.movie)) else nav.push(Route.SeriesDetail(h.series!!))
+                })
+            }
+        }
+    }
+}
+
+/** Opens a Continue watching item: films play from where they stopped, series open on their page. */
+private fun open(r: Store.Resume, nav: Nav) {
+    val lib = App.repo.state.value.lib
+    val movie = lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }
+    val series = lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }
+    when {
+        movie != null -> play(PlayItem.Vod(r.key, movie.name, movie = movie))
+        series != null -> nav.push(Route.SeriesDetail(series))
+    }
+}
+
+/** "1h 25m left", "12m left". */
+private fun timeLeft(ms: Long): String {
+    val m = (ms / 60_000).coerceAtLeast(1)
+    return if (m >= 60) "${m / 60}h ${m % 60}m left" else "${m}m left"
+}
+
+private fun greeting(): String {
+    val h = Time.hourOfDay()
+    return when { h < 12 -> "Good morning"; h < 18 -> "Good afternoon"; else -> "Good evening" }
+}
+
+/** A titled row of posters that scrolls edge to edge, its first poster lined up with the page's text. */
+@Composable
+private fun <T> PosterRow(title: String, list: List<T>, key: (T) -> Any, card: @Composable (T) -> Unit) {
+    Column {
+        SectionTitle(title, Modifier.padding(horizontal = S.gutter))
+        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+            items(list, key = key) { card(it) }
         }
     }
 }
@@ -142,7 +249,7 @@ fun HomeScreen(nav: Nav) {
 /** A section title with a Clear all button beside it. */
 @Composable
 private fun ClearableTitle(text: String, onClear: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    Row(Modifier.padding(horizontal = S.gutter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionTitle(text)
         Pill("Clear all", onClick = onClear, modifier = Modifier.padding(bottom = 10.dp))
     }
@@ -156,8 +263,9 @@ private fun RecentRow(list: List<io.github.novatv.play.data.Channel>) {
     var ask by remember { mutableStateOf<io.github.novatv.play.data.Channel?>(null) }
     ask?.let { c -> RemoveDialog(c.name, "Recently watched", onRemove = { gone = gone + c.id }, onDismiss = { ask = null }) }
     Column {
-        ClearableTitle("Recently watched") { all = true }
-        LazyRow(Modifier.dust(all) { App.store.clearRecentChannels(); History.rev++ }, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        ClearableTitle("Recent channels") { all = true }
+        LazyRow(Modifier.dust(all) { App.store.clearRecentChannels(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
+            horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
             items(list.size, key = { list[it].id }) { i ->
                 val c = list[i]
                 ChannelCard(c, onClick = { playChannel(list, i) }, onLongClick = { ask = c },
@@ -168,10 +276,10 @@ private fun RecentRow(list: List<io.github.novatv.play.data.Channel>) {
 }
 
 @Composable
-private fun ChannelRow(title: String, list: List<io.github.novatv.play.data.Channel>, modifier: Modifier = Modifier) {
+private fun ChannelRow(title: String, note: String?, list: List<io.github.novatv.play.data.Channel>, modifier: Modifier = Modifier) {
     Column {
-        SectionTitle(title)
-        LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionTitle(title, Modifier.padding(horizontal = S.gutter), trailing = note)
+        LazyRow(modifier, contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
             items(list.size, key = { list[it].id }) { i -> ChannelCard(list[i], onClick = { playChannel(list, i) }) }
         }
     }
