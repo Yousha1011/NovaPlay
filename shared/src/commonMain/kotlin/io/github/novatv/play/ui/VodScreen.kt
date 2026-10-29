@@ -57,75 +57,168 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.novatv.play.platform.IO
 import io.github.novatv.play.toast
+import io.github.novatv.play.data.Tmdb
+import io.github.novatv.play.data.TmdbInfo
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
 private enum class Sort(val label: String) { ADDED("Recently added"), AZ("A–Z"), RATING("Top rated") }
 
-/** Movies or series: categories across the top and a poster grid. Hold OK on a poster to favourite it. */
+/**
+ * Movies or series. Overview: what you're watching, your list, recent and top-rated titles and a row per category.
+ * Browse: categories and sort orders over a poster grid. Hold OK on a poster to add it to My list.
+ */
 @Composable
 fun VodScreen(nav: Nav, series: Boolean) {
     val st by App.repo.state.collectAsState()
-    val lib = st.lib
+    var browse by remember(series) { mutableStateOf(false) }
     var cat by remember(series) { mutableStateOf("all") }
-    var sort by remember(series) { mutableStateOf(Sort.ADDED) }
-    var favVersion by remember { mutableIntStateOf(0) }
-    val cats = if (series) lib.seriesCategories else lib.movieCategories
-    // Looked up in the library's index (built when the playlist loaded); other sort orders are made once, off the main thread.
-    val items: List<Any>? by androidx.compose.runtime.produceState<List<Any>?>(null, st.index, series, cat, sort, favVersion) {
-        val idx = st.index ?: return@produceState
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            val byAdded: List<Any> = when (cat) {
-                "all" -> if (series) idx.seriesByAdded else idx.moviesByAdded
-                "fav" -> (if (series) idx.seriesByAdded else idx.moviesByAdded).let { l -> val f = App.store.favourites; l.filter { key(it) in f } }
-                else -> (if (series) idx.seriesByCat[cat] else idx.moviesByCat[cat]).orEmpty()
-            }
-            if (sort == Sort.ADDED || cat == "fav") byAdded.let { l ->
-                when (sort) { Sort.ADDED -> l; Sort.AZ -> l.sortedBy { name(it).lowercase() }
-                    Sort.RATING -> l.sortedByDescending { ((it as? Movie)?.rating ?: (it as? Series)?.rating)?.toFloatOrNull() ?: 0f } }
-            } else idx.sortedOnce<Any>("$series|$cat|$sort") {
-                when (sort) {
-                    Sort.AZ -> byAdded.sortedBy { name(it).lowercase() }
-                    else -> byAdded.sortedByDescending { ((it as? Movie)?.rating ?: (it as? Series)?.rating)?.toFloatOrNull() ?: 0f }
-                }
-            }
+    val count = if (series) st.lib.series.size else st.lib.movies.size
+    Column(Modifier.fillMaxSize().padding(top = 30.dp)) {
+        Header(if (series) "Series" else "Movies", if (st.index == null) "Loading…" else "$count titles", Modifier.padding(horizontal = S.gutter)) {
+            Pill("Overview", onClick = { browse = false }, selected = !browse)
+            Pill("Browse all", onClick = { browse = true }, selected = browse)
+        }
+        Box(Modifier.padding(horizontal = S.gutter)) { SourceStatus() }
+        when {
+            st.index == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner() }
+            count == 0 -> Message(if (series) "No series in this playlist" else "No movies in this playlist",
+                "Your provider's list has none. Other playlists can be added in Settings.")
+            browse -> Browse(nav, series, cat) { cat = it }
+            else -> Overview(nav, series) { c -> cat = c; browse = true }
         }
     }
-    Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 30.dp, end = 30.dp)) {
-        Header(if (series) "Series" else "Movies", if (items == null) "Loading…" else "${items!!.size} titles") {
-            for (s in Sort.entries) Pill(s.label, onClick = { sort = s }, selected = sort == s)
+}
+
+/** Rows: Continue watching, My list, Recently added, Top rated, then each category; "See all" opens it in Browse. */
+@Composable
+private fun Overview(nav: Nav, series: Boolean, openCategory: (String) -> Unit) {
+    val st by App.repo.state.collectAsState()
+    val idx = st.index ?: return
+    val rev = History.rev
+    val cats = if (series) st.lib.seriesCategories else st.lib.movieCategories
+    val keyPrefix = if (series) "ep:" else "mv:"
+    val resume = remember(rev, series) { App.store.continueWatching.filter { it.key.startsWith(keyPrefix) } }
+    var favVersion by remember { mutableIntStateOf(0) }
+    val rows: List<Pair<String, List<Any>>> by produceState(emptyList<Pair<String, List<Any>>>(), idx, series, favVersion) {
+        value = withContext(Dispatchers.Default) {
+            val all: List<Any> = if (series) idx.seriesByAdded else idx.moviesByAdded
+            val fav = App.store.favourites
+            val byCat: Map<String, List<Any>> = if (series) idx.seriesByCat else idx.moviesByCat
+            buildList {
+                add("My list" to all.filter { key(it) in fav }.take(30))
+                add("Recently added" to all.take(30))
+                add("Top rated" to idx.sortedOnce<Any>("$series|all|${Sort.RATING}") { all.sortedByDescending { rating(it) } }.take(30))
+                // The biggest categories first: they are usually the main ones (a provider lists hundreds of small ones).
+                for (c in cats.sortedByDescending { byCat[it.id]?.size ?: 0 }.take(12)) byCat[c.id]?.let { add("${c.id}|${c.name}" to it.take(30)) }
+            }.filter { it.second.isNotEmpty() }
         }
-        SourceStatus()
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 18.dp)) {
-            item { Pill("All", onClick = { cat = "all" }, selected = cat == "all") }
-            item { Pill("Favourites", onClick = { cat = "fav" }, selected = cat == "fav") }
-            items(cats, key = { it.id }) { c -> Pill(c.name, onClick = { cat = c.id }, selected = cat == c.id) }
-        }
-        val list = items
-        if (list == null) { androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner() }; return@Column }
-        if (list.isEmpty()) { Message(if (cat == "fav") "No favourites yet" else "Nothing here", if (cat == "fav") "Hold OK on a poster to add it." else null); return@Column }
-        LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(bottom = 60.dp, top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            items(list, key = { key(it) }) { it ->
-                val fav = App.store.isFavourite(key(it))
-                val toggle = {
-                    val on = App.store.toggleFavourite(key(it)); favVersion++
-                    toast(if (on) "Added to favourites" else "Removed from favourites")
+    }
+    LazyColumn(contentPadding = PaddingValues(bottom = 60.dp, top = 6.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
+        if (resume.isNotEmpty()) item(key = "continue") {
+            Column {
+                SectionTitle("Continue watching", Modifier.padding(horizontal = S.gutter))
+                LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                    items(resume, key = { it.key }) { r ->
+                        PosterCard(r.title, r.poster, if (r.dur > 0) "${((r.dur - r.pos) / 60_000).coerceAtLeast(1)}m left" else null,
+                            modifier = Modifier.width(150.dp), progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onClick = {
+                                val lib = App.repo.state.value.lib
+                                lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }?.let { play(PlayItem.Vod(r.key, it.name, movie = it)) }
+                                    ?: lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }
+                                        ?.let { nav.push(Route.SeriesDetail(it)) }
+                            })
+                    }
                 }
-                when (it) {
-                    is Movie -> PosterCard(it.name, it.poster, listOfNotNull(if (fav) "★" else null, it.year, it.rating?.let { r -> "$r/10" }).joinToString("  "),
-                        onClick = { nav.push(Route.MovieDetail(it)) }, onLongClick = toggle,
-                        progress = App.store.progress(App.repo.movieKey(it))?.let { p -> p.first.toFloat() / p.second.coerceAtLeast(1) })
-                    is Series -> PosterCard(it.name, it.poster, listOfNotNull(if (fav) "★" else null, it.year, it.rating?.let { r -> "$r/10" }).joinToString("  "),
-                        onClick = { nav.push(Route.SeriesDetail(it)) }, onLongClick = toggle)
+            }
+        }
+        items(rows, key = { it.first }) { (k, list) ->
+            val catId = k.substringBefore('|', "")
+            Column {
+                Row(Modifier.padding(horizontal = S.gutter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    SectionTitle(k.substringAfter('|'))
+                    if (catId.isNotEmpty()) Pill("See all", onClick = { openCategory(catId) }, modifier = Modifier.padding(bottom = 10.dp))
+                }
+                LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                    items(list, key = { key(it) }) { VodPoster(nav, it) { favVersion++ } }
                 }
             }
         }
     }
 }
 
+/** Categories and sort orders over a grid that fits as many 150-unit posters as the screen holds. */
+@Composable
+private fun Browse(nav: Nav, series: Boolean, cat: String, onCat: (String) -> Unit) {
+    val st by App.repo.state.collectAsState()
+    var sort by remember(series) { mutableStateOf(Sort.ADDED) }
+    var favVersion by remember { mutableIntStateOf(0) }
+    val cats = if (series) st.lib.seriesCategories else st.lib.movieCategories
+    // Looked up in the library's index (built when the playlist loaded); other sort orders are made once, off the main thread.
+    val items: List<Any>? by produceState<List<Any>?>(null, st.index, series, cat, sort, favVersion) {
+        val idx = st.index ?: return@produceState
+        value = withContext(Dispatchers.Default) {
+            val byAdded: List<Any> = when (cat) {
+                "all" -> if (series) idx.seriesByAdded else idx.moviesByAdded
+                "fav" -> (if (series) idx.seriesByAdded else idx.moviesByAdded).let { l -> val f = App.store.favourites; l.filter { key(it) in f } }
+                else -> (if (series) idx.seriesByCat[cat] else idx.moviesByCat[cat]).orEmpty()
+            }
+            if (sort == Sort.ADDED || cat == "fav") byAdded.let { l ->
+                when (sort) { Sort.ADDED -> l; Sort.AZ -> l.sortedBy { name(it).lowercase() }; Sort.RATING -> l.sortedByDescending { rating(it) } }
+            } else idx.sortedOnce<Any>("$series|$cat|$sort") {
+                when (sort) { Sort.AZ -> byAdded.sortedBy { name(it).lowercase() }; else -> byAdded.sortedByDescending { rating(it) } }
+            }
+        }
+    }
+    Column {
+        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+            items(Sort.entries) { s -> Pill(s.label, onClick = { sort = s }, selected = sort == s) }
+        }
+        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 16.dp)) {
+            item { Pill("All", onClick = { onCat("all") }, selected = cat == "all") }
+            item { Pill("My list", onClick = { onCat("fav") }, selected = cat == "fav") }
+            items(cats, key = { it.id }) { c -> Pill(c.name, onClick = { onCat(c.id) }, selected = cat == c.id) }
+        }
+        val list = items
+        when {
+            list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner() }
+            list.isEmpty() -> Message(if (cat == "fav") "Your list is empty" else "Nothing in this category",
+                if (cat == "fav") "Hold OK on a poster, or use My list on its page, to add it." else null)
+            else -> LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(start = S.gutter, end = S.gutter, bottom = 60.dp, top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                items(list, key = { key(it) }) { VodPoster(nav, it, Modifier) { favVersion++ } }
+            }
+        }
+    }
+}
+
+/** A movie or series poster: title, year and rating underneath, a ★ when it's in My list. Hold OK toggles My list. */
+@Composable
+private fun VodPoster(nav: Nav, it: Any, modifier: Modifier = Modifier.width(150.dp), onFav: () -> Unit) {
+    val k = key(it)
+    val fav = App.store.isFavourite(k)
+    val toggle = { val on = App.store.toggleFavourite(k); onFav(); toast(if (on) "Added to My list" else "Removed from My list") }
+    val r = rating(it).takeIf { it > 0f }
+    val sub = listOfNotNull(if (fav) "★ My list" else null, (it as? Movie)?.year ?: (it as? Series)?.year, r?.let { v -> "★ ${fmt(v)}" }).joinToString("  ·  ")
+    when (it) {
+        is Movie -> PosterCard(it.name, it.poster, sub, onClick = { nav.push(Route.MovieDetail(it)) }, onLongClick = toggle, modifier = modifier,
+            progress = App.store.progress(k)?.let { p -> p.first.toFloat() / p.second.coerceAtLeast(1) })
+        is Series -> PosterCard(it.name, it.poster, sub, onClick = { nav.push(Route.SeriesDetail(it)) }, onLongClick = toggle, modifier = modifier)
+    }
+}
+
 private fun key(it: Any) = if (it is Movie) App.repo.movieKey(it) else App.repo.seriesKey(it as Series)
 private fun name(it: Any) = (it as? Movie)?.name ?: (it as Series).name
+private fun rating(it: Any) = ((it as? Movie)?.rating ?: (it as? Series)?.rating)?.toFloatOrNull() ?: 0f
+private fun fmt(v: Float) = ((v * 10).toInt() / 10f).toString()
 
-/** A movie's or a series' page: artwork, details, play or resume, and for series the seasons and episodes. */
+/**
+ * A movie's or a series' page: the artwork across the top right, title and details, Resume / Play from beginning /
+ * My list, then cast, the seasons and episodes, and more from the same category. Facts come from the provider, with
+ * TMDB's cast photos when a TMDB key is set; nothing is filled in when neither knows.
+ */
 @Composable
 fun DetailScreen(nav: Nav, movie: Movie? = null, series: Series? = null) {
     val title = movie?.name ?: series!!.name
@@ -136,67 +229,128 @@ fun DetailScreen(nav: Nav, movie: Movie? = null, series: Series? = null) {
             try { if (movie != null) p.movieDetails(movie) else p.seriesDetails(series!!) } catch (e: Exception) { Details() }
         }
     }
+    val tmdb by produceState<TmdbInfo?>(null, title) { value = withContext(IO) { Tmdb.lookup(title, movie?.year ?: series?.year, series != null) } }
     var favVersion by remember { mutableIntStateOf(0) }
     val favKey = if (movie != null) App.repo.movieKey(movie) else App.repo.seriesKey(series!!)
     val fav = remember(favVersion) { App.store.isFavourite(favKey) }
     var season by remember { mutableStateOf<Int?>(null) }
-    val playFocus = remember { FocusRequester() }
+    val firstFocus = remember { FocusRequester() }
+    val st by App.repo.state.collectAsState()
+    val similar = remember(st.index, movie, series) {
+        val idx = st.index
+        when {
+            idx == null -> emptyList()
+            movie != null -> idx.moviesByCat[movie.categoryId].orEmpty().filter { it.id != movie.id }.take(20)
+            else -> idx.seriesByCat[series!!.categoryId].orEmpty().filter { it.id != series.id }.take(20)
+        }
+    }
+    val cast: List<TmdbInfo.Person> = tmdb?.cast?.takeIf { it.isNotEmpty() }
+        ?: details.cast?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.take(12)?.map { TmdbInfo.Person(it, "", null) }.orEmpty()
+    val genres = details.genre ?: tmdb?.genres?.takeIf { it.isNotEmpty() }?.joinToString(", ")
 
-    Box(Modifier.fillMaxSize()) {
-        val art = details.backdrop ?: poster
-        if (art != null) AsyncImage(art, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alpha = 0.35f)
-        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(C.bg, C.bg.copy(alpha = 0.85f), Color.Transparent))))
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, C.bg), startY = 300f)))
-        Row(Modifier.fillMaxSize().padding(start = 60.dp, top = 50.dp, end = 50.dp)) {
-            Column(Modifier.width(240.dp)) {
-                PosterCard(title, poster, null, onClick = {}, modifier = Modifier.width(220.dp))
-            }
-            Spacer(Modifier.width(40.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = T.hero, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(8.dp))
-                Text(listOfNotNull(details.released?.take(4) ?: movie?.year ?: series?.year, details.genre, details.duration,
-                    (details.rating ?: movie?.rating ?: series?.rating)?.let { "★ $it" }).joinToString("   ·   "), style = T.small.copy(color = C.dim))
-                Spacer(Modifier.height(14.dp))
-                Text(details.plot ?: series?.plot ?: "", style = T.body.copy(color = C.dim), maxLines = 5, overflow = TextOverflow.Ellipsis)
-                details.cast?.let { Spacer(Modifier.height(10.dp)); Text("Cast: $it", style = T.small, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                details.director?.let { Text("Director: $it", style = T.small, maxLines = 1) }
-                Spacer(Modifier.height(22.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (movie != null) {
-                        val key = App.repo.movieKey(movie)
-                        val prog = App.store.progress(key)
-                        Pill(if (prog != null) "Resume ${duration(prog.first)}" else "Play", onClick = { play(PlayItem.Vod(key, movie.name, movie = movie)) },
-                            icon = Icons.Rounded.PlayArrow, primary = true, modifier = Modifier.focusRequester(playFocus))
-                        if (prog != null) Pill("Start over", onClick = { App.store.saveProgress(key, movie.name, movie.poster, 0, 0); play(PlayItem.Vod(key, movie.name, movie = movie)) },
-                            icon = Icons.Rounded.Replay)
-                    } else {
-                        val next = nextEpisode(series!!, details)
-                        if (next != null) Pill(next.second, onClick = { playEpisode(series, details, next.first) },
-                            icon = Icons.Rounded.PlayArrow, primary = true, modifier = Modifier.focusRequester(playFocus))
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(C.bg)) {
+        val heroHeight = (maxHeight * 0.66f).coerceAtLeast(340.dp)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
+            item(key = "hero") {
+                Box(Modifier.fillMaxWidth().height(heroHeight)) {
+                    val art = details.backdrop ?: tmdb?.backdrop ?: poster
+                    if (art != null) AsyncImage(art, null, Modifier.align(Alignment.TopEnd).fillMaxWidth(0.70f).fillMaxHeight(),
+                        contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
+                    Box(Modifier.matchParentSize().background(Brush.horizontalGradient(0f to C.bg, 0.32f to C.bg, 0.65f to C.bg.copy(alpha = 0.6f), 1f to Color.Transparent)))
+                    Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to C.bg)))
+                    Column(Modifier.align(Alignment.BottomStart).padding(start = S.gutter + 20.dp, bottom = 4.dp).fillMaxWidth(0.6f)) {
+                        Text(listOfNotNull(if (movie != null) "Movie" else "Series", genres?.split(',')?.firstOrNull()?.trim()).joinToString(" · ").uppercase(), style = T.eyebrow)
+                        Spacer(Modifier.height(8.dp))
+                        Text(title, style = T.display, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(10.dp))
+                        val score = (details.rating ?: movie?.rating ?: series?.rating)?.toFloatOrNull()?.takeIf { it > 0f } ?: tmdb?.score?.toFloat()?.takeIf { it > 0f }
+                        Text(listOfNotNull(details.released?.take(4) ?: movie?.year ?: series?.year, details.duration ?: tmdb?.runtimeMin?.let { "${it / 60}h ${it % 60}m" },
+                            score?.let { "★ ${fmt(it)}" }, genres).joinToString("   ·   "), style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val plot = details.plot ?: series?.plot ?: tmdb?.overview
+                        if (!plot.isNullOrBlank()) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(plot, style = T.body.copy(color = C.dim, lineHeight = 23.sp), maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        }
+                        details.director?.takeIf { it.isNotBlank() }?.let {
+                            Spacer(Modifier.height(8.dp)); Text("Director: $it", style = T.small.copy(color = C.faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Spacer(Modifier.height(20.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            var first = true
+                            fun Modifier.firstOne(): Modifier = if (first) { first = false; focusRequester(firstFocus) } else this
+                            if (movie != null) {
+                                val key = App.repo.movieKey(movie)
+                                val prog = App.store.progress(key)
+                                Pill(if (prog != null) "Resume from ${duration(prog.first)}" else "Play", onClick = { play(PlayItem.Vod(key, movie.name, movie = movie)) },
+                                    icon = Icons.Rounded.PlayArrow, primary = true, modifier = Modifier.firstOne())
+                                if (prog != null) Pill("Play from beginning", onClick = {
+                                    App.store.saveProgress(key, movie.name, movie.poster, 0, 0); play(PlayItem.Vod(key, movie.name, movie = movie))
+                                }, icon = Icons.Rounded.Replay)
+                            } else {
+                                val next = nextEpisode(series!!, details)
+                                if (next != null) Pill(next.second, onClick = { playEpisode(series, details, next.first) },
+                                    icon = Icons.Rounded.PlayArrow, primary = true, modifier = Modifier.firstOne())
+                            }
+                            Pill("My list", onClick = { App.store.toggleFavourite(favKey); favVersion++ },
+                                icon = if (fav) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, selected = fav, modifier = Modifier.firstOne())
+                        }
                     }
-                    Pill(if (fav) "Favourite" else "Add to favourites", onClick = { App.store.toggleFavourite(favKey); favVersion++ },
-                        icon = if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, selected = fav)
-                    Pill("Back", onClick = { nav.pop() })
                 }
-                if (series != null) {
-                    Spacer(Modifier.height(24.dp))
+            }
+            if (cast.isNotEmpty()) item(key = "cast") {
+                Column {
+                    Text("CAST", style = T.eyebrow.copy(color = C.dim), modifier = Modifier.padding(start = S.gutter + 20.dp, bottom = 10.dp))
+                    LazyRow(contentPadding = PaddingValues(horizontal = S.gutter + 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(cast) { CastCard(it) }
+                    }
+                }
+            }
+            if (series != null) item(key = "episodes") {
+                Column(Modifier.padding(horizontal = S.gutter + 20.dp)) {
                     val seasons = details.seasons
-                    if (seasons.isEmpty()) Spinner(size = 28.dp) else {
-                        val cur = season ?: seasons.keys.first()
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 14.dp)) {
-                            items(seasons.keys.toList()) { s -> Pill("Season $s", onClick = { season = s }, selected = s == cur) }
+                    when {
+                        seasons.isNotEmpty() -> {
+                            val cur = season ?: nextEpisode(series, details)?.first?.season ?: seasons.keys.first()
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 14.dp)) {
+                                items(seasons.keys.toList()) { s -> Pill("Season $s", onClick = { season = s }, selected = s == cur) }
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                for (e in seasons[cur].orEmpty()) androidx.compose.runtime.key(e.id) { EpisodeRow(series, e) { playEpisode(series, details, e) } }
+                            }
                         }
-                        val eps = seasons[cur].orEmpty()
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
-                            items(eps, key = { it.id }) { e -> EpisodeRow(series, e) { playEpisode(series, details, e) } }
+                        details == Details() -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spinner(size = 22.dp); Spacer(Modifier.width(10.dp)); Text("Loading episodes…", style = T.small)
                         }
+                        else -> Text("Your provider lists no episodes for this series.", style = T.small)
+                    }
+                }
+            }
+            if (similar.isNotEmpty()) item(key = "similar") {
+                Column {
+                    Text("MORE LIKE THIS", style = T.eyebrow.copy(color = C.dim), modifier = Modifier.padding(start = S.gutter + 20.dp, bottom = 10.dp))
+                    LazyRow(contentPadding = PaddingValues(horizontal = S.gutter + 20.dp), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                        items(similar, key = { key(it) }) { VodPoster(nav, it) {} }
                     }
                 }
             }
         }
     }
-    AutoFocus(playFocus, details)
+    AutoFocus(firstFocus)
+}
+
+/** A cast member: their photo when TMDB has one, otherwise initials, and the name (and role) under it. */
+@Composable
+private fun CastCard(p: TmdbInfo.Person) {
+    Tile({}, Modifier.width(170.dp).height(if (p.photo != null) 200.dp else 100.dp), shape = RoundedCornerShape(10.dp)) {
+        Column(Modifier.fillMaxSize()) {
+            if (p.photo != null) AsyncImage(p.photo, null, Modifier.fillMaxWidth().height(110.dp), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
+            else Text(initials(p.name), style = T.h2.copy(color = C.dim), modifier = Modifier.padding(start = 16.dp, top = 14.dp))
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(p.name, style = T.small.copy(color = C.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (p.role.isNotBlank()) Text(p.role, style = T.tiny, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }
 
 @Composable
