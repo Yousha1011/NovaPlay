@@ -83,6 +83,8 @@ import io.github.novatv.play.ui.Pill
 import io.github.novatv.play.ui.S
 import io.github.novatv.play.ui.enterAt
 import io.github.novatv.play.ui.rememberFocus
+import io.github.novatv.play.ui.topExit
+import io.github.novatv.play.ui.returnFromTop
 import io.github.novatv.play.ui.clock
 import io.github.novatv.play.ui.now
 import androidx.compose.ui.text.font.FontWeight
@@ -137,6 +139,8 @@ class Nav {
     var tab by mutableStateOf(Tab.HOME)
     val stack = mutableStateListOf<Route>()
     val railFocus = FocusRequester()
+    /** Up from a page's top control went to the rail; Down there comes back (TV only). */
+    val topExit = io.github.novatv.play.ui.TopExit()
     /** Each tab's page: Right from the menu goes to its first option, top left. */
     val pageFocus = HashMap<Tab, FocusRequester>()
     fun page(t: Tab) = pageFocus.getOrPut(t) { FocusRequester() }
@@ -185,6 +189,7 @@ private fun RootBody() {
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
     var railFocused by remember { mutableStateOf(false) }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
     BackHandler(enabled = nav.back(railFocused) != Back.EXIT) {
         when (nav.back(railFocused)) {
@@ -219,7 +224,7 @@ private fun RootBody() {
                     // Each page is a focus group that remembers where focus was: Right from the rail, or Back from a
                     // detail page, lands on the item last used instead of the page's first one. Hidden pages keep the
                     // same group (only their placement changes), so they remember it while another tab is open too.
-                    Box(Modifier.rememberFocus(nav.page(t))
+                    Box(Modifier.topExit(App.device == Device.TV, focusManager, nav.railFocus, nav.topExit).rememberFocus(nav.page(t))
                         .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
                         when (t) {
                             Tab.HOME -> HomeScreen(nav)
@@ -277,6 +282,7 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
                     else try { nav.page(nav.tab).requestFocus(); true } catch (e: Exception) { false }
                 }
                 // Focus coming in (Left or Back from a page) lands on the open tab's icon.
+                .returnFromTop(nav.topExit, nav.page(nav.tab))
                 .enterAt(nav.railFocus)
                 .padding(vertical = 22.dp, horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
