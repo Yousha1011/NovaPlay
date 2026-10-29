@@ -16,6 +16,16 @@ object App {
         private set
     lateinit var host: Host
         private set
+    /** Live TV's preview window. Its stream address comes from the playlist's provider, as the full-screen player's does. */
+    val preview: io.github.novatv.play.data.PreviewController by lazy {
+        io.github.novatv.play.data.PreviewController(
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main),
+            host.previewEngine,
+            resolve = { c -> kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { repo.provider?.liveUrl(c) } },
+            enabled = { store.livePreview },
+        )
+    }
+
     /** What the player plays next (lists of channels are too big to pass around). */
     @Volatile var pending: PlayItem? = null
 
@@ -39,6 +49,8 @@ object App {
 
 /** Opens the player full screen. */
 fun play(item: PlayItem) {
+    // The preview's player is let go before the full-screen one starts, so the two never compete for a decoder.
+    if (App.host.previewEngine != null) App.preview.stop()
     App.pending = item
     if (item is PlayItem.Vod) {
         item.movie?.let { App.store.addWatched(App.repo.movieKey(it)) }

@@ -21,9 +21,11 @@ class NovaApp : Application() {
         // TVs use the big-screen look (graphite and cyan); the phone draws its own screens with its themes.
         io.github.novatv.play.ui.Look.modern = false
         val recorder = AndroidRecorder(this)
+        val preview = if (ExoPreviewEngine.supported(this)) ExoPreviewEngine(this) else null
         App.start(object : Host {
             override val device = if (PHONE) Device.PHONE else Device.TV
             override val recorder = recorder
+            override val previewEngine = preview
             override fun play(item: PlayItem) {
                 startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }

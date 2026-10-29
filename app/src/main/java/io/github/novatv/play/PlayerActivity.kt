@@ -161,12 +161,7 @@ class PlayerActivity : ComponentActivity() {
             override fun onPlayerError(e: PlaybackException) {
                 // Live streams drop now and then: one quiet retry before showing the error.
                 if (item is PlayItem.Live && !retried) { retried = true; lifecycleScope.launch { delay(1500); startCurrent() }; return }
-                error = when (e.errorCode) {
-                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The server refused this stream"
-                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Could not reach the server"
-                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED, PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED -> "This stream's format is not supported"
-                    else -> "Playback failed (${e.errorCodeName})"
-                }
+                error = playbackMessage(e)
             }
         })
         (item as? PlayItem.Live)?.let { channelIndex = it.channelIndex }
@@ -198,15 +193,6 @@ class PlayerActivity : ComponentActivity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(data))
             .build()
     }
-
-    private fun mediaItem(url: String) = MediaItem.Builder().setUri(Uri.parse(url)).apply {
-        val path = url.substringBefore('?').lowercase()
-        when {
-            path.endsWith(".m3u8") || path.contains("/hls/") -> setMimeType(MimeTypes.APPLICATION_M3U8)
-            path.endsWith(".mpd") -> setMimeType(MimeTypes.APPLICATION_MPD)
-            path.endsWith(".ts") -> setMimeType(MimeTypes.VIDEO_MP2T)
-        }
-    }.build()
 
     // ---------------------------------------------------------------- multi-view
 

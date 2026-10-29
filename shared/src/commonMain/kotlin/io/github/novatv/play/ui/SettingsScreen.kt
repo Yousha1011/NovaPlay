@@ -95,6 +95,13 @@ fun SettingsScreen(nav: Nav) {
                 Pill("HLS (.m3u8)", onClick = { App.store.xtreamHls = true; v++ }, selected = App.store.xtreamHls)
             }
         }
+        if (App.host.previewEngine != null) item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Live TV preview", style = T.body, modifier = Modifier.width(260.dp))
+                Pill("On (muted)", onClick = { App.store.livePreview = true; v++ }, selected = App.store.livePreview)
+                Pill("Off", onClick = { App.store.livePreview = false; App.preview.stop(); v++ }, selected = !App.store.livePreview)
+            }
+        }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Buffer before playing", style = T.body, modifier = Modifier.width(260.dp))

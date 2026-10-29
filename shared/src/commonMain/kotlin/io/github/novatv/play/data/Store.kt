@@ -187,6 +187,11 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = arr("recordings")
         set(v) = put("recordings", v)
 
+    /** Live TV previews the highlighted channel (on devices that can). */
+    var livePreview: Boolean
+        get() = sp.getBoolean("livePreview", true)
+        set(v) { sp.putBoolean("livePreview", v) }
+
     var bufferMs: Int
         get() = sp.getInt("bufferMs", 6000)
         set(v) { sp.putInt("bufferMs", v) }

@@ -48,6 +48,8 @@ interface Host {
     fun restoreBackup(): String? = null
     /** Records live TV, where the platform can (Android); null hides recording. */
     val recorder: io.github.novatv.play.data.Recorder? get() = null
+    /** A small muted player for Live TV previews, where the device can afford one (Android TV); null shows a still panel. */
+    val previewEngine: io.github.novatv.play.data.PreviewEngine? get() = null
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

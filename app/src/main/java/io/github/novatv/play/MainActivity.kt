@@ -16,6 +16,12 @@ class MainActivity : ComponentActivity() {
             setContent { PhoneRoot() }
         } else setContent { NovaTheme { Root() } }
     }
+
+    /** The app went to the background (Home, another app, the screen off): the Live TV preview lets its player go. */
+    override fun onStop() {
+        super.onStop()
+        if (App.host.previewEngine != null) App.preview.stop()
+    }
 }
 
 /** True in the phone app, false in the Fire TV app. */

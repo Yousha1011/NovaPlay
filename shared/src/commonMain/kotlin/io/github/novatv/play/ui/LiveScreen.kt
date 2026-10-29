@@ -40,6 +40,7 @@ import io.github.novatv.play.data.Library
 import io.github.novatv.play.data.LibIndex
 import io.github.novatv.play.toast
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.unit.sp
 
 /** The categories the Live and Guide screens offer: everything, favourites, recent, then the source's own. */
@@ -82,6 +83,14 @@ fun LiveScreen(nav: Nav) {
     val group = groups.firstOrNull { it.id == sel } ?: groups.first()
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
     val first = remember { FocusRequester() }
+    // The preview follows the highlighted row, and stops when Live TV is hidden (other tabs stay built), the playlist
+    // changes, or the screen goes away.
+    androidx.compose.runtime.LaunchedEffect(focusedChannel, nav.tab) {
+        val c = focusedChannel
+        if (nav.tab == io.github.novatv.play.Tab.LIVE && c != null) App.preview.select(c) else App.preview.stop()
+    }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null; App.preview.stop() }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop() } }
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
         Header("Live TV", "${group.name} · ${group.channels.size} channels")
@@ -145,9 +154,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
         val nn = nowNext(c)
         val p = nn.firstOrNull()
         val t = now()
-        Box(Modifier.fillMaxWidth().height(170.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C)), contentAlignment = Alignment.Center) {
-            Logo(c.logo, c.name, Modifier.size(150.dp, 90.dp))
-        }
+        PreviewBox(c, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.panel)) {
             Box(Modifier.width(3.dp).height(if (p != null) 190.dp else 70.dp).background(C.accent))
@@ -167,6 +174,37 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
         }
         Spacer(Modifier.height(14.dp))
         Text("OK  Play      Hold OK  Favourite", style = T.tiny)
+    }
+}
+
+/**
+ * The panel's picture: the muted preview of [c] while it plays, otherwise its logo with what is happening
+ * (waiting, loading, couldn't play, or "Press OK to watch" where there is no preview).
+ */
+@Composable
+private fun PreviewBox(c: Channel, modifier: Modifier) {
+    val ps by App.preview.state.collectAsState()
+    val mine = when (val s = ps) {
+        is io.github.novatv.play.data.PreviewController.State.Waiting -> s.channel.id == c.id
+        is io.github.novatv.play.data.PreviewController.State.Loading -> s.channel.id == c.id
+        is io.github.novatv.play.data.PreviewController.State.Playing -> s.channel.id == c.id
+        is io.github.novatv.play.data.PreviewController.State.Failed -> s.channel.id == c.id
+        else -> false
+    }
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C)), contentAlignment = Alignment.Center) {
+        val playing = mine && ps is io.github.novatv.play.data.PreviewController.State.Playing
+        // The video surface stays in place while this channel loads, so the first picture appears without a jump.
+        if (mine && (playing || ps is io.github.novatv.play.data.PreviewController.State.Loading)) App.preview.Video(Modifier.fillMaxSize())
+        if (!playing) Logo(c.logo, c.name, Modifier.size(150.dp, 90.dp))
+        val note = when {
+            playing -> "Muted preview · OK to watch"
+            !mine -> "Press OK to watch"
+            ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message
+            else -> null
+        }
+        if (mine && !playing && ps !is io.github.novatv.play.data.PreviewController.State.Failed) Spinner(Modifier.align(Alignment.TopEnd).padding(10.dp), 20.dp)
+        if (note != null) Box(Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xB3000000))
+            .padding(horizontal = 8.dp, vertical = 3.dp)) { Text(note, style = T.tiny.copy(color = C.dim), maxLines = 1) }
     }
 }
 
