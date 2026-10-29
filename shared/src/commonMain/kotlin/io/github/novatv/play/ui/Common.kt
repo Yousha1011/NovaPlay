@@ -111,29 +111,60 @@ fun LiveMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** A match card: competition, sides with logos and scores, the time or live minute. */
+/** Each sport's marker colour: the stripe on its cards and filter chips. Muted, so cyan stays the accent. */
+fun sportColor(s: io.github.novatv.play.sports.Sport): Color = when (s) {
+    io.github.novatv.play.sports.Sport.FOOTBALL -> Color(0xFF4CC38A)
+    io.github.novatv.play.sports.Sport.CRICKET -> Color(0xFF7FB4FF)
+    io.github.novatv.play.sports.Sport.BASKETBALL -> Color(0xFFF0954A)
+    io.github.novatv.play.sports.Sport.AMERICAN_FOOTBALL -> Color(0xFFE8B04A)
+    io.github.novatv.play.sports.Sport.HOCKEY -> Color(0xFF8FD3F4)
+    io.github.novatv.play.sports.Sport.BASEBALL -> Color(0xFFE5747A)
+    io.github.novatv.play.sports.Sport.TENNIS -> Color(0xFFD8E36A)
+    io.github.novatv.play.sports.Sport.MOTORSPORT -> Color(0xFFE8D25A)
+    io.github.novatv.play.sports.Sport.MMA -> Color(0xFFC08AF0)
+    io.github.novatv.play.sports.Sport.GOLF -> Color(0xFF6FD6B0)
+    io.github.novatv.play.sports.Sport.RUGBY -> Color(0xFFB79A7A)
+}
+
+/**
+ * A match card: the sport's stripe, the competition, sides with logos and scores, the time or live minute, and
+ * "On your channels" when your playlist's guide or channel names carry it (looked up in the background, cached).
+ */
 @Composable
 fun EventCard(e: SportEvent, onClick: () -> Unit, modifier: Modifier = Modifier, fill: Boolean = false, favourite: Boolean = false) {
-    Tile(onClick, modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier.width(330.dp)).height(150.dp)) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(listOfNotNull(e.league.name, e.subtitle?.takeIf { it != e.league.name }).joinToString(" · "), style = T.tiny,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                if (favourite) { Text("★", style = T.small.copy(color = C.gold)); Spacer(Modifier.width(8.dp)) }
-                when (e.state) {
-                    State.LIVE -> Badge(if (e.detail.isBlank() || e.detail.equals("live", true)) "LIVE" else "LIVE · ${e.detail}")
-                    State.POST -> Badge(e.detail.ifBlank { "Final" }, C.panelHi)
-                    State.PRE -> Text("${dayLabel(e.start)} ${clock(e.start)}", style = T.small.copy(color = C.accent))
+    val epg = App.repo.state.collectAsState().value.epgVersion
+    val onChannels by produceState(false, e.id, epg) { value = withContext(IO) { App.repo.matcher().airings(e).isNotEmpty() } }
+    Tile(onClick, modifier.then(if (fill) Modifier.fillMaxWidth() else Modifier.width(330.dp)).height(156.dp), shape = RoundedCornerShape(10.dp)) {
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.width(4.dp).fillMaxSize().background(sportColor(e.league.sport)))
+            Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0x14FFFFFF)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                        Text(e.league.name, style = T.tiny.copy(color = sportColor(e.league.sport), fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), maxLines = 1)
+                    }
+                    if (favourite) { Spacer(Modifier.width(8.dp)); Text("★", style = T.small.copy(color = C.accent)) }
+                    Spacer(Modifier.weight(1f))
+                    when (e.state) {
+                        State.LIVE -> LiveMark()
+                        State.POST -> Text(e.detail.ifBlank { "Final" }, style = T.tiny.copy(color = C.dim))
+                        State.PRE -> Text("${dayLabel(e.start)} ${clock(e.start)}", style = T.small.copy(color = C.accent))
+                    }
                 }
-            }
-            Spacer(Modifier.height(10.dp))
-            if (e.home != null && e.away != null) {
-                SideRow(e.home.name, e.home.logo, e.home.score, e.state)
-                Spacer(Modifier.height(8.dp))
-                SideRow(e.away.name, e.away.logo, e.away.score, e.state)
-            } else {
-                Text(e.title, style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                e.venue?.let { Text(it, style = T.small, maxLines = 1) }
+                Spacer(Modifier.height(10.dp))
+                if (e.home != null && e.away != null) {
+                    SideRow(e.home.name, e.home.logo, e.home.score, e.state)
+                    Spacer(Modifier.height(6.dp))
+                    SideRow(e.away.name, e.away.logo, e.away.score, e.state)
+                } else {
+                    Text(e.title, style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    e.venue?.let { Text(it, style = T.small, maxLines = 1) }
+                }
+                Spacer(Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(listOfNotNull(e.subtitle?.takeIf { it != e.league.name }, if (e.state == State.LIVE) e.detail.takeIf { !it.equals("live", true) } else null,
+                        e.broadcasts.firstOrNull()).joinToString(" · "), style = T.tiny, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    if (onChannels) Text("On your channels", style = T.tiny.copy(color = C.accent, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                }
             }
         }
     }

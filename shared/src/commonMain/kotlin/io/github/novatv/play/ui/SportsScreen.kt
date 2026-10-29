@@ -103,18 +103,17 @@ fun SportsScreen(nav: Nav) {
     val columns = if (maxWidth < NARROW) 1 else 2
     Row(Modifier.fillMaxSize().padding(start = 28.dp, top = 30.dp, end = 30.dp)) {
         Column(Modifier.weight(1f)) {
-            Header("Sports", if (sports.loading && sports.events.isEmpty()) "Loading matches…"
+            Header("Sports Hub", if (sports.loading && sports.events.isEmpty()) "Loading matches…"
                 else "${sports.events.count { it.state == State.LIVE }} live · updated ${if (sports.updatedAt > 0) clock(sports.updatedAt) else "–"}") {
                 Pill("Choose sports", onClick = { nav.push(Route.Leagues) }, icon = Icons.Rounded.Tune)
                 Pill("Refresh", onClick = { App.repo.refreshSports(0) }, icon = Icons.Rounded.Refresh)
             }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 12.dp)) {
-                items(SportsTab.entries.toList(), key = { it.name }) { s -> Pill(s.label, onClick = { tab = s }, selected = s == tab) }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 14.dp)) {
+                items(SportsTab.entries.toList(), key = { it.name }) { s -> UnderTab(s.label.uppercase(), s == tab) { tab = s } }
             }
             if (tab != SportsTab.CHANNELS) LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
-                item { Pill("Choose sports", onClick = { nav.push(Route.Leagues) }, icon = Icons.Rounded.Tune) }
-                item { Pill("All sports", onClick = { sport = null }, selected = sport == null) }
-                items(Sport.entries.filter { it in present }, key = { it.name }) { s -> Pill(s.label, onClick = { sport = s }, selected = sport == s) }
+                item { Pill("All", onClick = { sport = null }, selected = sport == null) }
+                items(Sport.entries.filter { it in present }, key = { it.name }) { s -> SportChip(s, sport == s) { sport = s } }
             }
             when {
                 tab == SportsTab.CHANNELS -> GuideSports(st.epgVersion)
@@ -516,6 +515,31 @@ private fun SportPicks(sport: Sport, v: Int, changed: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** A text tab with a cyan underline when it is the open one (Live now, Today, ...). */
+@Composable
+private fun UnderTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Tile(onClick, Modifier.height(40.dp), shape = RoundedCornerShape(8.dp), scale = 1.0f, color = Color.Transparent) {
+        Column(Modifier.padding(horizontal = 14.dp).fillMaxHeight(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = T.small.copy(color = if (selected) C.text else C.faint, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                letterSpacing = androidx.compose.ui.unit.TextUnit(1.4f, androidx.compose.ui.unit.TextUnitType.Sp)), maxLines = 1)
+            Spacer(Modifier.height(5.dp))
+            Box(Modifier.width(40.dp).height(2.dp).background(if (selected) C.accent else Color.Transparent))
+        }
+    }
+}
+
+/** A sport filter: its colour as a short bar before the name. */
+@Composable
+private fun SportChip(s: Sport, selected: Boolean, onClick: () -> Unit) {
+    Tile(onClick, Modifier.height(38.dp), shape = RoundedCornerShape(8.dp), scale = 1.0f, color = if (selected) C.accent.copy(alpha = 0.2f) else C.panel) {
+        Row(Modifier.fillMaxHeight().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(3.dp).height(16.dp).background(sportColor(s)))
+            Spacer(Modifier.width(8.dp))
+            Text(s.label, style = T.small.copy(color = C.text), maxLines = 1)
         }
     }
 }
