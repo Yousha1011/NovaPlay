@@ -290,7 +290,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                         Logo(c.logo, c.name, Modifier.width(96.dp).height(64.dp))
                         Spacer(Modifier.width(18.dp))
                         Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Text("${c.number}  ${c.name}", style = T.h2, maxLines = 1); Spacer(Modifier.width(10.dp)); Badge("LIVE") }
+                            Row(verticalAlignment = Alignment.CenterVertically) { Text("${c.number}  ${c.name}", style = T.h2, maxLines = 1); Spacer(Modifier.width(10.dp)); io.github.novatv.play.ui.LiveMark() }
                             if (p != null) {
                                 Text("${clock(p.start)} – ${clock(p.stop)}   ${p.title}", style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Spacer(Modifier.height(6.dp))

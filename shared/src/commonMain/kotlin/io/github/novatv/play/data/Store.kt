@@ -146,7 +146,7 @@ class Store(private val sp: Prefs = Prefs()) {
 
     /** The iPhone app's colour theme (an id from the theme list). */
     var phoneTheme: String
-        get() = sp.getString("phoneTheme", "midnight") ?: "midnight"
+        get() = sp.getString("phoneTheme", "graphite") ?: "graphite"
         set(v) { ps("phoneTheme", v) }
 
     /** Recent searches, newest first. */

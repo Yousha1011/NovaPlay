@@ -72,6 +72,8 @@ class PhoneTheme(val id: String, val name: String, val top: Color, val bottom: C
  */
 object P {
     val themes = listOf(
+        // The default: the same graphite and cyan as the TV and Windows apps.
+        PhoneTheme("graphite", "NovaPlay Graphite", Color(0xFF151A22), Color(0xFF0B0E13), Color(0xFF161B23), Color(0xFF1F2630), Color(0xFF2CC8E0), Color(0xFFEF4A55)),
         PhoneTheme("midnight", "Midnight Blue", Color(0xFF101A3D), Color(0xFF05060F), Color(0xFF161D38), Color(0xFF232B4D), Color(0xFF5B8CFF), Color(0xFFFF5A6E)),
         PhoneTheme("onyx", "Onyx", Color(0xFF141416), Color(0xFF000000), Color(0xFF1C1C1E), Color(0xFF2C2C2E), Color(0xFF0A84FF), Color(0xFFFF453A)),
         PhoneTheme("plum", "Royal Plum", Color(0xFF2A1248), Color(0xFF09040F), Color(0xFF241638), Color(0xFF33214F), Color(0xFFB388FF), Color(0xFFFF7AB6)),

@@ -26,12 +26,13 @@ final class Images {
 
 /// The app's colours, as in the shared screens.
 enum Palette {
-    static let bg = UIColor(red: 0.031, green: 0.043, blue: 0.071, alpha: 1)
-    static let panel = UIColor(red: 0.078, green: 0.102, blue: 0.157, alpha: 1)
-    static let panelHi = UIColor(red: 0.110, green: 0.141, blue: 0.212, alpha: 1)
-    static let accent = UIColor(red: 0.357, green: 0.549, blue: 1, alpha: 1)
-    static let live = UIColor(red: 1, green: 0.302, blue: 0.369, alpha: 1)
-    static let dim = UIColor(red: 0.639, green: 0.671, blue: 0.741, alpha: 1)
+    // NovaPlay's graphite and cyan, as on the TV, Windows and phone apps.
+    static let bg = UIColor(red: 0.043, green: 0.055, blue: 0.075, alpha: 1)
+    static let panel = UIColor(red: 0.086, green: 0.106, blue: 0.137, alpha: 1)
+    static let panelHi = UIColor(red: 0.122, green: 0.149, blue: 0.188, alpha: 1)
+    static let accent = UIColor(red: 0.173, green: 0.784, blue: 0.878, alpha: 1)
+    static let live = UIColor(red: 0.937, green: 0.290, blue: 0.333, alpha: 1)
+    static let dim = UIColor(red: 0.651, green: 0.682, blue: 0.729, alpha: 1)
 }
 
 extension UIView {
