@@ -140,7 +140,20 @@ class Nav {
     fun page(t: Tab) = pageFocus.getOrPut(t) { FocusRequester() }
     fun push(r: Route) { stack.add(r) }
     fun pop(): Boolean = if (stack.isEmpty()) false else { stack.removeAt(stack.lastIndex); true }
+
+    /**
+     * What Back does: closes the open screen; from a page, goes to the rail; from the rail on another tab, goes to
+     * Home; from the rail on Home, leaves the app.
+     */
+    fun back(railFocused: Boolean): Back = when {
+        stack.isNotEmpty() -> Back.POP
+        !railFocused -> Back.TO_RAIL
+        tab != Tab.HOME -> Back.TO_HOME
+        else -> Back.EXIT
+    }
 }
+
+enum class Back { POP, TO_RAIL, TO_HOME, EXIT }
 
 /** The whole app: the menu, the tabs and the screens opened over them. */
 @Composable
@@ -170,8 +183,15 @@ private fun RootBody() {
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
     var railFocused by remember { mutableStateOf(false) }
-    BackHandler(enabled = nav.stack.isNotEmpty() || !railFocused) {
-        if (!nav.pop()) try { nav.railFocus.requestFocus() } catch (e: Exception) { }
+    val scope = rememberCoroutineScope()
+    BackHandler(enabled = nav.back(railFocused) != Back.EXIT) {
+        when (nav.back(railFocused)) {
+            Back.POP -> nav.pop()
+            Back.TO_RAIL -> try { nav.railFocus.requestFocus() } catch (e: Exception) { }
+            // The rail's focus follows the open tab once Home is laid out.
+            Back.TO_HOME -> { nav.tab = Tab.HOME; scope.launch { delay(30); try { nav.railFocus.requestFocus() } catch (e: Exception) { } } }
+            Back.EXIT -> {}
+        }
     }
     Box(Modifier.fillMaxSize()) {
         Backdrop()

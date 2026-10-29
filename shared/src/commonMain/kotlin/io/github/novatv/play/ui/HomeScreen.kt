@@ -58,7 +58,18 @@ import io.github.novatv.play.data.Store
 import kotlinx.coroutines.withContext
 
 /** What the home hero shows: the last thing watched, or else the newest film or series in the playlist. */
-private class Hero(val label: String, val movie: Movie?, val series: Series?, val resume: Store.Resume?)
+internal class Hero(val label: String, val movie: Movie?, val series: Series?, val resume: Store.Resume?)
+
+/**
+ * The hero: the most recent Continue watching item still in the playlist (films by key, episodes by their series),
+ * else the newest film, else the newest series; null when there is nothing.
+ */
+internal fun pickHero(resume: List<Store.Resume>, movieByKey: (String) -> Movie?, seriesForEpisode: (String) -> Series?,
+                      newMovies: List<Movie>, newSeries: List<Series>): Hero? =
+    resume.firstNotNullOfOrNull { r ->
+        movieByKey(r.key)?.let { Hero("Continue watching", it, null, r) } ?: seriesForEpisode(r.key)?.let { Hero("Continue watching", null, it, r) }
+    } ?: newMovies.firstOrNull()?.let { Hero("New movie", it, null, null) }
+        ?: newSeries.firstOrNull()?.let { Hero("New series", null, it, null) }
 
 @Composable
 fun HomeScreen(nav: Nav) {
@@ -78,11 +89,8 @@ fun HomeScreen(nav: Nav) {
     val newMovies = remember(st.index) { st.index?.moviesByAdded?.take(20).orEmpty() }
     val newSeries = remember(st.index) { st.index?.seriesByAdded?.take(20).orEmpty() }
     val hero = remember(lib, resume, newMovies, newSeries) {
-        resume.firstNotNullOfOrNull { r ->
-            lib.movies.firstOrNull { App.repo.movieKey(it) == r.key }?.let { Hero("Continue watching", it, null, r) }
-                ?: lib.series.firstOrNull { r.key.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") }?.let { Hero("Continue watching", null, it, r) }
-        } ?: newMovies.firstOrNull()?.let { Hero("New movie", it, null, null) }
-            ?: newSeries.firstOrNull()?.let { Hero("New series", null, it, null) }
+        pickHero(resume, { k -> lib.movies.firstOrNull { App.repo.movieKey(it) == k } },
+            { k -> lib.series.firstOrNull { k.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") } }, newMovies, newSeries)
     }
     val nothing = hero == null && favChannels.isEmpty() && recent.isEmpty() && liveSports.isEmpty() && lib.channels.isEmpty()
 
@@ -225,7 +233,7 @@ private fun open(r: Store.Resume, nav: Nav) {
 }
 
 /** "1h 25m left", "12m left". */
-private fun timeLeft(ms: Long): String {
+internal fun timeLeft(ms: Long): String {
     val m = (ms / 60_000).coerceAtLeast(1)
     return if (m >= 60) "${m / 60}h ${m % 60}m left" else "${m}m left"
 }
