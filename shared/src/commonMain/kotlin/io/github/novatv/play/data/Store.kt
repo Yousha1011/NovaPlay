@@ -8,13 +8,13 @@ import io.github.novatv.play.platform.Prefs
  * Everything the app remembers: sources, favourites, watch progress, recent channels and Sports choices.
  * Small JSON values in the platform's settings; the loaded libraries are cached separately ([LibraryCache]).
  */
-class Store(private val sp: Prefs = Prefs()) {
+class Store(private val sp: Prefs = Prefs()) : SourceList {
 
-    var sources: List<Source>
+    override var sources: List<Source>
         get() = arr("sources").let { a -> (0 until a.length()).map { Source.fromJson(a.getJSONObject(it)) } }
         set(v) = put("sources", JSONArray(v.map { it.toJson() }))
 
-    var activeSourceId: String?
+    override var activeSourceId: String?
         get() = sp.getString("active", null)
         set(v) { ps("active", v) }
 

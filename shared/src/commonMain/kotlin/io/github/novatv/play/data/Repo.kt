@@ -27,7 +27,10 @@ import io.github.novatv.play.platform.IO
 import io.github.novatv.play.platform.logW
 import io.github.novatv.play.platform.SafeMap
 
-/** The active source's library and its guide, shared by every screen; Sports is in [SportsRepository]. */
+/**
+ * What the screens use: the library (owned by [CatalogRepository]), the guide and matching (here), and Sports (owned
+ * by [SportsRepository]). Kept as one facade so screens didn't change when the parts moved out.
+ */
 class Repo(val store: Store, val epg: Epg) {
     data class LibState(
         val source: Source? = null,
@@ -45,52 +48,25 @@ class Repo(val store: Store, val epg: Epg) {
     private val scope = CoroutineScope(SupervisorJob() + IO)
     private val _state = MutableStateFlow(LibState())
     val state: StateFlow<LibState> = _state
+
+    /** Playlists and the open one's library (see [CatalogRepository]); the guide is loaded after each open. */
+    val catalog = CatalogRepository(scope, _state, store, afterLoad = { force -> loadGuide(force) }, onLibraryChanged = { matcher = null })
+
     /** The Sports feed lives in its own repository; these keep the screens' calls as they were. */
     val sportsRepo = SportsRepository(scope)
     val sports: StateFlow<SportsRepository.SportsState> get() = sportsRepo.state
 
-    @Volatile var provider: Provider? = null
-        private set
-    private var loadJob: Job? = null
+    val provider: Provider? get() = catalog.provider
     @Volatile private var matcher: Pair<Int, Matcher>? = null
 
     fun start() {
         store.addSportsGuides()
         epg.loadIndex()
-        val src = store.sources.firstOrNull { it.id == store.activeSourceId } ?: store.sources.firstOrNull()
-        if (src != null) open(src, force = false)
+        catalog.initialSource()?.let { open(it, force = false) }
     }
 
     /** Opens [src]: the cached library at once, then a refresh when the cache is older than [maxAgeMs] or [force]. */
-    fun open(src: Source, force: Boolean, maxAgeMs: Long = 12 * 3600_000L) {
-        store.activeSourceId = src.id
-        val p = Provider.of(src)
-        provider = p
-        matcher = null
-        loadJob?.cancel()
-        _state.update { LibState(source = src, epgVersion = it.epgVersion) }
-        loadJob = scope.launch {
-            val cacheFile = LibraryCache.file(dataDir(), src.id)
-            val cached = LibraryCache.read(cacheFile)
-            if (cached != null) _state.update { it.copy(lib = cached.first, index = LibIndex(cached.first)) }
-            if (force || cached == null || cached.second < nowMs() - maxAgeMs) {
-                _state.update { it.copy(loading = true, status = "Loading ${src.name}", error = null) }
-                try {
-                    val lib = p.load { msg -> _state.update { s -> s.copy(status = msg) } }
-                    LibraryCache.write(cacheFile, lib)
-                    matcher = null
-                    val idx = LibIndex(lib)
-                    _state.update { it.copy(lib = lib, index = idx, loading = false, status = "", error = null) }
-                } catch (e: OutOfMemoryError) {
-                    _state.update { it.copy(loading = false, status = "", error = "This playlist is too large for the memory of this device") }
-                } catch (e: Exception) {
-                    logW("load failed", e)
-                    _state.update { it.copy(loading = false, status = "", error = e.message ?: e::class.simpleName.orEmpty()) }
-                }
-            }
-            loadGuide(force)
-        }
-    }
+    fun open(src: Source, force: Boolean, maxAgeMs: Long = 12 * 3600_000L) { catalog.open(src, force, maxAgeMs) }
 
     private fun loadGuide(force: Boolean) {
         // The playlist's own guide, then any extra guides from Settings.
@@ -115,27 +91,15 @@ class Repo(val store: Store, val epg: Epg) {
 
     private fun bumpEpg(status: String?) = _state.update { it.copy(epgVersion = it.epgVersion + 1, epgStatus = status) }
 
-    fun refresh() { _state.value.source?.let { open(it, force = true) } }
+    fun refresh() = catalog.refresh()
 
     /** Reimports the TV guide now. */
     fun reloadGuide() { scope.launch { loadGuide(force = true) } }
 
-    @OptIn(ExperimentalUuidApi::class)
-    fun addSource(name: String, type: SourceType, url: String, user: String, pass: String, mac: String, epgUrl: String): Source {
-        val s = Source(Uuid.random().toString(), name.ifBlank { type.label }, type, url.trim(), user.trim(), pass.trim(), mac.trim(), epgUrl.trim())
-        store.sources = store.sources + s
-        open(s, force = true)
-        return s
-    }
+    fun addSource(name: String, type: SourceType, url: String, user: String, pass: String, mac: String, epgUrl: String): Source =
+        catalog.addSource(name, type, url, user, pass, mac, epgUrl)
 
-    fun removeSource(id: String) {
-        store.sources = store.sources.filter { it.id != id }
-        LibraryCache.delete(LibraryCache.file(dataDir(), id))
-        if (_state.value.source?.id == id) {
-            val next = store.sources.firstOrNull()
-            if (next != null) open(next, force = false) else { provider = null; _state.value = LibState() }
-        }
-    }
+    fun removeSource(id: String) = catalog.removeSource(id)
 
     // ---------- keys for favourites, progress and recents ----------
 
