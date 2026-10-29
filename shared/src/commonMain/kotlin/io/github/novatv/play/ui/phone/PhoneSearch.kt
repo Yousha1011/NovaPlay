@@ -273,7 +273,7 @@ fun AppMenu(nav: Nav) {
                 ))
             }
             item {
-                Group(listOf(MenuItem(Icons.Rounded.Info, "About NovaPlay") { io.github.novatv.play.toast("NovaPlay 1.0 for iPhone") }))
+                Group(listOf(MenuItem(Icons.Rounded.Info, "About NovaPlay") { io.github.novatv.play.toast("NovaPlay 1.1 for iPhone") }))
             }
         }
     }

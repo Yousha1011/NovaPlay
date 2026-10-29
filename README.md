@@ -9,10 +9,10 @@ Get the files from the [latest release](../../releases/latest):
 
 | Device | File | How to install |
 | --- | --- | --- |
-| iPhone | `NovaPlay.ipa` | Unsigned: sideload with SideStore, AltStore or a similar tool (signed with your own Apple ID). |
-| Android phone | `NovaPlay-Android-1.0.apk` | Open the file on the phone and allow installing from your browser or file manager. |
-| Fire TV / Android TV | `NovaPlay-1.0.apk` | Use the Downloader app, or `adb install -r NovaPlay-1.0.apk`. |
-| Windows 10 / 11 | `NovaPlay-Setup-1.0.0.msi` | Run the installer (VLC playback is built in). |
+| iPhone | `NovaPlay-1.1.ipa` | Unsigned: sideload with SideStore, AltStore or a similar tool (signed with your own Apple ID). |
+| Android phone | `NovaPlay-Android-1.1.apk` | Open the file on the phone and allow installing from your browser or file manager. |
+| Fire TV / Android TV | `NovaPlay-1.1.apk` | Use the Downloader app, or `adb install -r NovaPlay-1.1.apk`. |
+| Windows 10 / 11 | `NovaPlay-Setup-1.1.0.msi` | Run the installer (VLC playback is built in). |
 
 Updates install over the existing app and keep your playlist login (on iPhone it is also kept in the Keychain).
 

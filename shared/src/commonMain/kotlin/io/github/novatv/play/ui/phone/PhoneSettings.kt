@@ -171,7 +171,7 @@ fun PhoneConfigurations(nav: Nav) {
             item { KeyCard("SportMonks API token", "TV stations for football.", store.sportMonksKey,
                 { store.sportMonksKey = it }, { io.github.novatv.play.sports.Broadcasters.testSportMonks() }) }
             item { SectionLabel("About") }
-            item { Card { Text("NovaPlay 1.0 · a player for your own playlists. It does not provide any channels or content.", style = P.small) } }
+            item { Card { Text("NovaPlay 1.1 · a player for your own playlists. It does not provide any channels or content.", style = P.small) } }
         }
     }
 }

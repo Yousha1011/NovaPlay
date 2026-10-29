@@ -141,7 +141,7 @@ fun SettingsScreen(nav: Nav) {
             }
         }
         item { SectionTitle("About", Modifier.padding(top = 16.dp)) }
-        item { Text("NovaPlay 1.0 · a player for your own playlists. It does not provide any channels or content.", style = T.small) }
+        item { Text("NovaPlay 1.1 · a player for your own playlists. It does not provide any channels or content.", style = T.small) }
     }
 }
 
