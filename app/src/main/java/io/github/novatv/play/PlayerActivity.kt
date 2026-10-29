@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -325,7 +326,8 @@ class PlayerActivity : ComponentActivity() {
                     val p = App.repo.provider ?: return@withContext null
                     when (it) {
                         is PlayItem.Live -> p.liveUrl(it.channels[channelIndex])
-                        is PlayItem.Vod -> it.movie?.let { m -> p.movieUrl(m) } ?: p.episodeUrl(it.series!!, it.episode!!)
+                        is PlayItem.Vod -> it.movie?.let { m -> m.url?.takeIf { u -> u.startsWith("file:") } ?: p.movieUrl(m) }
+                            ?: p.episodeUrl(it.series!!, it.episode!!)
                     }
                 } catch (e: Exception) { null }
             }
@@ -384,6 +386,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun saveProgress(ended: Boolean = false) {
         val v = item as? PlayItem.Vod ?: return
+        if (v.key.startsWith("rec:")) return
         val dur = player.duration
         if (dur <= 0) return
         val poster = v.movie?.poster ?: v.series?.poster
@@ -619,6 +622,15 @@ class PlayerActivity : ComponentActivity() {
             }
             if (c != null) {
                 item { io.github.novatv.play.ui.Pill("Channels", icon = I.List, onClick = { showControls = false; showList = true }) }
+                if (App.host.recorder != null) item {
+                    val v = io.github.novatv.play.data.Recordings.version
+                    val rec = remember(v, c) { io.github.novatv.play.data.Recordings.at(c, System.currentTimeMillis()) }
+                    io.github.novatv.play.ui.Pill(if (rec != null) "Stop recording" else "Record", icon = I.FiberManualRecord, selected = rec != null, onClick = {
+                        if (rec != null) { io.github.novatv.play.data.Recordings.cancel(rec.id); Toast.makeText(this@PlayerActivity, "Recording stopped", Toast.LENGTH_SHORT).show() }
+                        else Toast.makeText(this@PlayerActivity, io.github.novatv.play.data.Recordings.schedule(c, epg.firstOrNull()?.takeIf { it.isLive })
+                            ?: "Recording ${epg.firstOrNull()?.takeIf { it.isLive }?.title ?: "the next hour"}", Toast.LENGTH_SHORT).show()
+                    })
+                }
                 if (!PHONE) item { io.github.novatv.play.ui.Pill("Multi-view", icon = I.GridView, onClick = { startMulti() }) }
             }
         }

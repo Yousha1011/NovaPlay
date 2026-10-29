@@ -182,6 +182,11 @@ class Store(private val sp: Prefs = Prefs()) {
         get() = sp.getBoolean("xtreamHls", false)
         set(v) { sp.putBoolean("xtreamHls", v) }
 
+    /** Recordings (see [Recordings]); not in the backup, since their files stay on the device. */
+    var recordingsJson: JSONArray
+        get() = arr("recordings")
+        set(v) = put("recordings", v)
+
     var bufferMs: Int
         get() = sp.getInt("bufferMs", 6000)
         set(v) { sp.putInt("bufferMs", v) }

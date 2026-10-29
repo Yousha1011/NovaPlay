@@ -50,6 +50,7 @@ import kotlinx.coroutines.withContext
 import io.github.novatv.play.platform.nowMs
 import io.github.novatv.play.platform.IO
 import io.github.novatv.play.toast
+import io.github.novatv.play.data.Recordings
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -178,7 +179,9 @@ private fun GuideRow(c: Channel, list: List<Channel>, index: Int, start: Long, c
                 val s = maxOf(p.start, start); val e = minOf(p.stop, end)
                 val x = gridW * ((s - start).toFloat() / WINDOW)
                 val w = (gridW * ((e - s).toFloat() / WINDOW)).coerceAtLeast(8.dp)
-                GuideCell(p.title, p, Modifier.offset(x = x).width(w).fillMaxHeight().padding(2.dp), i == 0, i == progs.lastIndex, onEarlier, onLater, onPage, { onFocus(p) }) {
+                GuideCell(p.title, p, Modifier.offset(x = x).width(w).fillMaxHeight().padding(2.dp), i == 0, i == progs.lastIndex, onEarlier, onLater, onPage, { onFocus(p) },
+                    onLongClick = if (App.host.recorder == null) null else ({ toast(Recordings.schedule(c, p) ?: "Will record ${p.title}") }),
+                    recording = io.github.novatv.play.data.Recordings.version.let { Recordings.at(c, p.start) != null }) {
                     if (p.isLive || p.start <= nowMs()) playChannel(list, index)
                     else toast("${p.title} starts ${dayLabel(p.start)} at ${clock(p.start)}")
                 }
@@ -189,7 +192,8 @@ private fun GuideRow(c: Channel, list: List<Channel>, index: Int, start: Long, c
 
 @Composable
 private fun GuideCell(title: String, p: Programme?, modifier: Modifier, first: Boolean, last: Boolean,
-                      onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit, onFocus: () -> Unit, onClick: () -> Unit) {
+                      onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit, onFocus: () -> Unit,
+                      onLongClick: (() -> Unit)? = null, recording: Boolean = false, onClick: () -> Unit) {
     val live = p?.isLive == true
     Tile(onClick, modifier.onFocusChanged { if (it.isFocused) onFocus() }.onPreviewKeyEvent { k ->
         if (k.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -200,8 +204,9 @@ private fun GuideCell(title: String, p: Programme?, modifier: Modifier, first: B
             k.key == Key.MediaRewind || k.key == Key.PageUp -> { onPage(false); true }
             else -> false
         }
-    }, shape = RoundedCornerShape(6.dp), scale = 1.0f, color = if (live) C.panelHi else C.panel) {
+    }, onLongClick = onLongClick, shape = RoundedCornerShape(6.dp), scale = 1.0f, color = if (live) C.panelHi else C.panel) {
         Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (recording) { Dot(C.live, 7.dp); Spacer(Modifier.width(6.dp)) }
             Text(title, style = T.small.copy(color = if (p == null) C.faint else C.text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }
     }

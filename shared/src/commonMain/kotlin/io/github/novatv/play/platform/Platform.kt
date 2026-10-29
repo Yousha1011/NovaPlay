@@ -46,6 +46,8 @@ interface Host {
     /** Keeps a snapshot of the settings where it survives reinstalling the app (the iPhone's Keychain). */
     fun saveBackup(json: String) {}
     fun restoreBackup(): String? = null
+    /** Records live TV, where the platform can (Android); null hides recording. */
+    val recorder: io.github.novatv.play.data.Recorder? get() = null
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

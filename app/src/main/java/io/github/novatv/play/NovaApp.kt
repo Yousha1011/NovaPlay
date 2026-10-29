@@ -20,13 +20,17 @@ class NovaApp : Application() {
         migratePrefs()
         // TVs use the big-screen look (graphite and cyan); the phone draws its own screens with its themes.
         io.github.novatv.play.ui.Look.modern = false
+        val recorder = AndroidRecorder(this)
         App.start(object : Host {
             override val device = if (PHONE) Device.PHONE else Device.TV
+            override val recorder = recorder
             override fun play(item: PlayItem) {
                 startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             override fun toast(msg: String) { Toast.makeText(this@NovaApp, msg, Toast.LENGTH_SHORT).show() }
         })
+        // Alarms are lost when the app is updated or the device restarts.
+        recorder.rearm()
     }
 
     /** Earlier versions kept favourites and Sports picks as Android string sets: moved once to the shared format. */

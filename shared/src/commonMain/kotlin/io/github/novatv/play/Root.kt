@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.FiberDvr
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Search
@@ -99,8 +100,11 @@ import org.jetbrains.compose.resources.painterResource
 enum class Tab(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Home), LIVE("Live TV", Icons.Rounded.LiveTv), GUIDE("TV guide", Icons.Rounded.CalendarMonth),
     SPORTS("Sports", Icons.Rounded.SportsSoccer), MOVIES("Movies", Icons.Rounded.Movie), SERIES("Series", Icons.Rounded.VideoLibrary),
-    SEARCH("Search", Icons.Rounded.Search), SETTINGS("Settings", Icons.Rounded.Settings),
+    RECORDINGS("Recordings", Icons.Rounded.FiberDvr), SEARCH("Search", Icons.Rounded.Search), SETTINGS("Settings", Icons.Rounded.Settings),
 }
+
+/** The tabs this device offers: Recordings only where something can record. */
+val tabs: List<Tab> get() = Tab.entries.filter { it != Tab.RECORDINGS || App.host.recorder != null }
 
 /** Screens opened over a tab; Back closes them. */
 sealed class Route {
@@ -203,6 +207,7 @@ private fun RootBody() {
                             Tab.SERIES -> VodScreen(nav, series = true)
                             Tab.SEARCH -> SearchScreen(nav)
                             Tab.SETTINGS -> SettingsScreen(nav)
+                            Tab.RECORDINGS -> io.github.novatv.play.ui.RecordingsScreen(nav)
                         }
                     }
                 }
@@ -256,7 +261,7 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
                 Image(painterResource(Res.drawable.logo_mark), "NovaPlay", Modifier.size(40.dp))
                 if (open) { Spacer(Modifier.width(10.dp)); Text("NovaPlay", style = T.h2, maxLines = 1) }
             }
-            for (t in Tab.entries) {
+            for (t in tabs) {
                 val selected = nav.tab == t
                 // A plain focusable row with instant colour swaps: animated focus effects cost 70-80 ms frames on a Fire TV.
                 var itemFocused by remember { mutableStateOf(false) }
