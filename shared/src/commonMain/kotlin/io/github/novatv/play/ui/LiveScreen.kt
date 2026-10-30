@@ -87,10 +87,10 @@ fun LiveScreen(nav: Nav) {
     // changes, or the screen goes away.
     androidx.compose.runtime.LaunchedEffect(focusedChannel, nav.tab) {
         val c = focusedChannel
-        if (nav.tab == io.github.novatv.play.Tab.LIVE && c != null) App.preview.select(c) else App.preview.stop()
+        if (nav.tab == io.github.novatv.play.Tab.LIVE && c != null) App.preview.select(c, "live") else App.preview.stop("live")
     }
-    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null; App.preview.stop() }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop() } }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null; App.preview.stop("live") }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("live") } }
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
         Header("Live TV", "${group.name} · ${group.channels.size} channels")
@@ -182,9 +182,10 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
  * (waiting, loading, couldn't play, or "Press OK to watch" where there is no preview).
  */
 @Composable
-private fun PreviewBox(c: Channel, modifier: Modifier) {
+internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", unavailable: String? = null, logoSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(150.dp, 90.dp)) {
     val ps by App.preview.state.collectAsState()
-    val mine = when (val s = ps) {
+    // Only the screen that started the preview shows its picture: the player's one video view can't be in two places.
+    val mine = unavailable == null && App.preview.owner == owner && when (val s = ps) {
         is io.github.novatv.play.data.PreviewController.State.Waiting -> s.channel.id == c.id
         is io.github.novatv.play.data.PreviewController.State.Loading -> s.channel.id == c.id
         is io.github.novatv.play.data.PreviewController.State.Playing -> s.channel.id == c.id
@@ -195,8 +196,9 @@ private fun PreviewBox(c: Channel, modifier: Modifier) {
         val playing = mine && ps is io.github.novatv.play.data.PreviewController.State.Playing
         // The video surface stays in place while this channel loads, so the first picture appears without a jump.
         if (mine && (playing || ps is io.github.novatv.play.data.PreviewController.State.Loading)) App.preview.Video(Modifier.fillMaxSize())
-        if (!playing) Logo(c.logo, c.name, Modifier.size(150.dp, 90.dp))
+        if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize))
         val note = when {
+            unavailable != null -> unavailable
             playing -> "Muted preview · OK to watch"
             !mine -> "Press OK to watch"
             ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message

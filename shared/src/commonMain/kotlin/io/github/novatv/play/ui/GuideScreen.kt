@@ -45,6 +45,9 @@ import io.github.novatv.play.App
 import io.github.novatv.play.Nav
 import io.github.novatv.play.data.Channel
 import io.github.novatv.play.data.Programme
+import io.github.novatv.play.data.GuidePreview
+import io.github.novatv.play.data.followGuide
+import androidx.compose.foundation.layout.aspectRatio
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.novatv.play.platform.nowMs
@@ -77,6 +80,16 @@ fun GuideScreen(nav: Nav) {
     val earliest = { nowMs() / HALF_HOUR * HALF_HOUR }
     val pageLater = { by: Long -> if (start + by < nowMs() + 4 * 86_400_000L) start += by }
     val pageEarlier = { by: Long -> val n = maxOf(earliest(), start - by); val moved = n != start; start = n; moved }
+    // The panel previews the highlighted channel where the device can (Android TV), as Live TV does: the shared
+    // preview player, after the same pause. Only what is on now plays; the preview stops when the Guide is hidden,
+    // the playlist changes or the screen goes away.
+    val previewing = App.preview.available
+    val target = focused?.let { (c, p) -> GuidePreview.of(c, p, t) }
+    androidx.compose.runtime.LaunchedEffect(target, nav.tab, previewing) {
+        if (previewing) App.preview.followGuide(target, nav.tab == io.github.novatv.play.Tab.GUIDE)
+    }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null; App.preview.stop("guide") }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("guide") } }
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 26.dp, end = S.gutter)) {
         if (groups.isEmpty()) {
@@ -85,7 +98,7 @@ fun GuideScreen(nav: Nav) {
             }
             return@Column
         }
-        GuidePanel(focused, t)
+        GuidePanel(focused, t, if (previewing) target else null)
         SourceStatus()
         if (!App.repo.epg.hasData && st.epgStatus == null) {
             Text("This playlist has no TV guide. Add one in Settings (XMLTV link) to fill the grid.", style = T.small, modifier = Modifier.padding(bottom = 10.dp))
@@ -134,10 +147,19 @@ fun GuideScreen(nav: Nav) {
 
 /** What's focused in the grid: the programme's title, channel, times, minutes left, progress and description. */
 @Composable
-private fun GuidePanel(f: Pair<Channel, Programme?>?, t: Long) {
-    Row(Modifier.fillMaxWidth().height(132.dp).padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(C.panel)) {
+private fun GuidePanel(f: Pair<Channel, Programme?>?, t: Long, preview: GuidePreview?) {
+    Row(Modifier.fillMaxWidth().height(if (preview != null) 160.dp else 132.dp).padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(C.panel)) {
         Box(Modifier.width(3.dp).fillMaxHeight().background(C.accent))
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 12.dp)) {
+        // The muted preview, or why there is none: a programme that isn't on now can't be shown from the live stream.
+        if (preview != null && f != null) {
+            val note = when (preview) {
+                is GuidePreview.Play -> null
+                is GuidePreview.Upcoming -> "No preview · starts ${if (preview.programme.start - t < 86_400_000L) "" else "${dayLabel(preview.programme.start)} "}${clock(preview.programme.start)}"
+                is GuidePreview.Ended -> "No preview · this programme has ended"
+            }
+            PreviewBox(f.first, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "guide", note, androidx.compose.ui.unit.DpSize(96.dp, 58.dp))
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 18.dp, vertical = 12.dp)) {
             if (f == null) { Text("Move through the grid to see a programme's details.", style = T.small); return@Column }
             val (c, p) = f
             Row(verticalAlignment = Alignment.CenterVertically) {

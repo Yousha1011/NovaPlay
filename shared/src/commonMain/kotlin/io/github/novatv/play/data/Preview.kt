@@ -1,6 +1,9 @@
 package io.github.novatv.play.data
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +65,12 @@ class PreviewController(
     private val _state = MutableStateFlow<State>(if (available) State.Idle else State.Unsupported)
     val state: StateFlow<State> = _state
     private var job: Job? = null
+    /**
+     * The screen whose highlight started the preview ("live", "guide"); "" for none. Observed, so a screen's panel
+     * redraws when the same channel's preview passes from one screen to the other.
+     */
+    var owner by mutableStateOf("")
+        private set
     /** Bumped on every change, so a late event from an earlier stream is ignored. */
     private var generation = 0
 
@@ -69,12 +78,16 @@ class PreviewController(
         is State.Waiting -> channel; is State.Loading -> channel; is State.Playing -> channel; is State.Failed -> channel; else -> null
     }
 
-    /** [c] is highlighted: previews it after a short pause (again if it failed); the earlier preview stops at once. */
-    fun select(c: Channel) {
+    /**
+     * [c] is highlighted on [by]'s screen: previews it after a short pause (again if it failed); the earlier preview
+     * stops at once.
+     */
+    fun select(c: Channel, by: String = "live") {
         val e = engine
         if (e == null || !enabled()) { stop(); return }
         val cur = _state.value
-        if (cur.channel()?.id == c.id && cur !is State.Failed) return
+        if (owner == by && cur.channel()?.id == c.id && cur !is State.Failed) return
+        owner = by
         job?.cancel()
         e.release()
         val gen = ++generation
@@ -97,10 +110,43 @@ class PreviewController(
     /** Stops any preview and frees its player: leaving the screen, switching playlist, the full-screen player, background. */
     fun stop() {
         job?.cancel(); job = null
+        owner = ""
         generation++
         engine?.release()
         _state.value = if (available) State.Idle else State.Unsupported
     }
 
+    /** Stops the preview only if [by]'s screen started it, so a screen being hidden can't stop the next screen's. */
+    fun stop(by: String) { if (owner == by) stop() }
+
     @Composable fun Video(modifier: Modifier) { engine?.Video(modifier) }
+}
+
+/** What the Guide previews for a highlighted cell. */
+sealed interface GuidePreview {
+    /** The channel's live stream. */
+    data class Play(val channel: Channel) : GuidePreview
+    /** A programme that isn't on now: nothing plays (a channel's stream is only ever what is on now). */
+    data class Upcoming(val programme: Programme) : GuidePreview
+    data class Ended(val programme: Programme) : GuidePreview
+
+    companion object {
+        /**
+         * The channel's stream for its own tile, a cell with no guide information, or the programme on [now]; nothing
+         * for a programme that has ended or not started, since the stream wouldn't show it.
+         */
+        fun of(c: Channel, p: Programme?, now: Long): GuidePreview = when {
+            p == null || now in p.start until p.stop -> Play(c)
+            p.start > now -> Upcoming(p)
+            else -> Ended(p)
+        }
+    }
+}
+
+/**
+ * The Guide's preview follows its highlight: [target]'s channel plays while the Guide is [visible]; a programme that
+ * isn't on now, nothing highlighted, or a hidden Guide stops the Guide's preview (never another screen's).
+ */
+fun PreviewController.followGuide(target: GuidePreview?, visible: Boolean) {
+    if (visible && target is GuidePreview.Play) select(target.channel, "guide") else stop("guide")
 }
