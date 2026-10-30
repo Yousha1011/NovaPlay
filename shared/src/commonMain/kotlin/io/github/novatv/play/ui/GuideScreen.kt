@@ -46,7 +46,6 @@ import io.github.novatv.play.Nav
 import io.github.novatv.play.data.Channel
 import io.github.novatv.play.data.Programme
 import io.github.novatv.play.data.GuidePreview
-import io.github.novatv.play.data.followGuide
 import androidx.compose.foundation.layout.aspectRatio
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -85,8 +84,10 @@ fun GuideScreen(nav: Nav) {
     // the playlist changes or the screen goes away.
     val previewing = App.preview.available
     val target = focused?.let { (c, p) -> GuidePreview.of(c, p, t) }
-    androidx.compose.runtime.LaunchedEffect(target, nav.tab, previewing) {
-        if (previewing) App.preview.followGuide(target, nav.tab == io.github.novatv.play.Tab.GUIDE)
+    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, "guide") }
+    val visible = nav.visibility(io.github.novatv.play.Tab.GUIDE) == io.github.novatv.play.PageVisibility.VISIBLE
+    androidx.compose.runtime.LaunchedEffect(target, visible, previewing) {
+        if (previewing) follower.update(target, (target as? GuidePreview.Play)?.channel, visible)
     }
     androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null; App.preview.stop("guide") }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("guide") } }

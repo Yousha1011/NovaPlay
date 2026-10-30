@@ -85,10 +85,9 @@ fun LiveScreen(nav: Nav) {
     val first = remember { FocusRequester() }
     // The preview follows the highlighted row, and stops when Live TV is hidden (other tabs stay built), the playlist
     // changes, or the screen goes away.
-    androidx.compose.runtime.LaunchedEffect(focusedChannel, nav.tab) {
-        val c = focusedChannel
-        if (nav.tab == io.github.novatv.play.Tab.LIVE && c != null) App.preview.select(c, "live") else App.preview.stop("live")
-    }
+    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, "live") }
+    val visible = nav.visibility(io.github.novatv.play.Tab.LIVE) == io.github.novatv.play.PageVisibility.VISIBLE
+    androidx.compose.runtime.LaunchedEffect(focusedChannel, visible) { follower.update(focusedChannel, focusedChannel, visible) }
     androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null; App.preview.stop("live") }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("live") } }
 

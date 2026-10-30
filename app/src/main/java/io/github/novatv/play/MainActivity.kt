@@ -17,9 +17,18 @@ class MainActivity : ComponentActivity() {
         } else setContent { NovaTheme { Root() } }
     }
 
-    /** The app went to the background (Home, another app, the screen off): the Live TV preview lets its player go. */
+    override fun onStart() {
+        super.onStart()
+        App.away = false
+    }
+
+    /**
+     * The full-screen player opened over the app, or it went to the background (Home, another app, the screen off):
+     * previews let their player go, and stay stopped until the user moves on.
+     */
     override fun onStop() {
         super.onStop()
+        App.away = true
         if (App.host.previewEngine != null) App.preview.stop()
     }
 }

@@ -1,5 +1,7 @@
 package io.github.novatv.play
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import io.github.novatv.play.data.Epg
 import io.github.novatv.play.data.PlayItem
 import io.github.novatv.play.data.Repo
@@ -25,6 +27,9 @@ object App {
             enabled = { store.livePreview },
         )
     }
+
+    /** The app's window is out of sight: the full-screen player is over it, or the app is in the background. */
+    var away by androidx.compose.runtime.mutableStateOf(false)
 
     /** What the player plays next (lists of channels are too big to pass around). */
     @Volatile var pending: PlayItem? = null

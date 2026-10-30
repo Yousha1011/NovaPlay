@@ -150,3 +150,28 @@ sealed interface GuidePreview {
 fun PreviewController.followGuide(target: GuidePreview?, visible: Boolean) {
     if (visible && target is GuidePreview.Play) select(target.channel, "guide") else stop("guide")
 }
+
+/**
+ * One screen's preview ([owner]: "live", "guide"), following that screen's highlight while its page is visible. Hidden,
+ * covered by a screen or the menu, or behind the player, the screen's preview stops and frees its player (another
+ * screen's is left alone). Coming back doesn't restart it: the highlight the page left with waits until the user
+ * moves to another channel or programme.
+ */
+class PagePreview(private val controller: PreviewController, private val owner: String) {
+    /** The highlight showing when the page last stopped being visible; null once the user has moved on. */
+    private var held: Any? = null
+    private var hidden = false
+
+    /** [key] identifies the highlight (a channel, a guide cell); [channel] is what to preview for it, or null for none. */
+    fun update(key: Any?, channel: Channel?, visible: Boolean) {
+        if (!visible) {
+            if (!hidden) { hidden = true; held = key }
+            controller.stop(owner)
+            return
+        }
+        hidden = false
+        if (key != null && key == held) return
+        held = null
+        if (channel != null) controller.select(channel, owner) else controller.stop(owner)
+    }
+}

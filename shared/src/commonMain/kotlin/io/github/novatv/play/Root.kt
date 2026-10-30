@@ -144,6 +144,20 @@ class Nav {
     /** Each tab's page: Right from the menu goes to its first option, top left. */
     val pageFocus = HashMap<Tab, FocusRequester>()
     fun page(t: Tab) = pageFocus.getOrPut(t) { FocusRequester() }
+    /** The menu (rail) has focus and is open over the page. */
+    var menuOpen by mutableStateOf(false)
+    /** The app's window is covered: the full-screen player, another app, or the screen off (set by the platform). */
+    var covered by mutableStateOf(false)
+
+    /** How much of [t]'s page the user can see; only a [PageVisibility.VISIBLE] page may run a preview. */
+    fun visibility(t: Tab): PageVisibility = when {
+        covered -> PageVisibility.BEHIND_PLAYER
+        t != tab -> PageVisibility.HIDDEN
+        stack.isNotEmpty() -> PageVisibility.COVERED
+        menuOpen -> PageVisibility.MENU_OPEN
+        else -> PageVisibility.VISIBLE
+    }
+
     fun push(r: Route) { stack.add(r) }
     fun pop(): Boolean = if (stack.isEmpty()) false else { stack.removeAt(stack.lastIndex); true }
 
@@ -160,6 +174,12 @@ class Nav {
 }
 
 enum class Back { POP, TO_RAIL, TO_HOME, EXIT }
+
+/**
+ * Where a tab's page stands: on screen and in use, kept built but hidden (another tab is open), under a screen opened
+ * over it, under the open menu, or behind the full-screen player (or the app is in the background).
+ */
+enum class PageVisibility { VISIBLE, HIDDEN, COVERED, MENU_OPEN, BEHIND_PLAYER }
 
 /** The whole app: the menu, the tabs and the screens opened over them. */
 @Composable
@@ -188,7 +208,8 @@ fun ImageLoaderSetup() {
 private fun RootBody() {
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
-    var railFocused by remember { mutableStateOf(false) }
+    val railFocused = nav.menuOpen
+    androidx.compose.runtime.LaunchedEffect(App.away) { nav.covered = App.away }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
     BackHandler(enabled = nav.back(railFocused) != Back.EXIT) {
@@ -240,7 +261,7 @@ private fun RootBody() {
                     }
                 }
             }
-            Rail(nav) { railFocused = it }
+            Rail(nav) { nav.menuOpen = it }
         }
         if (top != null) {
             when (top) {
