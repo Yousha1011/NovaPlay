@@ -97,7 +97,7 @@ fun HomeScreen(nav: Nav) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         // The hero takes about half the screen whatever its size, within limits that keep small and huge TVs readable.
         val heroHeight = (maxHeight * 0.56f).coerceIn(300.dp, 520.dp)
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
+        LazyColumn(Modifier.rememberFocusInList().fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
             item(key = "status") { Box(Modifier.padding(start = S.gutter, end = S.gutter, top = if (hero == null) 34.dp else 0.dp)) { SourceStatus() } }
             if (hero != null) item(key = "hero") { HeroBanner(hero, heroHeight, nav) }
             else if (!nothing) item(key = "header") {
@@ -112,7 +112,7 @@ fun HomeScreen(nav: Nav) {
                 ask?.let { r -> RemoveDialog(r.title, "Continue watching", onRemove = { gone = gone + r.key }, onDismiss = { ask = null }) }
                 Column {
                     ClearableTitle("Continue watching") { all = true }
-                    LazyRow(Modifier.dust(all) { store.clearContinue(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
+                    LazyRow(Modifier.rememberFocusInList().dust(all) { store.clearContinue(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
                         horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                         items(resume, key = { it.key }) { r ->
                             PosterCard(r.title, r.poster, timeLeft(r.dur - r.pos),
@@ -126,7 +126,7 @@ fun HomeScreen(nav: Nav) {
             if (liveSports.isNotEmpty()) item(key = "sports") {
                 Column {
                     SectionTitle("Live sports", Modifier.padding(horizontal = S.gutter), trailing = "${liveSports.size} on now")
-                    LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                    LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                         items(liveSports, key = { it.id }) { e ->
                             EventCard(e, onClick = {
                                 // Broadcaster lookups go to the network: off the main thread, then play the first channel found.
@@ -248,7 +248,7 @@ private fun greeting(): String {
 private fun <T> PosterRow(title: String, list: List<T>, key: (T) -> Any, card: @Composable (T) -> Unit) {
     Column {
         SectionTitle(title, Modifier.padding(horizontal = S.gutter))
-        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+        LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
             items(list, key = key) { card(it) }
         }
     }
@@ -272,7 +272,7 @@ private fun RecentRow(list: List<io.github.novatv.play.data.Channel>) {
     ask?.let { c -> RemoveDialog(c.name, "Recently watched", onRemove = { gone = gone + c.id }, onDismiss = { ask = null }) }
     Column {
         ClearableTitle("Recent channels") { all = true }
-        LazyRow(Modifier.dust(all) { App.store.clearRecentChannels(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
+        LazyRow(Modifier.rememberFocusInList().dust(all) { App.store.clearRecentChannels(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
             horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
             items(list.size, key = { list[it].id }) { i ->
                 val c = list[i]
@@ -287,7 +287,7 @@ private fun RecentRow(list: List<io.github.novatv.play.data.Channel>) {
 private fun ChannelRow(title: String, note: String?, list: List<io.github.novatv.play.data.Channel>, modifier: Modifier = Modifier) {
     Column {
         SectionTitle(title, Modifier.padding(horizontal = S.gutter), trailing = note)
-        LazyRow(modifier, contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+        LazyRow(modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
             items(list.size, key = { list[it].id }) { i -> ChannelCard(list[i], onClick = { playChannel(list, i) }) }
         }
     }

@@ -117,11 +117,11 @@ private fun Overview(nav: Nav, series: Boolean, openCategory: (String) -> Unit) 
             }.filter { it.second.isNotEmpty() }
         }
     }
-    LazyColumn(contentPadding = PaddingValues(bottom = 60.dp, top = 6.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
+    LazyColumn(Modifier.rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp, top = 6.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
         if (resume.isNotEmpty()) item(key = "continue") {
             Column {
                 SectionTitle("Continue watching", Modifier.padding(horizontal = S.gutter))
-                LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                     items(resume, key = { it.key }) { r ->
                         PosterCard(r.title, r.poster, if (r.dur > 0) "${((r.dur - r.pos) / 60_000).coerceAtLeast(1)}m left" else null,
                             modifier = Modifier.width(150.dp), progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onClick = {
@@ -141,7 +141,7 @@ private fun Overview(nav: Nav, series: Boolean, openCategory: (String) -> Unit) 
                     SectionTitle(k.substringAfter('|'))
                     if (catId.isNotEmpty()) Pill("See all", onClick = { openCategory(catId) }, modifier = Modifier.padding(bottom = 10.dp))
                 }
-                LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                     items(list, key = { key(it) }) { VodPoster(nav, it) { favVersion++ } }
                 }
             }
@@ -173,10 +173,10 @@ private fun Browse(nav: Nav, series: Boolean, cat: String, onCat: (String) -> Un
         }
     }
     Column {
-        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.rememberFocusInList().padding(bottom = 12.dp)) {
             items(Sort.entries) { s -> Pill(s.label, onClick = { sort = s }, selected = sort == s) }
         }
-        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 16.dp)) {
+        LazyRow(contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.rememberFocusInList().padding(bottom = 16.dp)) {
             item { Pill("All", onClick = { onCat("all") }, selected = cat == "all") }
             item { Pill("My list", onClick = { onCat("fav") }, selected = cat == "fav") }
             items(cats, key = { it.id }) { c -> Pill(c.name, onClick = { onCat(c.id) }, selected = cat == c.id) }
@@ -186,7 +186,7 @@ private fun Browse(nav: Nav, series: Boolean, cat: String, onCat: (String) -> Un
             list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner() }
             list.isEmpty() -> Message(if (cat == "fav") "Your list is empty" else "Nothing in this category",
                 if (cat == "fav") "Hold OK on a poster, or use My list on its page, to add it." else null)
-            else -> LazyVerticalGrid(GridCells.Adaptive(150.dp), contentPadding = PaddingValues(start = S.gutter, end = S.gutter, bottom = 60.dp, top = 6.dp),
+            else -> LazyVerticalGrid(GridCells.Adaptive(150.dp), Modifier.rememberFocusInList(), contentPadding = PaddingValues(start = S.gutter, end = S.gutter, bottom = 60.dp, top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
                 items(list, key = { key(it) }) { VodPoster(nav, it, Modifier) { favVersion++ } }
             }
@@ -250,7 +250,7 @@ fun DetailScreen(nav: Nav, movie: Movie? = null, series: Series? = null) {
 
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(C.bg)) {
         val heroHeight = (maxHeight * 0.66f).coerceAtLeast(340.dp)
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
+        LazyColumn(Modifier.rememberFocusInList().fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(S.rowGap)) {
             item(key = "hero") {
                 Box(Modifier.fillMaxWidth().height(heroHeight)) {
                     val art = details.backdrop ?: tmdb?.backdrop ?: poster
@@ -300,7 +300,7 @@ fun DetailScreen(nav: Nav, movie: Movie? = null, series: Series? = null) {
             if (cast.isNotEmpty()) item(key = "cast") {
                 Column {
                     Text("CAST", style = T.eyebrow.copy(color = C.dim), modifier = Modifier.padding(start = S.gutter + 20.dp, bottom = 10.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = S.gutter + 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter + 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(cast) { CastCard(it) }
                     }
                 }
@@ -311,7 +311,7 @@ fun DetailScreen(nav: Nav, movie: Movie? = null, series: Series? = null) {
                     when {
                         seasons.isNotEmpty() -> {
                             val cur = season ?: nextEpisode(series, details)?.first?.season ?: seasons.keys.first()
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 14.dp)) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.rememberFocusInList().padding(bottom = 14.dp)) {
                                 items(seasons.keys.toList()) { s -> Pill("Season $s", onClick = { season = s }, selected = s == cur) }
                             }
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -328,7 +328,7 @@ fun DetailScreen(nav: Nav, movie: Movie? = null, series: Series? = null) {
             if (similar.isNotEmpty()) item(key = "similar") {
                 Column {
                     Text("MORE LIKE THIS", style = T.eyebrow.copy(color = C.dim), modifier = Modifier.padding(start = S.gutter + 20.dp, bottom = 10.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = S.gutter + 20.dp), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
+                    LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter + 20.dp), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                         items(similar, key = { key(it) }) { VodPoster(nav, it) {} }
                     }
                 }

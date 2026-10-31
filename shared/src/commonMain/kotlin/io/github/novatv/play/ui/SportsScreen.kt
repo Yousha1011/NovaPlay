@@ -108,10 +108,10 @@ fun SportsScreen(nav: Nav) {
                 Pill("Choose sports", onClick = { nav.push(Route.Leagues) }, icon = Icons.Rounded.Tune)
                 Pill("Refresh", onClick = { App.repo.refreshSports(0) }, icon = Icons.Rounded.Refresh)
             }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 14.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.rememberFocusInList().padding(bottom = 14.dp)) {
                 items(SportsTab.entries.toList(), key = { it.name }) { s -> UnderTab(s.label.uppercase(), s == tab) { tab = s } }
             }
-            if (tab != SportsTab.CHANNELS) LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
+            if (tab != SportsTab.CHANNELS) LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.rememberFocusInList().padding(bottom = 16.dp)) {
                 item { Pill("All", onClick = { sport = null }, selected = sport == null) }
                 items(Sport.entries.filter { it in present }, key = { it.name }) { s -> SportChip(s, sport == s) { sport = s } }
             }
@@ -121,7 +121,7 @@ fun SportsScreen(nav: Nav) {
                 shown.isEmpty() -> Message(
                     when (tab) { SportsTab.LIVE -> "Nothing live right now"; SportsTab.MINE -> "No matches for your teams"; else -> "No matches" },
                     when (tab) { SportsTab.MINE -> "Open a match and star a team to follow it."; SportsTab.LIVE -> "Try Today or Upcoming."; else -> null })
-                else -> LazyVerticalGrid(GridCells.Fixed(columns), contentPadding = PaddingValues(bottom = 50.dp, end = 8.dp),
+                else -> LazyVerticalGrid(GridCells.Fixed(columns), Modifier.rememberFocusInList(), contentPadding = PaddingValues(bottom = 50.dp, end = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(shown, key = { it.id }) { e ->
                         EventCard(e, onClick = { selected = e; popup = e }, fill = true, favourite = e.teams.any { isFavTeam(e, it) },
@@ -170,7 +170,7 @@ private fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit)
                     LaunchedEffect(Unit) { repeat(5) { try { close.requestFocus(); return@LaunchedEffect } catch (ex: Exception) { delay(60) } } }
                 }
                 else -> {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(Modifier.rememberFocusInList(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(airings!!.size) { i ->
                             AiringRow(airings!![i], if (i == 0) Modifier.focusRequester(first) else Modifier) {
                                 onDismiss(); playChannel(airings!!.map { it.channel }, i)
@@ -245,7 +245,7 @@ private fun EventPanel(e: SportEvent?, epgVersion: Int, modifier: Modifier = Mod
             airings == null -> Spinner(size = 24.dp)
             airings!!.isEmpty() -> Text(if (App.repo.epg.hasData) "Not found in your playlist's guide or channel names." else
                 "Add a TV guide to your playlist to find matches on your channels.", style = T.small)
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            else -> LazyColumn(Modifier.rememberFocusInList(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(airings!!.size) { i -> AiringRow(airings!![i]) { playChannel(airings!!.map { it.channel }, i) } }
             }
         }
@@ -290,7 +290,7 @@ private fun GuideSports(epgVersion: Int) {
     when {
         list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner() }
         list!!.isEmpty() -> Message("No sport in your guide right now", if (App.repo.epg.hasData) "Check back later." else "This playlist has no TV guide.")
-        else -> LazyVerticalGrid(GridCells.Fixed(2), contentPadding = PaddingValues(bottom = 50.dp),
+        else -> LazyVerticalGrid(GridCells.Fixed(2), Modifier.rememberFocusInList(), contentPadding = PaddingValues(bottom = 50.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(list!!.size) { i -> AiringRow(list!![i]) { playChannel(list!!.map { it.channel }, i) } }
         }
@@ -314,7 +314,7 @@ fun LeaguesScreen(nav: Nav) {
     Row(Modifier.fillMaxSize().padding(start = if (narrow) 20.dp else 50.dp, top = 36.dp, end = if (narrow) 16.dp else 40.dp)) {
         Column(Modifier.width(if (narrow) 200.dp else 330.dp)) {
             Header("Choose sports", "OK turns a sport on or off")
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+            LazyColumn(Modifier.rememberFocusInList(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 items(Sport.entries.toList(), key = { it.name }) { sp ->
                     val on = remember(v) { Follow.sportOn(sp) }
                     val picks = remember(v) { Follow.hasPicks(sp) }
@@ -387,12 +387,12 @@ private fun SportPicks(sport: Sport, v: Int, changed: () -> Unit) {
                 changed()
             })
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 60.dp)) {
+        LazyColumn(Modifier.rememberFocusInList(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 60.dp)) {
             if (leagues.isNotEmpty()) item { SectionTitle("Competitions") }
             for ((country, ls) in byCountry) {
                 item(key = "c:$country") {
                     val all = remember(v) { ls.all { it.id in store.sportsLeagues } }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyRow(Modifier.rememberFocusInList(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (byCountry.size > 1) item {
                             Pill((if (all) "✓ " else "") + "All of $country", selected = all, onClick = {
                                 val ids = ls.map { it.id }.toSet()
@@ -427,7 +427,7 @@ private fun SportPicks(sport: Sport, v: Int, changed: () -> Unit) {
                 for ((group, names) in groups) item(key = "intl:$group") {
                     Column {
                         Text(group, style = T.body, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LazyRow(Modifier.rememberFocusInList(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(names, key = { it }) { n ->
                                 val k = io.github.novatv.play.sports.Cricket.tournamentKey(n)
                                 val on = remember(v) { k in store.sportsComps }
@@ -445,7 +445,7 @@ private fun SportPicks(sport: Sport, v: Int, changed: () -> Unit) {
                 for ((country, national, comps2) in cricket) item(key = "cr:$country") {
                     Column {
                         Text(country, style = T.body, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LazyRow(Modifier.rememberFocusInList(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             val nKey = io.github.novatv.play.sports.Cricket.nationKey(country)
                             val lKey = io.github.novatv.play.sports.Cricket.leaguesKey(country)
                             // The whole country: its national side and all its leagues.

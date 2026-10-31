@@ -49,7 +49,7 @@ fun SearchScreen(nav: Nav) {
             )
         }
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 36.dp, end = 36.dp, top = 30.dp, bottom = 60.dp),
+    LazyColumn(Modifier.rememberFocusInList().fillMaxSize(), contentPadding = PaddingValues(start = 36.dp, end = 36.dp, top = 30.dp, bottom = 60.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp)) {
         item { Column {
             Header("Search", "Press OK to type. Hold the microphone button to speak, or type from the Fire TV app on your phone.")
@@ -58,7 +58,7 @@ fun SearchScreen(nav: Nav) {
         if (res.channels.isNotEmpty()) item {
             Column {
                 SectionTitle("Channels", trailing = "${res.channels.size}")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                LazyRow(Modifier.rememberFocusInList(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(res.channels.size) { i -> ChannelCard(res.channels[i], onClick = { playChannel(res.channels, i) }) }
                 }
             }
@@ -66,7 +66,7 @@ fun SearchScreen(nav: Nav) {
         if (res.movies.isNotEmpty()) item {
             Column {
                 SectionTitle("Movies", trailing = "${res.movies.size}")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                LazyRow(Modifier.rememberFocusInList(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(res.movies, key = { it.id }) { m -> PosterCard(m.name, m.poster, m.year, onClick = { nav.push(Route.MovieDetail(m)) }, modifier = Modifier.width(150.dp)) }
                 }
             }
@@ -74,7 +74,7 @@ fun SearchScreen(nav: Nav) {
         if (res.series.isNotEmpty()) item {
             Column {
                 SectionTitle("Series", trailing = "${res.series.size}")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                LazyRow(Modifier.rememberFocusInList(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(res.series, key = { it.id }) { s -> PosterCard(s.name, s.poster, s.year, onClick = { nav.push(Route.SeriesDetail(s)) }, modifier = Modifier.width(150.dp)) }
                 }
             }
