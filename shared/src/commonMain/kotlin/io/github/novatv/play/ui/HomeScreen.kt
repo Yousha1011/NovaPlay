@@ -322,7 +322,4 @@ fun WelcomeScreen(nav: Nav) {
 internal fun adultCategoryIds(cats: List<io.github.novatv.play.data.Category>): Set<String> =
     cats.filter { isAdultName(it.name) }.map { it.id }.toSet()
 
-internal fun isAdultName(name: String): Boolean {
-    val n = name.lowercase()
-    return Regex("""(^|[^a-z])(xxx|adult|adults|porn|18\+|\+18|for adults)([^a-z]|$)""").containsMatchIn(n)
-}
+internal fun isAdultName(name: String): Boolean = io.github.novatv.play.data.Parental.isAdultName(name)

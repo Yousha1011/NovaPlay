@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircle
@@ -56,6 +57,7 @@ import androidx.compose.runtime.collectAsState
 import io.github.novatv.play.App
 import io.github.novatv.play.Nav
 import io.github.novatv.play.Route
+import io.github.novatv.play.data.Parental
 import io.github.novatv.play.data.Refresh
 import io.github.novatv.play.data.Repo
 import io.github.novatv.play.data.SourceType
@@ -72,6 +74,7 @@ private enum class Pane(val title: String, val about: String, val icon: ImageVec
     PLAYBACK("Playback", "Stream format, buffering and picture", Icons.Rounded.PlayCircle),
     STORAGE("Recording & storage", "Recordings, the image cache and search history", Icons.Rounded.Storage),
     LOOK("Appearance", "Hints and what Home shows", Icons.Rounded.Palette),
+    PARENTAL("Parental controls", "A PIN, and categories and channels to block", Icons.Rounded.Lock),
     TIPS("Remote tips", "Buttons worth knowing", Icons.Rounded.Lightbulb),
     ABOUT("About", "Version and where information comes from", Icons.Rounded.Info),
 }
@@ -83,6 +86,13 @@ fun SettingsScreen(nav: Nav) {
     val changed: () -> Unit = { v++ }
     var pane by remember { mutableStateOf(Pane.PLAYLISTS) }
     val syncing by App.repo.syncing.collectAsState()
+    // When the PIN pad closes, focus comes back to the options (the row that opened it may be gone).
+    val paneFocus = remember { FocusRequester() }
+    var padWasUp by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Pin.request) {
+        if (Pin.request != null) padWasUp = true
+        else if (padWasUp) { padWasUp = false; kotlinx.coroutines.delay(50); try { paneFocus.requestFocus() } catch (e: Exception) { } }
+    }
     Row(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, top = 30.dp)) {
         Column(Modifier.width(320.dp).fillMaxHeight()) {
             Header("Settings")
@@ -107,8 +117,9 @@ fun SettingsScreen(nav: Nav) {
             Text(pane.title, style = T.h1)
             Text(pane.about, style = T.small, modifier = Modifier.padding(bottom = 14.dp))
             SourceStatus()
-            key(pane) {
-                LazyColumn(Modifier.fillMaxSize().rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Also rebuilt on coming back from a screen opened from here (the block lists), so counts are current.
+            key(pane, nav.stack.size) {
+                LazyColumn(Modifier.fillMaxSize().focusRequester(paneFocus).rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Read here so a change re-reads every row's value; the rows (and focus on them) stay put.
                     if (v < 0) return@LazyColumn
                     when (pane) {
@@ -119,6 +130,7 @@ fun SettingsScreen(nav: Nav) {
                         Pane.PLAYBACK -> playbackPane(changed)
                         Pane.STORAGE -> storagePane(changed)
                         Pane.LOOK -> lookPane(changed)
+                        Pane.PARENTAL -> parentalPane(nav, changed)
                         Pane.TIPS -> tipsPane()
                         Pane.ABOUT -> aboutPane(st)
                     }
@@ -327,6 +339,48 @@ private fun LazyListScope.lookPane(changed: () -> Unit) {
             }
         }
     }
+}
+
+/** Parental controls' options, open once the PIN has been typed (until the app closes). */
+private var parentalOpen by mutableStateOf(false)
+
+private fun LazyListScope.parentalPane(nav: Nav, changed: () -> Unit) {
+    val s = App.store
+    val repo = App.repo
+    if (s.parentalPin.isEmpty()) {
+        section("Get started")
+        item { Action("Set a PIN", "Choose 4 to 8 digits. They're needed to change these settings and to show blocked content.", "Set") {
+            Pin.choose { pin -> s.parentalPin = Parental.hash(pin); s.parentalOn = true; parentalOpen = true; repo.parentalChanged(); changed()
+                toast("PIN set. Now choose what to block.") } } }
+        item { Text("With a PIN set you can block live TV, film and series categories, single channels, and adult categories by name. " +
+            "Blocked content is hidden everywhere: lists, the guide, Home, Search and Sports.", style = T.small) }
+        return
+    }
+    if (!parentalOpen) {
+        section("Locked")
+        item { Action("Type your PIN", "Parental controls are locked", "Unlock") { Pin.check("Parental controls") { parentalOpen = true; changed() } } }
+        return
+    }
+    val src = repo.fullState.value.source?.id ?: "-"
+    val cats = s.blockedCategories
+    fun count(prefix: String) = cats.count { it.startsWith("$src|$prefix") }
+    section("Blocking")
+    item { Toggle("Parental controls", "Hide what's blocked below, everywhere in the app", s.parentalOn) { s.parentalOn = it; repo.parentalChanged(); changed() } }
+    item { Toggle("Block adult categories", "Any category named like XXX, Adult or 18+, in live TV, films and series", s.blockAdult) {
+        s.blockAdult = it; repo.parentalChanged(); changed() } }
+    item { Action("Live TV categories", "Choose categories to block", "${count("l:")} blocked") { nav.push(Route.Blocks("live")) } }
+    item { Action("Channels", "Choose single channels to block", "${s.blockedChannels.count { it.startsWith("ch:$src:") }} blocked") { nav.push(Route.Blocks("channels")) } }
+    item { Action("Film categories", "Choose categories to block", "${count("m:")} blocked") { nav.push(Route.Blocks("movies")) } }
+    item { Action("Series categories", "Choose categories to block", "${count("s:")} blocked") { nav.push(Route.Blocks("series")) } }
+    section("Showing blocked content")
+    item {
+        if (repo.unlocked) Action("Hide blocked content again", "It's showing now, until the app closes", "Hide") { repo.lock(); changed() }
+        else Action("Show blocked content", "Until the app closes; needs the PIN", "Show") { Pin.check("Show blocked content") { repo.unlock(); changed() } }
+    }
+    section("PIN")
+    item { Action("Change PIN", null, "Change") { Pin.choose { pin -> s.parentalPin = Parental.hash(pin); toast("PIN changed") } } }
+    item { Action("Remove PIN", "Turns parental controls off; your blocked lists are kept", "Remove") {
+        Pin.check("Remove PIN") { s.parentalPin = ""; s.parentalOn = false; parentalOpen = false; repo.lock(); repo.parentalChanged(); changed() } } }
 }
 
 /** NovaPlay's own remote gestures, page by page. */

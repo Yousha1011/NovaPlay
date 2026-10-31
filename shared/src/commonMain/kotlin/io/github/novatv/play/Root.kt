@@ -116,6 +116,8 @@ sealed class Route {
     data class SeriesDetail(val series: Series) : Route()
     data object AddSource : Route()
     data object Leagues : Route()
+    /** Parental controls: what to block, of one [kind] ("live", "movies", "series" or "channels"). */
+    data class Blocks(val kind: String) : Route()
     // iPhone only.
     data class SeeAll(val title: String, val items: List<Any>) : Route()
     data object Menu : Route()
@@ -212,7 +214,7 @@ private fun RootBody() {
     androidx.compose.runtime.LaunchedEffect(App.away) { nav.covered = App.away }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    BackHandler(enabled = nav.back(railFocused) != Back.EXIT) {
+    BackHandler(enabled = nav.back(railFocused) != Back.EXIT && io.github.novatv.play.ui.Pin.request == null) {
         when (nav.back(railFocused)) {
             Back.POP -> nav.pop()
             Back.TO_RAIL -> try { nav.railFocus.requestFocus() } catch (e: Exception) { }
@@ -269,12 +271,15 @@ private fun RootBody() {
                 is Route.SeriesDetail -> DetailScreen(nav, series = top.series)
                 Route.AddSource -> AddSourceScreen(nav)
                 Route.Leagues -> LeaguesScreen(nav)
+                is Route.Blocks -> io.github.novatv.play.ui.BlocksScreen(nav, top.kind)
                 else -> {} // iPhone-only screens never open on a TV or PC
             }
             // A remote has Back; with a mouse or a finger the screen needs a button.
             if (App.device != Device.TV) Pill("Back", onClick = { nav.pop() }, icon = Icons.AutoMirrored.Rounded.ArrowBack,
                 modifier = Modifier.align(Alignment.BottomStart).padding(24.dp))
         }
+        // Parental controls' PIN, over everything while it's asked for.
+        io.github.novatv.play.ui.PinPad()
     }
 }
 

@@ -47,7 +47,37 @@ class Repo(val store: Store, val epg: Epg) {
 
     private val scope = CoroutineScope(SupervisorJob() + IO)
     private val _state = MutableStateFlow(LibState())
-    val state: StateFlow<LibState> = _state
+    /** What the screens see: the library less anything parental controls block (see [Parental]). */
+    private val _shown = MutableStateFlow(LibState())
+    val state: StateFlow<LibState> = _shown
+    /** The whole library, blocked content included: for choosing what to block. */
+    val fullState: StateFlow<LibState> = _state
+
+    /** Bumped when parental controls change; [unlocked] shows blocked content again until the app closes. */
+    private val parentalVersion = MutableStateFlow(0)
+    @Volatile var unlocked = false
+        private set
+    fun parentalChanged() { matcher = null; parentalVersion.value++ }
+    fun unlock() { unlocked = true; parentalChanged() }
+    fun lock() { unlocked = false; parentalChanged() }
+
+    private var filterCache: Triple<Library, Parental.Rules, Pair<Library, LibIndex?>>? = null
+
+    private fun shown(s: LibState): LibState {
+        val rules = store.parentalRules()
+        if (unlocked || !rules.active) return s
+        val c = filterCache
+        val (lib, idx) = if (c != null && c.first === s.lib && c.second == rules) c.third else {
+            val f = Parental.filter(s.lib, s.source?.id ?: "-", rules) { channelKey(it) }
+            (f to (if (f === s.lib) s.index else LibIndex(f))).also { filterCache = Triple(s.lib, rules, it) }
+        }
+        return s.copy(lib = lib, index = if (s.index == null && lib !== s.lib) null else idx ?: s.index)
+    }
+
+    init {
+        // Every change to the library or to the controls passes through the filter (cached, so status lines are cheap).
+        scope.launch { kotlinx.coroutines.flow.combine(_state, parentalVersion) { st, _ -> st }.collect { _shown.value = shown(it) } }
+    }
 
     /** Playlists and the open one's library (see [CatalogRepository]); the guide is loaded after each open. */
     val catalog = CatalogRepository(scope, _state, store, afterLoad = { force -> loadGuide(force) }, onLibraryChanged = { matcher = null },
@@ -176,9 +206,9 @@ class Repo(val store: Store, val epg: Epg) {
     /** Built once per playlist and guide; screens asking at the same time wait for the one build. */
     private val matcherLock = Lock()
     fun matcher(): Matcher = matcherLock.locked {
-        val v = _state.value.epgVersion * 31 + _state.value.lib.channels.size
+        val v = _state.value.epgVersion * 31 + state.value.lib.channels.size
         matcher?.let { if (it.first == v) return@locked it.second }
-        Matcher(epg, _state.value.lib.channels).also { matcher = v to it }
+        Matcher(epg, state.value.lib.channels).also { matcher = v to it }
     }
 
     // ---------- Sports ----------

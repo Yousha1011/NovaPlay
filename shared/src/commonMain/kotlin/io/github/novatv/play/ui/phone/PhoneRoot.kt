@@ -128,6 +128,8 @@ fun PhoneRoot() {
             // from the App Menu, or one gone back to, just appears, as the tabs do.
             val fromMenu = nav.stack.size >= 2 && nav.stack[nav.stack.size - 2] == Route.Menu
             key(nav.stack.size, top) { Box(Modifier.fillMaxSize().then(if (opened && !fromMenu) Modifier.flowIn(fromX = 0.35f) else Modifier)) { when (top) {
+                // The TV's parental block lists never open on the phone.
+                is Route.Blocks -> {}
                 is Route.MovieDetail -> PhoneDetail(nav, movie = top.movie)
                 is Route.SeriesDetail -> PhoneDetail(nav, series = top.series)
                 is Route.SeeAll -> SeeAll(nav, top.title, top.items)

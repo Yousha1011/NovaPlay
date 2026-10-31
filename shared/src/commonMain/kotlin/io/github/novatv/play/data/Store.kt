@@ -288,6 +288,29 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = sp.getString("overnightLast", null)
         set(v) { sp.putString("overnightLast", v) }
 
+    /** Parental controls (see [Parental]): the PIN's hash ("" when none), whether they're on, and what is blocked. */
+    var parentalPin: String
+        get() = sp.getString("pinHash", "") ?: ""
+        set(v) { sp.putString("pinHash", v) }
+
+    var parentalOn: Boolean
+        get() = sp.getBoolean("parentalOn", false)
+        set(v) { sp.putBoolean("parentalOn", v) }
+
+    var blockAdult: Boolean
+        get() = sp.getBoolean("blockAdult", false)
+        set(v) { sp.putBoolean("blockAdult", v) }
+
+    var blockedCategories: Set<String>
+        get() = strSet("blockedCats")
+        set(v) = putSet("blockedCats", v)
+
+    var blockedChannels: Set<String>
+        get() = strSet("blockedChans")
+        set(v) = putSet("blockedChans", v)
+
+    fun parentalRules() = Parental.Rules(parentalOn && parentalPin.isNotEmpty(), blockAdult, blockedCategories, blockedChannels)
+
     /** Keeps adult categories' films and series off the Home rows. */
     var hideAdultOnHome: Boolean
         get() = sp.getBoolean("hideAdultHome", false)
