@@ -25,8 +25,9 @@ import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 
 /** Recordings start this early and end this late, since guide times are often a little off. */
-private const val PAD_BEFORE = 60_000L
-private const val PAD_AFTER = 120_000L
+/** How early a recording starts and how late it runs (Settings › Recording). */
+private val PAD_BEFORE get() = App.store.recordBeforeMin * 60_000L
+private val PAD_AFTER get() = App.store.recordAfterMin * 60_000L
 /** Below this much free space a recording stops rather than fill the device. */
 private const val MIN_FREE = 300L * 1024 * 1024
 

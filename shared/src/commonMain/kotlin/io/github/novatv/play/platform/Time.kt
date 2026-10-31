@@ -17,8 +17,14 @@ object Time {
     private val days = mapOf(DayOfWeek.MONDAY to "Mon", DayOfWeek.TUESDAY to "Tue", DayOfWeek.WEDNESDAY to "Wed", DayOfWeek.THURSDAY to "Thu",
         DayOfWeek.FRIDAY to "Fri", DayOfWeek.SATURDAY to "Sat", DayOfWeek.SUNDAY to "Sun")
 
-    /** "14:05" in local time. */
-    fun hm(t: Long): String = local(t).let { "${pad2(it.hour)}:${pad2(it.minute)}" }
+    /** Clock times as 14:05 (true) or 2:05 PM; set from Settings. */
+    var use24h = true
+
+    /** "14:05" (or "2:05 PM") in local time. */
+    fun hm(t: Long): String = local(t).let { hm(it.hour, it.minute, use24h) }
+
+    fun hm(hour: Int, minute: Int, h24: Boolean): String =
+        if (h24) "${pad2(hour)}:${pad2(minute)}" else "${if (hour % 12 == 0) 12 else hour % 12}:${pad2(minute)} ${if (hour < 12) "AM" else "PM"}"
 
     /** "Sun 25 Oct". */
     fun dayMonth(t: Long): String = local(t).let { "${days[it.dayOfWeek]} ${it.dayOfMonth} ${months[it.monthNumber - 1]}" }

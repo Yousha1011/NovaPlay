@@ -191,9 +191,8 @@ private fun GuideRow(c: Channel, list: List<Channel>, index: Int, start: Long, c
         Tile({ playChannel(list, index) }, Modifier.width(chW).fillMaxHeight().padding(2.dp).onFocusChanged { if (it.isFocused) onFocus(null) },
             shape = RoundedCornerShape(6.dp), scale = 1.0f, color = Color.Transparent) {
             Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (c.number > 0) Text("${c.number}", style = T.small.copy(color = C.faint), maxLines = 1, modifier = Modifier.width(44.dp))
-                Logo(c.logo, c.name, Modifier.size(40.dp, 28.dp))
-                Spacer(Modifier.width(8.dp))
+                if (c.number > 0 && App.store.showChannelNumbers) Text("${c.number}", style = T.small.copy(color = C.faint), maxLines = 1, modifier = Modifier.width(44.dp))
+                if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(40.dp, 28.dp)); Spacer(Modifier.width(8.dp)) }
                 Text(c.name, style = T.small.copy(color = C.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

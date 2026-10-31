@@ -45,6 +45,7 @@ object App {
         host.restoreBackup()?.let { store.restore(it) }
         store.backup = { host.saveBackup(it) }
         if (store.sources.isNotEmpty()) host.saveBackup(store.snapshot())
+        io.github.novatv.play.platform.Time.use24h = store.clock24
         repo = Repo(store, Epg())
         repo.start()
     }

@@ -86,8 +86,12 @@ fun HomeScreen(nav: Nav) {
     val liveSports = remember(sports) { sports.events.filter { it.state == State.LIVE && io.github.novatv.play.sports.Follow.shows(it) }.take(15) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val resume = remember(lib, rev) { store.continueWatching }
-    val newMovies = remember(st.index) { st.index?.moviesByAdded?.take(20).orEmpty() }
-    val newSeries = remember(st.index) { st.index?.seriesByAdded?.take(20).orEmpty() }
+    // Settings › Appearance can keep adult categories off Home (Movies and Series still list them).
+    val hideAdult = App.store.hideAdultOnHome
+    val adultMovieCats = remember(st.lib, hideAdult) { if (hideAdult) adultCategoryIds(st.lib.movieCategories) else emptySet() }
+    val adultSeriesCats = remember(st.lib, hideAdult) { if (hideAdult) adultCategoryIds(st.lib.seriesCategories) else emptySet() }
+    val newMovies = remember(st.index, adultMovieCats) { st.index?.moviesByAdded?.asSequence()?.filter { it.categoryId !in adultMovieCats }?.take(20)?.toList().orEmpty() }
+    val newSeries = remember(st.index, adultSeriesCats) { st.index?.seriesByAdded?.asSequence()?.filter { it.categoryId !in adultSeriesCats }?.take(20)?.toList().orEmpty() }
     val hero = remember(lib, resume, newMovies, newSeries) {
         pickHero(resume, { k -> lib.movies.firstOrNull { App.repo.movieKey(it) == k } },
             { k -> lib.series.firstOrNull { k.startsWith(App.repo.seriesKey(it).replaceFirst("se:", "ep:") + ":") } }, newMovies, newSeries)
@@ -312,4 +316,13 @@ fun WelcomeScreen(nav: Nav) {
     }
     AutoFocus(r)
     Row {}
+}
+
+/** Categories whose names mark them as adult content (XXX, Adult, 18+ and the like). */
+internal fun adultCategoryIds(cats: List<io.github.novatv.play.data.Category>): Set<String> =
+    cats.filter { isAdultName(it.name) }.map { it.id }.toSet()
+
+internal fun isAdultName(name: String): Boolean {
+    val n = name.lowercase()
+    return Regex("""(^|[^a-z])(xxx|adult|adults|porn|18\+|\+18|for adults)([^a-z]|$)""").containsMatchIn(n)
 }

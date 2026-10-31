@@ -152,9 +152,11 @@ fun EventCard(e: SportEvent, onClick: () -> Unit, modifier: Modifier = Modifier,
                 }
                 Spacer(Modifier.height(10.dp))
                 if (e.home != null && e.away != null) {
-                    SideRow(e.home.name, e.home.logo, e.home.score, e.state)
+                    // Spoiler-safe (Settings): the score shows only once the match is opened.
+                    val hide = App.store.hideScores
+                    SideRow(e.home.name, e.home.logo, e.home.score.takeUnless { hide }, e.state)
                     Spacer(Modifier.height(6.dp))
-                    SideRow(e.away.name, e.away.logo, e.away.score, e.state)
+                    SideRow(e.away.name, e.away.logo, e.away.score.takeUnless { hide }, e.state)
                 } else {
                     Text(e.title, style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     e.venue?.let { Text(it, style = T.small, maxLines = 1) }

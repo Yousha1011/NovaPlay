@@ -125,7 +125,9 @@ class PlayerActivity : ComponentActivity() {
     private var length by mutableLongStateOf(0L)
     private var playing by mutableStateOf(true)
     private var tracks by mutableStateOf<Tracks?>(null)
-    private var resize by mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT)
+    private var resize by mutableIntStateOf(when (App.store.defaultAspect) {
+        "FILL" -> AspectRatioFrameLayout.RESIZE_MODE_FILL; "ZOOM" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM; else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+    })
     private var playerView: PlayerView? = null
     private var inPip by mutableStateOf(false)
     /** The toolbar under the info bar (Play/Pause, Favourite, Audio, Aspect, Channels, Multi-view). */
@@ -362,7 +364,8 @@ class PlayerActivity : ComponentActivity() {
         saveProgress(ended = true)
         val next = v.nextEpisodes.firstOrNull()
         val series = v.series
-        if (next != null && series != null) {
+        // The next episode follows unless that's turned off in Settings.
+        if (next != null && series != null && App.store.autoNextEpisode) {
             Toast.makeText(this, "Next: S${next.season} E${next.number}", Toast.LENGTH_SHORT).show()
             item = PlayItem.Vod(App.repo.episodeKey(series, next), "${series.name} · S${next.season} E${next.number}", episode = next,
                 series = series, nextEpisodes = v.nextEpisodes.drop(1))
@@ -457,6 +460,18 @@ class PlayerActivity : ComponentActivity() {
         player2?.release(); player2 = null
     }
 
+    /** Subtitle size, background and height from Settings › Movies & Series (text subtitles; image ones keep their look). */
+    private fun styleSubtitles(v: androidx.media3.ui.SubtitleView) {
+        val st = App.store
+        val bg = when (st.subtitleBackground) { "BOX" -> 0xB3000000.toInt(); "SOLID" -> 0xFF000000.toInt(); else -> android.graphics.Color.TRANSPARENT }
+        val edge = if (st.subtitleBackground == "SHADOW") androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW else androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
+        v.setStyle(androidx.media3.ui.CaptionStyleCompat(android.graphics.Color.WHITE, bg, android.graphics.Color.TRANSPARENT, edge, android.graphics.Color.BLACK, null))
+        val size = when (st.subtitleSize) { "SMALL" -> 0.8f; "LARGE" -> 1.25f; "XLARGE" -> 1.5f; else -> 1f }
+        v.setFractionalTextSize(androidx.media3.ui.SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * size)
+        v.setApplyEmbeddedStyles(false)
+        v.setBottomPaddingFraction(when (st.subtitlePosition) { "RAISED" -> 0.16f; "HIGH" -> 0.28f; else -> androidx.media3.ui.SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION })
+    }
+
     // ---------------------------------------------------------------- UI
 
     @Composable
@@ -469,10 +484,17 @@ class PlayerActivity : ComponentActivity() {
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     playerView = this
+                    subtitleView?.let { styleSubtitles(it) }
                 }
             }, update = { it.resizeMode = resize }, modifier = Modifier.fillMaxSize())
 
             if (inPip) return@Box
+            // Settings › Live TV & Guide: the time stays in the corner while the details are hidden.
+            if (App.store.playerClock && !showInfo) {
+                val time by androidx.compose.runtime.produceState(System.currentTimeMillis()) { while (true) { delay(10_000); value = System.currentTimeMillis() } }
+                Box(Modifier.align(Alignment.TopEnd).padding(top = 28.dp, end = 36.dp).clip(RoundedCornerShape(8.dp)).background(Color(0x99000000))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)) { Text(clock(time), style = T.body) }
+            }
             // Phones: a tap shows the details and toolbar, and a button in the corner minimises the player.
             if (PHONE && !multi) Box(Modifier.fillMaxSize().clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) {
                 if (showInfo) { showInfo = false; showControls = false } else openControls()
@@ -540,7 +562,7 @@ class PlayerActivity : ComponentActivity() {
                 .padding(start = 48.dp, end = 48.dp, top = 70.dp, bottom = 28.dp)) {
                 if (c != null) LiveBar(t) else VodBar()
                 Spacer(Modifier.height(18.dp))
-                if (showControls || PHONE) Toolbar() else Text(
+                if (showControls || PHONE) Toolbar() else if (App.store.showHints) Text(
                     if (c != null) "OK  Toolbar     ◀  Channels     ▲▼  Zap     ☰  Audio & subtitles" else "OK  Play/Pause     ◀ ▶  Seek     ▼  Toolbar     ▲  Audio & subtitles",
                     style = T.tiny)
             }

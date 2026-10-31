@@ -196,6 +196,72 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = sp.getInt("bufferMs", 6000)
         set(v) { sp.putInt("bufferMs", v) }
 
+    /** Times as 20:05 (true) or 8:05 PM. */
+    var clock24: Boolean
+        get() = sp.getBoolean("clock24", true)
+        set(v) { sp.putBoolean("clock24", v); io.github.novatv.play.platform.Time.use24h = v }
+
+    /** Channel numbers and logos in the Live TV list and the Guide. */
+    var showChannelNumbers: Boolean
+        get() = sp.getBoolean("showChNumbers", true)
+        set(v) { sp.putBoolean("showChNumbers", v) }
+
+    var showChannelLogos: Boolean
+        get() = sp.getBoolean("showChLogos", true)
+        set(v) { sp.putBoolean("showChLogos", v) }
+
+    /** The time stays in a corner of the player, not only with its details. */
+    var playerClock: Boolean
+        get() = sp.getBoolean("playerClock", false)
+        set(v) { sp.putBoolean("playerClock", v) }
+
+    /** The next episode starts by itself when one ends. */
+    var autoNextEpisode: Boolean
+        get() = sp.getBoolean("autoNext", true)
+        set(v) { sp.putBoolean("autoNext", v) }
+
+    /** Subtitles in films and series: [SubSize], [SubBackground], [SubPosition] names. */
+    var subtitleSize: String
+        get() = sp.getString("subSize", "MEDIUM") ?: "MEDIUM"
+        set(v) { sp.putString("subSize", v) }
+
+    var subtitleBackground: String
+        get() = sp.getString("subBg", "SHADOW") ?: "SHADOW"
+        set(v) { sp.putString("subBg", v) }
+
+    var subtitlePosition: String
+        get() = sp.getString("subPos", "BOTTOM") ?: "BOTTOM"
+        set(v) { sp.putString("subPos", v) }
+
+    /** How the picture first fills the screen: an [Aspect] name. */
+    var defaultAspect: String
+        get() = sp.getString("aspect", "FIT") ?: "FIT"
+        set(v) { sp.putString("aspect", v) }
+
+    /** Minutes a recording starts early and runs late. */
+    var recordBeforeMin: Int
+        get() = sp.getInt("recBefore", 1)
+        set(v) { sp.putInt("recBefore", v) }
+
+    var recordAfterMin: Int
+        get() = sp.getInt("recAfter", 2)
+        set(v) { sp.putInt("recAfter", v) }
+
+    /** Spoiler-safe: scores stay hidden in the Sports Hub until a match is opened. */
+    var hideScores: Boolean
+        get() = sp.getBoolean("hideScores", false)
+        set(v) { sp.putBoolean("hideScores", v) }
+
+    /** The button hints at the foot of pages and in the player. */
+    var showHints: Boolean
+        get() = sp.getBoolean("showHints", true)
+        set(v) { sp.putBoolean("showHints", v) }
+
+    /** Keeps adult categories' films and series off the Home rows. */
+    var hideAdultOnHome: Boolean
+        get() = sp.getBoolean("hideAdultHome", false)
+        set(v) { sp.putBoolean("hideAdultHome", v) }
+
     // ---------- helpers ----------
 
     private fun arr(k: String) = try { JSONArray(sp.getString(k, "[]") ?: "[]") } catch (e: Exception) { JSONArray() }

@@ -172,7 +172,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
             }
         }
         Spacer(Modifier.height(14.dp))
-        Text("OK  Play      Hold OK  Favourite", style = T.tiny)
+        if (App.store.showHints) Text("OK  Play      Hold OK  Favourite", style = T.tiny)
     }
 }
 
@@ -219,9 +219,9 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocu
     Tile(onClick, Modifier.fillMaxWidth().height(52.dp).onFocusChanged { if (it.isFocused) onFocus() }, onLongClick = onLongClick, scale = 1.0f,
         shape = RoundedCornerShape(8.dp), color = Color.Transparent) {
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (c.number > 0) "${c.number}" else "", style = T.small.copy(color = C.faint), modifier = Modifier.width(52.dp), maxLines = 1)
-            Logo(c.logo, c.name, Modifier.size(52.dp, 34.dp))
-            Spacer(Modifier.width(12.dp))
+            // Numbers and logos can be turned off in Settings.
+            if (App.store.showChannelNumbers) Text(if (c.number > 0) "${c.number}" else "", style = T.small.copy(color = C.faint), modifier = Modifier.width(52.dp), maxLines = 1)
+            if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(52.dp, 34.dp)); Spacer(Modifier.width(12.dp)) }
             // Shares, rather than fixed widths, so the row also fits a phone.
             Row(Modifier.weight(0.42f), verticalAlignment = Alignment.CenterVertically) {
                 Text(c.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
