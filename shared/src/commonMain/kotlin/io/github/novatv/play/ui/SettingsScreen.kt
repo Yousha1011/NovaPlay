@@ -124,7 +124,7 @@ fun SettingsScreen(nav: Nav) {
                     if (v < 0) return@LazyColumn
                     when (pane) {
                         Pane.PLAYLISTS -> playlistsPane(nav, st, syncing, changed)
-                        Pane.LIVE -> livePane(changed)
+                        Pane.LIVE -> livePane(nav, changed)
                         Pane.VOD -> vodPane(changed)
                         Pane.SPORTS -> sportsPane(nav, changed)
                         Pane.PLAYBACK -> playbackPane(changed)
@@ -166,9 +166,10 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: St
     updatesSection(changed)
     section("TV guide")
     item { Text(remember(st.epgVersion) { App.repo.epg.summary() }, style = T.body) }
+    section("Universal guide")
     item {
         Column {
-            Text("Extra TV guides (XMLTV links, separated by spaces), loaded together with your playlist's own guide", style = T.small,
+            Text("XMLTV guide links (separated by spaces) used with every playlist, as well as each playlist's own guide", style = T.small,
                 modifier = Modifier.padding(bottom = 6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 var url by remember { mutableStateOf(App.store.extraEpg.joinToString(" ")) }
@@ -177,6 +178,25 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: St
             }
         }
     }
+    item { Toggle("Use only the universal guide", "Ignore each playlist's own guide (when it's poor or slow); needs a link above",
+        App.store.universalGuideOnly) { App.store.universalGuideOnly = it; changed(); App.repo.reloadGuide() } }
+}
+
+/** Hiding countries, regions and single categories (no PIN; a tidier list). */
+private fun LazyListScope.categoriesSection(nav: Nav, changed: () -> Unit) {
+    val st = App.repo.fullState.value
+    val src = st.source?.id ?: "-"
+    val hidden = App.store.hiddenCategories
+    val regions = io.github.novatv.play.data.Visibility.regions(st.lib)
+    fun count(p: String) = hidden.count { it.startsWith("$src|$p") }
+    section("Categories")
+    if (regions.isNotEmpty()) item { Action("Countries and regions", "Show only the ones you want; big playlists stay quick to browse",
+        "${regions.size - count("r:")} of ${regions.size} shown") { nav.push(Route.Blocks("regions")) } }
+    item { Action("Live TV categories", "Hide categories you never watch", "${count("l:")} hidden") { nav.push(Route.Blocks("hide-live")) } }
+    item { Action("Film categories", null, "${count("m:")} hidden") { nav.push(Route.Blocks("hide-movies")) } }
+    item { Action("Series categories", null, "${count("s:")} hidden") { nav.push(Route.Blocks("hide-series")) } }
+    if (hidden.any { it.startsWith("$src|") }) item { Action("Show everything again", "Unhide all categories and regions of this playlist", "Reset") {
+        App.store.hiddenCategories = hidden.filterNot { it.startsWith("$src|") }.toSet(); App.repo.parentalChanged(); changed() } }
 }
 
 /** When each playlist and the guide last updated, with buttons to update them now. */
@@ -237,8 +257,9 @@ private fun LazyListScope.updatesSection(changed: () -> Unit) {
     }
 }
 
-private fun LazyListScope.livePane(changed: () -> Unit) {
+private fun LazyListScope.livePane(nav: Nav, changed: () -> Unit) {
     val s = App.store
+    categoriesSection(nav, changed)
     if (App.host.previewEngine != null) {
         section("Previews")
         item { Toggle("Live TV and guide preview", "The highlighted channel plays muted beside the list after a short pause. OK opens it full screen.",

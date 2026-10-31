@@ -288,6 +288,16 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = sp.getString("overnightLast", null)
         set(v) { sp.putString("overnightLast", v) }
 
+    /** Hidden categories and regions (see [Visibility]); no PIN. */
+    var hiddenCategories: Set<String>
+        get() = strSet("hiddenCats")
+        set(v) = putSet("hiddenCats", v)
+
+    /** Only the universal guide ([extraEpg]) is used, not each playlist's own. */
+    var universalGuideOnly: Boolean
+        get() = sp.getBoolean("epgOnlyUniversal", false)
+        set(v) { sp.putBoolean("epgOnlyUniversal", v) }
+
     /** Parental controls (see [Parental]): the PIN's hash ("" when none), whether they're on, and what is blocked. */
     var parentalPin: String
         get() = sp.getString("pinHash", "") ?: ""

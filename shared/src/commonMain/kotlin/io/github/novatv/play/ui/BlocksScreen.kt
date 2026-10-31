@@ -51,11 +51,42 @@ fun BlocksScreen(nav: Nav, kind: String) {
     val blockedChans = remember(v) { App.store.blockedChannels }
     // Focus starts on the first list, so OK works straight away.
     val start = remember { androidx.compose.ui.focus.FocusRequester() }
-    val title = when (kind) { "live" -> "Live TV categories"; "movies" -> "Film categories"; "series" -> "Series categories"; else -> "Channels" }
+    // "hide-live" etc. and "regions": the same lists for hiding (Settings › Live TV & guide; no PIN).
+    val hiding = kind.startsWith("hide-") || kind == "regions"
+    val hidden = remember(v) { App.store.hiddenCategories }
+    val base = kind.removePrefix("hide-")
+    val title = when (base) { "live" -> "Live TV categories"; "movies" -> "Film categories"; "series" -> "Series categories"; "regions" -> "Countries and regions"; else -> "Channels" }
     Column(Modifier.fillMaxSize().background(C.bg).padding(start = 60.dp, end = 60.dp, top = 36.dp)) {
-        Header("Block $title".replace("Block Channels", "Block channels"),
+        if (hiding) Header(if (kind == "regions") title else "Show or hide $title".replace("Show or hide Live", "Show or hide live"),
+            "OK shows or hides. Hidden ones leave every list, the guide, Home and Search. BACK when you're done.")
+        else Header("Block $title".replace("Block Channels", "Block channels"),
             "OK locks or unlocks. Blocked ones are hidden everywhere while parental controls are on. BACK when you're done.")
-        if (kind != "channels") {
+        if (kind == "regions") {
+            val regions = remember(st.lib) { io.github.novatv.play.data.Visibility.regions(st.lib) }
+            if (regions.isEmpty()) Message("No regions", "This playlist's categories don't start with a country or region, like \"UK|\".")
+            LazyColumn(Modifier.fillMaxSize().focusRequester(start).rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (v < 0) return@LazyColumn
+                items(regions, key = { it.first }) { (r, n) ->
+                    val k = io.github.novatv.play.data.Visibility.regionKey(source, r)
+                    LockRow(r, k in hidden, "$n categories", on = "Hidden", off = "Shown") {
+                        App.store.hiddenCategories = App.store.hiddenCategories.let { if (k in it) it - k else it + k }; save()
+                    }
+                }
+            }
+        } else if (hiding) {
+            val cats = when (base) { "live" -> st.lib.liveCategories; "movies" -> st.lib.movieCategories; else -> st.lib.seriesCategories }
+            val key = { c: Category -> when (base) { "live" -> Parental.liveKey(source, c.id); "movies" -> Parental.movieKey(source, c.id); else -> Parental.seriesKey(source, c.id) } }
+            LazyColumn(Modifier.fillMaxSize().focusRequester(start).rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (v < 0) return@LazyColumn
+                items(cats, key = { it.id }) { c ->
+                    val k = key(c)
+                    val byRegion = io.github.novatv.play.data.Visibility.region(c.name)?.let { io.github.novatv.play.data.Visibility.regionKey(source, it) in hidden } == true
+                    LockRow(c.name, k in hidden || byRegion, if (byRegion) "Hidden with its region" else null, on = "Hidden", off = "Shown") {
+                        if (!byRegion) { App.store.hiddenCategories = App.store.hiddenCategories.let { if (k in it) it - k else it + k }; save() }
+                    }
+                }
+            }
+        } else if (kind != "channels") {
             val cats = when (kind) { "live" -> st.lib.liveCategories; "movies" -> st.lib.movieCategories; else -> st.lib.seriesCategories }
             val key = { c: Category -> when (kind) { "live" -> Parental.liveKey(source, c.id); "movies" -> Parental.movieKey(source, c.id); else -> Parental.seriesKey(source, c.id) } }
             if (cats.isEmpty()) Message("Nothing to block", "This playlist has no $title.".lowercase().replaceFirstChar { it.uppercase() })
@@ -105,7 +136,7 @@ fun BlocksScreen(nav: Nav, kind: String) {
 }
 
 @Composable
-private fun LockRow(name: String, locked: Boolean, note: String?, toggle: () -> Unit) {
+private fun LockRow(name: String, locked: Boolean, note: String?, on: String = "Blocked", off: String = "Allowed", toggle: () -> Unit) {
     Tile(toggle, Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(10.dp), scale = 1.0f,
         color = if (locked) C.live.copy(alpha = 0.16f) else C.panel) {
         Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -113,7 +144,7 @@ private fun LockRow(name: String, locked: Boolean, note: String?, toggle: () -> 
                 Text(name, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 note?.let { Text(it, style = T.tiny) }
             }
-            Text(if (locked) "Blocked" else "Allowed", style = T.body.copy(color = if (locked) C.live else C.dim))
+            Text(if (locked) on else off, style = T.body.copy(color = if (locked) C.live else C.dim))
         }
     }
 }

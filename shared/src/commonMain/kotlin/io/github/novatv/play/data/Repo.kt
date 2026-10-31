@@ -61,15 +61,20 @@ class Repo(val store: Store, val epg: Epg) {
     fun unlock() { unlocked = true; parentalChanged() }
     fun lock() { unlocked = false; parentalChanged() }
 
-    private var filterCache: Triple<Library, Parental.Rules, Pair<Library, LibIndex?>>? = null
+    private var filterCache: Triple<Library, Pair<Parental.Rules?, Set<String>>, Pair<Library, LibIndex?>>? = null
 
+    /** The library less hidden categories (always) and what parental controls block (unless unlocked). */
     private fun shown(s: LibState): LibState {
-        val rules = store.parentalRules()
-        if (unlocked || !rules.active) return s
+        val rules = store.parentalRules().takeIf { !unlocked && it.active }
+        val hidden = store.hiddenCategories
+        val source = s.source?.id ?: "-"
+        if (rules == null && hidden.none { it.startsWith("$source|") }) return s
+        val key = rules to hidden
         val c = filterCache
-        val (lib, idx) = if (c != null && c.first === s.lib && c.second == rules) c.third else {
-            val f = Parental.filter(s.lib, s.source?.id ?: "-", rules) { channelKey(it) }
-            (f to (if (f === s.lib) s.index else LibIndex(f))).also { filterCache = Triple(s.lib, rules, it) }
+        val (lib, idx) = if (c != null && c.first === s.lib && c.second == key) c.third else {
+            var f = Visibility.filter(s.lib, source, hidden)
+            if (rules != null) f = Parental.filter(f, source, rules) { channelKey(it) }
+            (f to (if (f === s.lib) s.index else LibIndex(f))).also { filterCache = Triple(s.lib, key, it) }
         }
         return s.copy(lib = lib, index = if (s.index == null && lib !== s.lib) null else idx ?: s.index)
     }
@@ -103,7 +108,9 @@ class Repo(val store: Store, val epg: Epg) {
 
     private fun loadGuide(force: Boolean) {
         // The playlist's own guide, then any extra guides from Settings.
-        val urls = (listOfNotNull(_state.value.lib.epgUrl) + store.extraEpg).distinct()
+        // The playlist's own guide, unless only the universal guide (Settings) is wanted, then the universal guide.
+        val own = if (store.universalGuideOnly && store.extraEpg.isNotEmpty()) emptyList() else listOfNotNull(_state.value.lib.epgUrl)
+        val urls = (own + store.extraEpg).distinct()
         if (urls.isNotEmpty()) {
             if (!force && epg.fresh(urls, Refresh.maxAgeMs(store.guideRefreshHours))) epg.loadIndex()
             else {
