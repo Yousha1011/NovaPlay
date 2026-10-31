@@ -51,10 +51,16 @@ class CatalogRepository(
     @OptIn(ExperimentalUuidApi::class) private val newId: () -> String = { Uuid.random().toString() },
     private val afterLoad: suspend (force: Boolean) -> Unit = {},
     private val onLibraryChanged: () -> Unit = {},
+    /** Called after each read from a playlist's server: when, and the error (null when it worked). */
+    private val onSynced: (sourceId: String, at: Long, error: String?) -> Unit = { _, _, _ -> },
+    /** Called with when the saved copy of a playlist was written, each time it is read. */
+    private val onCached: (sourceId: String, savedAt: Long) -> Unit = { _, _ -> },
 ) {
     @Volatile var provider: Provider? = null
         private set
     private var loadJob: Job? = null
+    /** Opening a playlist (and its guide) is still under way. */
+    val busy: Boolean get() = loadJob?.isActive == true
 
     /** The playlist chosen last time, or the first one; null when there are none. */
     fun initialSource(): Source? = sourceList.sources.let { all -> all.firstOrNull { it.id == sourceList.activeSourceId } ?: all.firstOrNull() }
@@ -69,12 +75,13 @@ class CatalogRepository(
         state.update { Repo.LibState(source = src, epgVersion = it.epgVersion) }
         return scope.launch {
             val cached = cache.read(src.id)
-            if (cached != null) state.update { it.copy(lib = cached.first, index = LibIndex(cached.first)) }
+            if (cached != null) { onCached(src.id, cached.second); state.update { it.copy(lib = cached.first, index = LibIndex(cached.first)) } }
             if (force || cached == null || cached.second < clock() - maxAgeMs) {
                 state.update { it.copy(loading = true, status = "Loading ${src.name}", error = null) }
                 try {
                     val lib = p.load { msg -> state.update { s -> s.copy(status = msg) } }
                     cache.write(src.id, lib)
+                    onSynced(src.id, clock(), null)
                     onLibraryChanged()
                     val idx = LibIndex(lib)
                     state.update { it.copy(lib = lib, index = idx, loading = false, status = "", error = null) }
@@ -83,11 +90,37 @@ class CatalogRepository(
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     logW("load failed", e)
-                    state.update { it.copy(loading = false, status = "", error = e.message ?: e::class.simpleName.orEmpty()) }
+                    val msg = e.message ?: e::class.simpleName.orEmpty()
+                    onSynced(src.id, clock(), msg)
+                    state.update { it.copy(loading = false, status = "", error = msg) }
                 }
             }
             afterLoad(force)
         }.also { loadJob = it }
+    }
+
+    /**
+     * Reads [src] from its server again and saves it, without clearing what the screens show: when it is the open
+     * playlist its new library replaces the old one in place. Returns the error, or null when it worked.
+     */
+    suspend fun sync(src: Source): String? {
+        val p = if (state.value.source?.id == src.id) provider ?: providerOf(src) else providerOf(src)
+        return try {
+            val lib = p.load { }
+            cache.write(src.id, lib)
+            onSynced(src.id, clock(), null)
+            if (state.value.source?.id == src.id) {
+                onLibraryChanged()
+                state.update { it.copy(lib = lib, index = LibIndex(lib), error = null) }
+            }
+            null
+        } catch (e: OutOfMemoryError) {
+            "Too large for this device's memory".also { onSynced(src.id, clock(), it) }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            logW("sync failed", e)
+            (e.message ?: e::class.simpleName.orEmpty()).also { onSynced(src.id, clock(), it) }
+        }
     }
 
     /** Reloads the open playlist from its server. */

@@ -257,6 +257,37 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = sp.getBoolean("showHints", true)
         set(v) { sp.putBoolean("showHints", v) }
 
+    /** How often playlists and the guide are read again, in hours; 0 is only when asked (see [Refresh]). */
+    var playlistRefreshHours: Int
+        get() = sp.getInt("plRefreshH", 12)
+        set(v) { sp.putInt("plRefreshH", v) }
+
+    var guideRefreshHours: Int
+        get() = sp.getInt("epgRefreshH", 12)
+        set(v) { sp.putInt("epgRefreshH", v) }
+
+    /** Playlists and the guide update once a night while the app is closed, from [overnightHour] o'clock. */
+    var overnightSync: Boolean
+        get() = sp.getBoolean("overnight", false)
+        set(v) { sp.putBoolean("overnight", v) }
+
+    var overnightHour: Int
+        get() = sp.getInt("overnightHour", 3)
+        set(v) { sp.putInt("overnightHour", v) }
+
+    /** When each playlist was last read from its server, and why the last try failed (null: it worked). */
+    fun syncedAt(sourceId: String): Long? = sp.getString("syncedAt.$sourceId", null)?.toLongOrNull()
+    fun syncError(sourceId: String): String? = sp.getString("syncErr.$sourceId", null)?.takeIf { it.isNotEmpty() }
+    fun recordSync(sourceId: String, at: Long, error: String?) {
+        if (error == null) sp.putString("syncedAt.$sourceId", "$at")
+        sp.putString("syncErr.$sourceId", error ?: "")
+    }
+
+    /** The last overnight update: when it ran and what it did. */
+    var overnightLast: String?
+        get() = sp.getString("overnightLast", null)
+        set(v) { sp.putString("overnightLast", v) }
+
     /** Keeps adult categories' films and series off the Home rows. */
     var hideAdultOnHome: Boolean
         get() = sp.getBoolean("hideAdultHome", false)

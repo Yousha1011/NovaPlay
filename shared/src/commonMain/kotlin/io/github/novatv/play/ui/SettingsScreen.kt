@@ -56,6 +56,7 @@ import androidx.compose.runtime.collectAsState
 import io.github.novatv.play.App
 import io.github.novatv.play.Nav
 import io.github.novatv.play.Route
+import io.github.novatv.play.data.Refresh
 import io.github.novatv.play.data.Repo
 import io.github.novatv.play.data.SourceType
 import kotlinx.coroutines.launch
@@ -81,6 +82,7 @@ fun SettingsScreen(nav: Nav) {
     var v by remember { mutableIntStateOf(0) }
     val changed: () -> Unit = { v++ }
     var pane by remember { mutableStateOf(Pane.PLAYLISTS) }
+    val syncing by App.repo.syncing.collectAsState()
     Row(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, top = 30.dp)) {
         Column(Modifier.width(320.dp).fillMaxHeight()) {
             Header("Settings")
@@ -110,7 +112,7 @@ fun SettingsScreen(nav: Nav) {
                     // Read here so a change re-reads every row's value; the rows (and focus on them) stay put.
                     if (v < 0) return@LazyColumn
                     when (pane) {
-                        Pane.PLAYLISTS -> playlistsPane(nav, st, changed)
+                        Pane.PLAYLISTS -> playlistsPane(nav, st, syncing, changed)
                         Pane.LIVE -> livePane(changed)
                         Pane.VOD -> vodPane(changed)
                         Pane.SPORTS -> sportsPane(nav, changed)
@@ -128,7 +130,7 @@ fun SettingsScreen(nav: Nav) {
 
 private fun LazyListScope.section(t: String) = item { SectionTitle(t, Modifier.padding(top = 10.dp)) }
 
-private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, changed: () -> Unit) {
+private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: String?, changed: () -> Unit) {
     section("Playlists")
     items(App.store.sources, key = { it.id }) { s ->
         val active = s.id == st.source?.id
@@ -148,13 +150,10 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, changed: ()
         }
     }
     item { Pill("Add a playlist", onClick = { nav.push(Route.AddSource) }, icon = Icons.Rounded.Add, primary = true) }
+    statusSection(st, syncing)
+    updatesSection(changed)
     section("TV guide")
-    item {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(remember(st.epgVersion) { App.repo.epg.summary() }, style = T.body, modifier = Modifier.weight(1f))
-            Pill("Reload guide", onClick = { App.repo.reloadGuide() }, icon = Icons.Rounded.Refresh)
-        }
-    }
+    item { Text(remember(st.epgVersion) { App.repo.epg.summary() }, style = T.body) }
     item {
         Column {
             Text("Extra TV guides (XMLTV links, separated by spaces), loaded together with your playlist's own guide", style = T.small,
@@ -165,6 +164,64 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, changed: ()
                 Pill("Save and reload", onClick = { App.store.extraEpg = url.split(' ', ',').map { it.trim() }.filter { it.startsWith("http") }; App.repo.reloadGuide() })
             }
         }
+    }
+}
+
+/** When each playlist and the guide last updated, with buttons to update them now. */
+private fun LazyListScope.statusSection(st: Repo.LibState, syncing: String?) {
+    val now = io.github.novatv.play.platform.nowMs()
+    section("Status")
+    item {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(syncing ?: st.epgStatus?.takeIf { it.startsWith("Loading") } ?: "Everything is up to date as of the times below.",
+                style = T.small.copy(color = if (syncing != null) C.accent else C.dim), modifier = Modifier.weight(1f))
+            Pill("Update everything", onClick = { if (syncing == null) App.repo.syncAllNow() }, icon = Icons.Rounded.Refresh)
+        }
+    }
+    items(App.store.sources, key = { "status-" + it.id }) { src ->
+        val err = App.store.syncError(src.id)
+        StatusRow(src.name, if (err != null) "Last try failed: $err" else "Channels, films and series updated ${Refresh.ago(App.store.syncedAt(src.id), now)}",
+            err != null) { if (syncing == null) App.repo.syncPlaylist(src) }
+    }
+    item(key = "status-guide") {
+        StatusRow("TV guide", "Updated ${Refresh.ago(remember(st.epgVersion) { App.repo.guideUpdatedAt() }, now)}", false) {
+            if (syncing == null) App.repo.reloadGuide() }
+    }
+    if (App.host.backgroundSync) item(key = "status-night") {
+        StatusRow("Overnight update", App.store.overnightLast ?: if (App.store.overnightSync) "Not run yet" else "Off", false, button = null) {}
+    }
+}
+
+@Composable
+private fun StatusRow(name: String, line: String, failed: Boolean, button: String? = "Update", onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(C.panel).padding(start = 18.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (failed) C.live else C.accent))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, style = T.body, maxLines = 1)
+            Text(line, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (button != null) Pill(button, onClick = onClick, icon = Icons.Rounded.Refresh)
+    }
+}
+
+/** How often playlists and the guide update, and the overnight update where the device can run one. */
+private fun LazyListScope.updatesSection(changed: () -> Unit) {
+    val s = App.store
+    section("Updates")
+    item { Choice("Update playlists", "How often channels, films and series are read again from your provider: when the app opens or comes back",
+        Refresh.INTERVALS.map { "$it" to Refresh.intervalLabel(it) }, "${s.playlistRefreshHours}") { s.playlistRefreshHours = it.toInt(); changed() } }
+    item { Choice("Update the TV guide", "How often the programme guide is downloaded again",
+        Refresh.INTERVALS.map { "$it" to Refresh.intervalLabel(it) }, "${s.guideRefreshHours}") { s.guideRefreshHours = it.toInt(); changed() } }
+    if (App.host.backgroundSync) {
+        item { Toggle("Update overnight", "Playlists and the guide update once a night while the app is closed, so they're fresh in the morning",
+            s.overnightSync) { s.overnightSync = it; App.host.scheduleOvernight(it, s.overnightHour); changed() } }
+        item { Choice("Overnight time", "It starts within two hours of this time",
+            (1..6).map { "$it" to io.github.novatv.play.platform.Time.hm(it, 0, io.github.novatv.play.platform.Time.use24h) }, "${s.overnightHour}") {
+            s.overnightHour = it.toInt(); App.host.scheduleOvernight(s.overnightSync, s.overnightHour); changed() } }
+        item { Action("Run the overnight update now", "Runs it in the background, as at night; Status shows the result", "Run") {
+            App.host.runOvernightNow(); toast("Updating playlists and the TV guide") } }
     }
 }
 

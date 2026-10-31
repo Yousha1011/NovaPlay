@@ -50,6 +50,12 @@ interface Host {
     val recorder: io.github.novatv.play.data.Recorder? get() = null
     /** A small muted player for Live TV previews, where the device can afford one (Android TV); null shows a still panel. */
     val previewEngine: io.github.novatv.play.data.PreviewEngine? get() = null
+    /** Whether playlists and the guide can update while the app is closed (Android); false hides the overnight options. */
+    val backgroundSync: Boolean get() = false
+    /** Arms (or, with [enabled] false, cancels) the nightly update at [hour] o'clock. */
+    fun scheduleOvernight(enabled: Boolean, hour: Int) {}
+    /** Runs the nightly update now, the way it runs at night; its result lands in Store.overnightLast. */
+    fun runOvernightNow() {}
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

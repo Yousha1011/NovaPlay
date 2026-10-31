@@ -30,7 +30,12 @@ class NovaApp : Application() {
                 startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             override fun toast(msg: String) { Toast.makeText(this@NovaApp, msg, Toast.LENGTH_SHORT).show() }
+            override val backgroundSync = true
+            override fun scheduleOvernight(enabled: Boolean, hour: Int) = Overnight.schedule(this@NovaApp, enabled, hour)
+            override fun runOvernightNow() = SyncService.start(this@NovaApp)
         })
+        // Re-armed at every start: alarms don't survive an update or a restart (the boot receiver starts the app).
+        Overnight.schedule(this, App.store.overnightSync, App.store.overnightHour)
         // Alarms are lost when the app is updated or the device restarts.
         recorder.rearm()
     }

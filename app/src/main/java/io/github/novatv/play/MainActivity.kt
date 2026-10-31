@@ -20,6 +20,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         App.away = false
+        // Back in the app: the open playlist and the guide are read again if their interval has passed.
+        App.repo.refreshIfDue()
     }
 
     /**

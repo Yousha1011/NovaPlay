@@ -54,6 +54,15 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".SyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".OvernightAlarm"
+            android:exported="false" />
+
         <receiver
             android:name=".RecordAlarm"
             android:exported="false">
