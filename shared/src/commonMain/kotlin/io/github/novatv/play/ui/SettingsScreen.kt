@@ -454,7 +454,7 @@ private fun LazyListScope.tipsPane() {
 
 private fun LazyListScope.aboutPane(st: Repo.LibState) {
     section("NovaPlay")
-    item { Action("Version", "A player for your own playlists. It does not provide any channels or content.", "1.1") {} }
+    item { Action("Version", "A player for your own playlists. It does not provide any channels or content.", "1.2") {} }
     item { Action("Playlist in use", st.source?.name ?: "None",
         "${st.lib.channels.size} channels · ${st.lib.movies.size} films · ${st.lib.series.size} series") {} }
     section("Where information comes from")
