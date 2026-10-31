@@ -97,6 +97,22 @@ class PagePreviewTest {
         assertEquals("http://host/live/1.ts", s.e.played.last())
     }
 
+    @Test fun restoringFocusToTheSameGuideCellDoesNotRestartThePreview() = runTest {
+        val s = Screens(this).apply { nav.tab = Tab.GUIDE }
+        s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()
+        // Out through the menu and another tab; back in, focus lands on the same cell (an equal value, rebuilt).
+        s.nav.menuOpen = true; s.settle()
+        s.nav.tab = Tab.LIVE; s.settle()
+        s.nav.tab = Tab.GUIDE; s.settle()
+        s.nav.menuOpen = false; s.settle()
+        s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()
+        assertEquals(State.Idle, s.controller.state.value)
+        assertEquals(1, s.e.played.size)
+        // The next move starts it.
+        s.guideCell = GuidePreview.of(ch("8"), onNow(ch("8")), now); s.settle(); advanceUntilIdle()
+        assertEquals("http://host/live/8.ts", s.e.played.last())
+    }
+
     @Test fun theFullScreenPlayerStopsThePreviewFirstAndReturningWaitsForAMove() = runTest {
         val s = Screens(this).apply { nav.tab = Tab.GUIDE }
         s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()

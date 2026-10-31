@@ -31,7 +31,8 @@ fun Modifier.rememberFocus(requester: FocusRequester): Modifier = focusRequester
 
 /**
  * For a scrolling list inside a page: remembers its own focused row, which the page's memory alone loses for rows a
- * lazy list builds on demand (Live TV's channels, for one).
+ * lazy list builds on demand (Live TV's channels, for one). Also for a row inside such a list, to remember its item
+ * (a Guide row's programme cell).
  */
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 fun Modifier.rememberFocusInList(): Modifier = focusRestorer()

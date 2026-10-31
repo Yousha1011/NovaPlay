@@ -123,7 +123,9 @@ fun GuideScreen(nav: Nav) {
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(C.line))
                 Box {
-                    LazyColumn(contentPadding = PaddingValues(bottom = 60.dp)) {
+                    // The grid remembers its row, and each row its cell, so coming back from the menu, another tab or a
+                    // screen opened over it lands on the cell last used instead of the Now button.
+                    LazyColumn(Modifier.rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp)) {
                         itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
                             GuideRow(c, group.channels, i, start, chW, gridW, st.epgVersion,
                                 // Left pages back only as far as the current half hour; from there it reaches the channel column.
@@ -185,7 +187,7 @@ private fun GuideRow(c: Channel, list: List<Channel>, index: Int, start: Long, c
     val progs by produceState(emptyList<Programme>(), c.id, start, epgVersion) {
         value = withContext(IO) { App.repo.epg.key(c)?.let { App.repo.epg.programmes(it, start, end) } ?: emptyList() }
     }
-    Row(Modifier.height(54.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(54.dp).rememberFocusInList(), verticalAlignment = Alignment.CenterVertically) {
         Tile({ playChannel(list, index) }, Modifier.width(chW).fillMaxHeight().padding(2.dp).onFocusChanged { if (it.isFocused) onFocus(null) },
             shape = RoundedCornerShape(6.dp), scale = 1.0f, color = Color.Transparent) {
             Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
