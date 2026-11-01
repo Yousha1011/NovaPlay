@@ -6,11 +6,6 @@ import io.github.novatv.play.App
 object MultiView {
     const val MAX = 4
 
-    /**
-     * How many screens a device with [ramMb] of memory can play without running out: each one holds seconds of video,
-     * and a Fire TV Stick (under 2 GB) ground to a halt with four. Below 2 GB: 2; below 3 GB: 3; otherwise [MAX].
-     */
-    fun maxScreens(ramMb: Long): Int = when { ramMb in 1 until 2048 -> 2; ramMb in 2048 until 3072 -> 3; else -> MAX }
 
     /** How long a screen may sit buffering before its stream is opened again. */
     const val STALL_MS = 12_000L

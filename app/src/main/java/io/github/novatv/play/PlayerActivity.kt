@@ -21,6 +21,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.SportsSoccer
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Fullscreen
@@ -54,6 +56,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -138,7 +141,7 @@ class PlayerActivity : ComponentActivity() {
     private var showControls by mutableStateOf(false)
 
     /** One more screen in multi-view: its own player, channel and reconnecting. The first screen is [player]. */
-    private inner class Slot(var channel: Int) {
+    private inner class Slot(var ch: Channel) {
         /** The player on screen; replaced by [standby] when its stream is cut off. */
         var player by mutableStateOf(buildPlayer(light = true))
         /** The next stream, opened while the current one plays out what it has buffered after being cut off. */
@@ -154,6 +157,8 @@ class PlayerActivity : ComponentActivity() {
         /** When it started waiting for picture (0 while playing), for the stall watchdog. */
         var waitingSince = 0L
         var failures = 0
+        /** Playing the HD version of a 4K channel. */
+        var hd by mutableStateOf(false)
 
         fun release() {
             job?.cancel(); standbyJob?.cancel()
@@ -165,9 +170,15 @@ class PlayerActivity : ComponentActivity() {
     private val extra = androidx.compose.runtime.mutableStateListOf<Slot>()
     private val multi get() = extra.isNotEmpty()
     private var active by mutableIntStateOf(0)
-    /** The channel list is open to pick a channel for screen [pickFor], or for a new screen when it's -1. */
+    /** The picker is open to choose a channel for screen [pickFor], or for a new screen when it's -1. */
     private var picking by mutableStateOf(false)
     private var pickFor = -1
+    /** Where the picker is: choosing Live TV or Sports, a channel list, the games, or one game's channels. */
+    private enum class PickSource { CHOOSE, LIVE, SPORTS, GAME }
+    private var pickSource by mutableStateOf(PickSource.CHOOSE)
+    private var pickGame by mutableStateOf<io.github.novatv.play.sports.SportEvent?>(null)
+    /** The first screen plays the HD version of its 4K channel. */
+    private var mainHd by mutableStateOf(false)
     /** The multi-view action bar (TV: OK opens it; phones: always shown). */
     private var multiMenu by mutableStateOf(false)
     private var mainWaitingSince = 0L
@@ -246,8 +257,15 @@ class PlayerActivity : ComponentActivity() {
         mi.totalMem / (1024 * 1024)
     }
 
-    /** How many screens this device can hold. */
-    private val maxScreens get() = io.github.novatv.play.data.MultiView.maxScreens(ramMb)
+    /** How many screens multi-view shows. */
+    private val maxScreens get() = io.github.novatv.play.data.MultiView.MAX
+
+    /**
+     * What a screen actually plays for [ch]: in multi-view, the HD version of a 4K channel when the playlist has one
+     * (a quarter of the memory and bandwidth, and a small screen loses nothing). Blocking; call off the main thread.
+     */
+    private fun streamFor(ch: Channel, small: Boolean): Channel =
+        if (small) io.github.novatv.play.data.HdTwin.of(ch, App.repo.state.value.lib.channels) ?: ch else ch
 
     // ---------------------------------------------------------------- multi-view
 
@@ -277,34 +295,67 @@ class PlayerActivity : ComponentActivity() {
     private fun startMulti() {
         if (live == null) return
         val max = maxScreens
-        if (1 + extra.size >= max) { Toast.makeText(this, "This device has memory for $max channels at once", Toast.LENGTH_LONG).show(); return }
+        if (1 + extra.size >= max) { Toast.makeText(this, "Multi-view shows up to $max channels", Toast.LENGTH_SHORT).show(); return }
         multiViewProblem(2 + extra.size)?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show(); return }
         showControls = false; showInfo = false; multiMenu = false
-        pickFor = -1; picking = true; showList = true
+        pickFor = -1; picking = true; pickSource = PickSource.CHOOSE
     }
 
-    /** Opens the channel list to change screen [i]'s channel. */
-    private fun changeScreen(i: Int) { multiMenu = false; pickFor = i; picking = true; showList = true }
+    /** Opens the picker to change screen [i]'s channel. */
+    private fun changeScreen(i: Int) { multiMenu = false; pickFor = i; picking = true; pickSource = PickSource.CHOOSE }
 
-    private fun channelOf(i: Int) = if (i == 0) channelIndex else extra.getOrNull(i - 1)?.channel ?: channelIndex
+    /** Screen [i]'s channel. */
+    private fun chOf(i: Int): Channel? = if (i == 0) channel else extra.getOrNull(i - 1)?.ch
 
-    /** Screen [i] plays channel [index]. */
-    private fun setScreen(i: Int, index: Int) {
-        val l = live ?: return
-        val idx = index.mod(l.channels.size)
-        if (i == 0) { channelIndex = idx; mainFailures = 0; zap(0); return }
+    /** Screen [i] plays [ch]. */
+    private fun setScreen(i: Int, ch: Channel) {
+        if (i == 0) { putMain(ch); return }
         val slot = extra.getOrNull(i - 1) ?: return
-        slot.channel = idx; slot.failures = 0
+        slot.ch = ch; slot.failures = 0
         startSlot(slot)
     }
 
-    private fun addScreen(index: Int) {
+    /** The first screen plays [ch]; a channel from Sports outside the list joins the front of it, for zapping. */
+    private fun putMain(ch: Channel) {
         val l = live ?: return
-        val slot = Slot(index.mod(l.channels.size))
+        val idx = l.channels.indexOfFirst { it.id == ch.id }
+        if (idx >= 0) channelIndex = idx
+        else { item = PlayItem.Live(listOf(ch) + l.channels, 0); channelIndex = 0 }
+        mainFailures = 0
+        zap(0)
+    }
+
+    /** CH+/-: screen [i] moves [d] channels along the list. */
+    private fun zapScreen(i: Int, d: Int) {
+        val l = live ?: return
+        val idx = l.channels.indexOfFirst { it.id == chOf(i)?.id }.coerceAtLeast(0)
+        setScreen(i, l.channels[(idx + d).mod(l.channels.size)])
+    }
+
+    private fun addScreen(ch: Channel) {
+        val first = extra.isEmpty()
+        val slot = Slot(ch)
         listen(slot, slot.player)
         extra.add(slot)
         useView(extra.size)
         startSlot(slot)
+        // The first screen goes small too: over to its HD version, if it has one.
+        if (first) { mainFailures = 0; startCurrent() }
+    }
+
+    /** A channel chosen in the picker goes on screen [pickFor], or on a new screen. */
+    private fun pickChannel(ch: Channel) {
+        picking = false; showList = false; pickSource = PickSource.CHOOSE; pickGame = null
+        if (pickFor < 0) addScreen(ch) else setScreen(pickFor, ch)
+    }
+
+    /** Back in the picker: one step up, then closed. */
+    private fun pickBack() {
+        when (pickSource) {
+            PickSource.GAME -> { pickSource = PickSource.SPORTS; pickGame = null }
+            PickSource.SPORTS, PickSource.LIVE -> { pickSource = PickSource.CHOOSE; showList = false }
+            PickSource.CHOOSE -> { picking = false; showList = false }
+        }
     }
 
     /** Events of one of [slot]'s players: the one on screen, or its standby. */
@@ -347,7 +398,7 @@ class PlayerActivity : ComponentActivity() {
         listen(slot, sp)
         slot.standby = sp
         slot.standbyJob = lifecycleScope.launch {
-            val url = withContext(IO) { try { App.repo.provider?.liveUrl(l.channels[slot.channel]) } catch (e: Exception) { null } }
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(streamFor(slot.ch, true)) } catch (e: Exception) { null } }
             if (url == null || slot.standby !== sp) return@launch
             sp.setMediaItem(mediaItem(url)); sp.prepare(); sp.playWhenReady = false
         }
@@ -386,7 +437,9 @@ class PlayerActivity : ComponentActivity() {
         slot.job?.cancel()
         slot.error = null; slot.loading = true; slot.waitingSince = System.currentTimeMillis()
         slot.job = lifecycleScope.launch {
-            val url = withContext(IO) { try { App.repo.provider?.liveUrl(l.channels[slot.channel]) } catch (e: Exception) { null } }
+            val stream = withContext(IO) { streamFor(slot.ch, true) }
+            slot.hd = stream.id != slot.ch.id
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(stream) } catch (e: Exception) { null } }
             if (url == null) { reconnect(slot); return@launch }
             slot.player.stop()
             slot.player.setMediaItem(mediaItem(url)); slot.player.prepare(); slot.player.playWhenReady = true
@@ -464,19 +517,20 @@ class PlayerActivity : ComponentActivity() {
             // The first screen's player goes on with the next screen's channel.
             val next = extra.removeAt(0)
             next.release()
-            channelIndex = next.channel; zap(0)
+            putMain(next.ch)
         } else extra.removeAt(i - 1).release()
         useView(minOf(active, extra.size))
     }
 
     /** Leaves multi-view, keeping screen [keep] full screen. */
     private fun endMulti(keep: Int) {
-        val ch = channelOf(keep)
+        val ch = chOf(keep)
         for (slot in extra) slot.release()
         extra.clear()
         picking = false; multiMenu = false
         player.volume = 1f; active = 0; mainFailures = 0
-        if (keep != 0) { channelIndex = ch; zap(0) }
+        // Back to one screen: the channel in 4K again, if a screen was showing its HD version.
+        if (keep != 0 && ch != null) putMain(ch) else if (mainHd) startCurrent()
     }
 
     /** Another title picked while the player sits in its corner window: play that one instead. */
@@ -531,7 +585,12 @@ class PlayerActivity : ComponentActivity() {
                 try {
                     val p = App.repo.provider ?: return@withContext null
                     when (it) {
-                        is PlayItem.Live -> p.liveUrl(it.channels[channelIndex])
+                        is PlayItem.Live -> {
+                            // Several screens: the HD version of a 4K channel; one screen: the channel itself.
+                            val stream = streamFor(it.channels[channelIndex], multi)
+                            mainHd = stream.id != it.channels[channelIndex].id
+                            p.liveUrl(stream)
+                        }
                         is PlayItem.Vod -> it.movie?.let { m -> m.url?.takeIf { u -> u.startsWith("file:") } ?: p.movieUrl(m) }
                             ?: p.episodeUrl(it.series!!, it.episode!!)
                     }
@@ -569,7 +628,7 @@ class PlayerActivity : ComponentActivity() {
     private fun jumpTo(index: Int) {
         val l = live ?: return
         showList = false
-        if (picking) { picking = false; if (pickFor < 0) addScreen(index) else setScreen(pickFor, index); return }
+        if (picking) { pickChannel(l.channels[index.coerceIn(0, l.channels.lastIndex)]); return }
         channelIndex = index.coerceIn(0, l.channels.lastIndex)
         zap(0)
     }
@@ -612,10 +671,15 @@ class PlayerActivity : ComponentActivity() {
      * the toolbar. Multi-view: Left/Right pick the view with sound, Up/Down change its channel, OK or Back keep it full screen.
      */
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        if (picking && pickSource != PickSource.LIVE) {
+            if (e.keyCode == KeyEvent.KEYCODE_BACK || e.keyCode == KeyEvent.KEYCODE_MENU) { if (e.action == KeyEvent.ACTION_UP) pickBack(); return true }
+            return super.dispatchKeyEvent(e)
+        }
         if (showList || showTracks || showControls) {
             if (e.keyCode == KeyEvent.KEYCODE_BACK || e.keyCode == KeyEvent.KEYCODE_MENU) {
                 if (e.action == KeyEvent.ACTION_UP) {
-                    if (showList || showTracks) { showList = false; showTracks = false; picking = false } else { showControls = false; showInfo = false }
+                    if (picking && showList) pickBack()
+                    else if (showList || showTracks) { showList = false; showTracks = false; picking = false } else { showControls = false; showInfo = false }
                 }
                 return true
             }
@@ -639,8 +703,8 @@ class PlayerActivity : ComponentActivity() {
                 KeyEvent.KEYCODE_DPAD_RIGHT -> { useView((active + 1).mod(n)); return true }
                 KeyEvent.KEYCODE_DPAD_UP -> { if (active - cols >= 0) useView(active - cols); return true }
                 KeyEvent.KEYCODE_DPAD_DOWN -> { if (active + cols < n) useView(active + cols); return true }
-                KeyEvent.KEYCODE_CHANNEL_UP -> { setScreen(active, channelOf(active) - 1); return true }
-                KeyEvent.KEYCODE_CHANNEL_DOWN -> { setScreen(active, channelOf(active) + 1); return true }
+                KeyEvent.KEYCODE_CHANNEL_UP -> { zapScreen(active, -1); return true }
+                KeyEvent.KEYCODE_CHANNEL_DOWN -> { zapScreen(active, 1); return true }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { multiMenu = true; return true }
             }
             return super.dispatchKeyEvent(e)
@@ -747,6 +811,8 @@ class PlayerActivity : ComponentActivity() {
                 AnimatedVisibility(showInfo, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) { Overlay() }
             }
             AnimatedVisibility(showList, enter = slideInHorizontally { -it } + fadeIn(), exit = slideOutHorizontally { -it } + fadeOut()) { ChannelList() }
+            if (picking && pickSource == PickSource.CHOOSE) SourceChooser()
+            if (picking && (pickSource == PickSource.SPORTS || pickSource == PickSource.GAME)) SportsPicker()
             AnimatedVisibility(showTracks, enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut(),
                 modifier = Modifier.align(Alignment.CenterEnd)) { TracksPanel() }
         }
@@ -895,7 +961,8 @@ class PlayerActivity : ComponentActivity() {
                     val x = (maxWidth - (tileW * inRow + gap * (inRow - 1))) / 2 + (tileW + gap) * (i % cols)
                     val y = top + (tileH + gap) * r
                     val slot = extra.getOrNull(i - 1)
-                    val c = l.channels.getOrNull(channelOf(i))
+                    val c = chOf(i)
+                    val hd = if (slot == null) mainHd else slot.hd
                     androidx.compose.runtime.key(if (slot == null) 0 else System.identityHashCode(slot)) {
                         Box(Modifier.offset(x, y).size(tileW, tileH).clip(RoundedCornerShape(10.dp)).background(Color(0xFF0B0E13))
                             .then(if (active == i) Modifier.androidxBorder(3.dp, C.accent) else Modifier.androidxBorder(1.dp, C.line))
@@ -917,6 +984,7 @@ class PlayerActivity : ComponentActivity() {
                                 .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (c.number > 0) { Text("${c.number}", style = T.body); Spacer(Modifier.width(8.dp)) }
                                 Text(c.name, style = T.small.copy(color = C.text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                if (hd) { Spacer(Modifier.width(8.dp)); Text("HD", style = T.tiny.copy(color = C.accent)) }
                                 if (active == i) Text("♪", style = T.h2.copy(color = C.accent))
                             }
                         }
@@ -951,6 +1019,90 @@ class PlayerActivity : ComponentActivity() {
 
     private fun Modifier.androidxAspect() = this.then(Modifier.aspectRatio(16f / 9f))
     private fun Modifier.androidxBorder(w: androidx.compose.ui.unit.Dp, c: Color) = this.then(Modifier.border(w, c, RoundedCornerShape(10.dp)))
+
+    /** Multi-view's first step: a channel from Live TV, or a game from Sports. */
+    @Composable
+    private fun SourceChooser() {
+        val first = remember { FocusRequester() }
+        LaunchedEffect(Unit) { repeat(5) { try { first.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(50) } } }
+        val I = androidx.compose.material.icons.Icons.Rounded
+        Box(Modifier.fillMaxSize().background(Color(0xC0000000)), contentAlignment = Alignment.Center) {
+            Column(Modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xF00A0E17)).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(if (pickFor < 0) "Add a screen" else "Change this screen", style = T.h1)
+                Spacer(Modifier.height(6.dp))
+                Text("Pick a channel, or a game and the channel showing it", style = T.small)
+                Spacer(Modifier.height(24.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    io.github.novatv.play.ui.Pill("Live TV", icon = I.LiveTv, primary = true, modifier = Modifier.focusRequester(first),
+                        onClick = { pickSource = PickSource.LIVE; showList = true })
+                    io.github.novatv.play.ui.Pill("Sports", icon = I.SportsSoccer, onClick = { pickSource = PickSource.SPORTS })
+                }
+            }
+        }
+    }
+
+    /** Sports: today's games (live ones first), then the channels showing the one chosen. */
+    @Composable
+    private fun SportsPicker() {
+        val sports by App.repo.sports.collectAsState()
+        LaunchedEffect(Unit) { App.repo.sportsRepo.refresh() }
+        val now = System.currentTimeMillis()
+        val games = remember(sports.events) {
+            sports.events.filter { it.state == io.github.novatv.play.sports.State.LIVE ||
+                (it.state == io.github.novatv.play.sports.State.PRE && it.start - now < 12 * 3600_000L) }
+                .sortedWith(compareBy({ it.state != io.github.novatv.play.sports.State.LIVE }, { it.start }))
+        }
+        val game = pickGame
+        val focus = remember { FocusRequester() }
+        // The first row takes focus once its list is there (a game's channels arrive a moment after it opens).
+        fun focusFirst() = lifecycleScope.launch { repeat(10) { try { focus.requestFocus(); return@launch } catch (e: Exception) { delay(80) } } }
+        Column(Modifier.width(560.dp).fillMaxHeight().background(Color(0xF00A0E17)).padding(16.dp)) {
+            if (game == null) {
+                LaunchedEffect(games.isEmpty()) { if (games.isNotEmpty()) focusFirst() }
+                Text("Pick a game", style = T.h2, modifier = Modifier.padding(start = 6.dp, bottom = 8.dp))
+                if (games.isEmpty()) Text(if (sports.loading) "Loading games…" else "No games on now or in the next 12 hours", style = T.small, modifier = Modifier.padding(6.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(games, key = { _, g -> g.id }) { i, g ->
+                        Tile({ pickGame = g; pickSource = PickSource.GAME }, Modifier.fillMaxWidth().height(70.dp).let { if (i == 0) it.focusRequester(focus) else it },
+                            shape = RoundedCornerShape(10.dp), scale = 1.02f, color = Color.Transparent) {
+                            Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.Center) {
+                                Text(g.title, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text((if (g.state == io.github.novatv.play.sports.State.LIVE) "LIVE · ${g.detail}" else clock(g.start)) + " · ${g.league.name}",
+                                    style = T.tiny.copy(color = if (g.state == io.github.novatv.play.sports.State.LIVE) C.live else C.dim), maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            } else {
+                val epg = App.repo.state.collectAsState().value.epgVersion
+                val airings by androidx.compose.runtime.produceState<List<io.github.novatv.play.sports.Airing>?>(null, game.id, epg) {
+                    value = withContext(IO) { App.repo.matcher().airings(game, limit = 60) }
+                    val more = withContext(IO) { App.repo.matcher().airings(game, io.github.novatv.play.sports.Broadcasters.forEvent(game), limit = 60) }
+                    value = (value.orEmpty() + more).distinctBy { it.channel.id }
+                }
+                Text(game.title, style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp))
+                Text("Channels showing it", style = T.small, modifier = Modifier.padding(start = 6.dp, bottom = 8.dp))
+                val list = airings
+                LaunchedEffect(game.id, list.isNullOrEmpty()) { if (!list.isNullOrEmpty()) focusFirst() }
+                when {
+                    list == null -> Text("Looking through your channels…", style = T.small, modifier = Modifier.padding(6.dp))
+                    list.isEmpty() -> Text("None of your channels show this game. BACK for another.", style = T.small, modifier = Modifier.padding(6.dp))
+                }
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(list.orEmpty(), key = { _, a -> a.channel.id }) { i, a ->
+                        Tile({ pickChannel(a.channel) }, Modifier.fillMaxWidth().height(58.dp).let { if (i == 0) it.focusRequester(focus) else it },
+                            shape = RoundedCornerShape(10.dp), scale = 1.02f, color = Color.Transparent) {
+                            Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Logo(a.channel.logo, a.channel.name, Modifier.size(56.dp, 38.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text(a.channel.name, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     @Composable
     private fun ChannelList() {
