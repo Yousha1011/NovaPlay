@@ -59,6 +59,7 @@ import io.github.novatv.play.Nav
 import io.github.novatv.play.Route
 import io.github.novatv.play.data.Parental
 import io.github.novatv.play.data.Refresh
+import io.github.novatv.play.data.Updates
 import io.github.novatv.play.data.Repo
 import io.github.novatv.play.data.SourceType
 import kotlinx.coroutines.launch
@@ -132,7 +133,7 @@ fun SettingsScreen(nav: Nav) {
                         Pane.LOOK -> lookPane(changed)
                         Pane.PARENTAL -> parentalPane(nav, changed)
                         Pane.TIPS -> tipsPane()
-                        Pane.ABOUT -> aboutPane(st)
+                        Pane.ABOUT -> aboutPane(st, changed)
                     }
                 }
             }
@@ -452,9 +453,12 @@ private fun LazyListScope.tipsPane() {
     }
 }
 
-private fun LazyListScope.aboutPane(st: Repo.LibState) {
+private fun LazyListScope.aboutPane(st: Repo.LibState, changed: () -> Unit) {
+    val s = App.store
     section("NovaPlay")
-    item { Action("Version", "A player for your own playlists. It does not provide any channels or content.", "1.2") {} }
+    item { Action("Version", "A player for your own playlists. It does not provide any channels or content.", Updates.CURRENT) {} }
+    item { Toggle("Check for updates when NovaPlay opens", "Offers a new version as soon as it's released", s.checkUpdates) { s.checkUpdates = it; changed() } }
+    item { Action("Check for updates now", null, null) { Updates.check() } }
     item { Action("Playlist in use", st.source?.name ?: "None",
         "${st.lib.channels.size} channels · ${st.lib.movies.size} films · ${st.lib.series.size} series") {} }
     section("Where information comes from")

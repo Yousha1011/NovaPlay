@@ -56,6 +56,10 @@ interface Host {
     fun scheduleOvernight(enabled: Boolean, hour: Int) {}
     /** Runs the nightly update now, the way it runs at night; its result lands in Store.overnightLast. */
     fun runOvernightNow() {}
+    /** This device's file in a release ("NovaPlay-1.2.apk"); null opens the release page instead of installing. */
+    val updateAsset: Regex? get() = null
+    /** Installs a downloaded update (Android's installer, the Windows setup). */
+    fun installUpdate(file: String) {}
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

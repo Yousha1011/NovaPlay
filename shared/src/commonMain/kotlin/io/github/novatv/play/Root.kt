@@ -190,7 +190,11 @@ fun Root() {
     if (Look.modern) androidx.compose.runtime.LaunchedEffect(Unit) {
         io.github.novatv.play.ui.phone.P.themes.firstOrNull { it.id == App.store.phoneTheme }?.let { io.github.novatv.play.ui.phone.P.theme = it }
     }
-    RootBody()
+    Box(Modifier.fillMaxSize()) {
+        RootBody()
+        io.github.novatv.play.ui.UpdatePrompt()
+    }
+    io.github.novatv.play.ui.UpdateCheck()
 }
 
 /** Logos and posters: a memory cache sized for a TV and a 250 MB disk cache. */
@@ -214,7 +218,8 @@ private fun RootBody() {
     androidx.compose.runtime.LaunchedEffect(App.away) { nav.covered = App.away }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    BackHandler(enabled = nav.back(railFocused) != Back.EXIT && io.github.novatv.play.ui.Pin.request == null) {
+    BackHandler(enabled = nav.back(railFocused) != Back.EXIT && io.github.novatv.play.ui.Pin.request == null &&
+        io.github.novatv.play.data.Updates.offer == null) {
         when (nav.back(railFocused)) {
             Back.POP -> nav.pop()
             Back.TO_RAIL -> try { nav.railFocus.requestFocus() } catch (e: Exception) { }

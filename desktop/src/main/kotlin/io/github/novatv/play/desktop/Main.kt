@@ -43,6 +43,16 @@ object Desktop : Host {
     var message by mutableStateOf<Pair<String, Long>?>(null)
     override fun play(item: PlayItem) { playing = item }
     override fun toast(msg: String) { message = msg to System.nanoTime() }
+    override fun openUrl(url: String) { runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(url)) } }
+    override val updateAsset = Regex("""NovaPlay-Setup-[\d.]+\.msi""")
+    /** Starts the setup (it replaces this version and keeps the settings in %APPDATA%), then quits so it can. */
+    override fun installUpdate(file: String) {
+        try {
+            ProcessBuilder("msiexec", "/i", file).start()
+        } catch (e: Exception) { toast("Couldn't start the setup: ${e.message}"); return }
+        Vlc.release()
+        kotlin.system.exitProcess(0)
+    }
 }
 
 /** Raised by a second launch of the app: the open window comes to the front instead of a new one opening. */

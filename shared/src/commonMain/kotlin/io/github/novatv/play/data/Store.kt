@@ -253,6 +253,11 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         set(v) { sp.putBoolean("hideScores", v) }
 
     /** The button hints at the foot of pages and in the player. */
+    /** Whether NovaPlay looks for a new release when it opens. */
+    var checkUpdates: Boolean
+        get() = sp.getBoolean("checkUpdates", true)
+        set(v) { sp.putBoolean("checkUpdates", v) }
+
     var showHints: Boolean
         get() = sp.getBoolean("showHints", true)
         set(v) { sp.putBoolean("showHints", v) }

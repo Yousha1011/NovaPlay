@@ -33,6 +33,8 @@ class NovaApp : Application() {
             override val backgroundSync = true
             override fun scheduleOvernight(enabled: Boolean, hour: Int) = Overnight.schedule(this@NovaApp, enabled, hour)
             override fun runOvernightNow() = SyncService.start(this@NovaApp)
+            override val updateAsset = Installer.asset
+            override fun installUpdate(file: String) = Installer.install(this@NovaApp, java.io.File(file))
         })
         // Re-armed at every start: alarms don't survive an update or a restart (the boot receiver starts the app).
         Overnight.schedule(this, App.store.overnightSync, App.store.overnightHour)

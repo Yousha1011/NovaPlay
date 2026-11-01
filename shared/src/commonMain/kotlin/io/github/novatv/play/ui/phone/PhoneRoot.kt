@@ -91,6 +91,15 @@ private fun label(t: Tab) = when (t) { Tab.SERIES -> "TV Shows"; else -> t.label
 fun PhoneRoot() {
     io.github.novatv.play.ImageLoaderSetup()
     PhoneStyle()
+    Box(Modifier.fillMaxSize()) {
+        PhoneBody()
+        io.github.novatv.play.ui.UpdatePrompt()
+    }
+    io.github.novatv.play.ui.UpdateCheck()
+}
+
+@Composable
+private fun PhoneBody() {
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
     Box(Modifier.fillMaxSize().background(P.background)) {
