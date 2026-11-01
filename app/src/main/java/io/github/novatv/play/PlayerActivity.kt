@@ -222,9 +222,14 @@ class PlayerActivity : ComponentActivity() {
     /** An ExoPlayer with NovaPlay's buffer setting; [light] keeps a smaller buffer for multi-view's second stream. */
     private fun buildPlayer(light: Boolean): ExoPlayer {
         val buffer = App.store.bufferMs
-        val load = if (light) DefaultLoadControl.Builder().setBufferDurationsMs(8_000, 20_000, 1_500, 3_000).build()
+        // Buffers are capped in bytes as well as seconds: seconds of a 4K stream run to hundreds of megabytes, which
+        // a Fire TV Stick (1.7 GB) can't spare, least of all with several screens.
+        val low = ramMb < 2048
+        val load = if (light) DefaultLoadControl.Builder().setBufferDurationsMs(6_000, if (low) 12_000 else 20_000, 1_500, 3_000)
+                .setTargetBufferBytes((if (low) 6 else 24) * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false).build()
             else DefaultLoadControl.Builder()
                 .setBufferDurationsMs(maxOf(15_000, buffer * 3), maxOf(50_000, buffer * 8), buffer.coerceAtMost(15_000), buffer)
+                .setTargetBufferBytes((if (low) 24 else 128) * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false)
                 .build()
         val data = OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA)
         return ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)
@@ -233,6 +238,16 @@ class PlayerActivity : ComponentActivity() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(data))
             .build()
     }
+
+    /** The device's memory in MB (a Fire TV Stick 4K Max: about 1,700). */
+    private val ramMb: Long by lazy {
+        val mi = android.app.ActivityManager.MemoryInfo()
+        getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(mi)
+        mi.totalMem / (1024 * 1024)
+    }
+
+    /** How many screens this device can hold. */
+    private val maxScreens get() = io.github.novatv.play.data.MultiView.maxScreens(ramMb)
 
     // ---------------------------------------------------------------- multi-view
 
@@ -261,8 +276,8 @@ class PlayerActivity : ComponentActivity() {
     /** Adds a screen: checks the device, then opens the channel list to pick its channel. */
     private fun startMulti() {
         if (live == null) return
-        val max = io.github.novatv.play.data.MultiView.MAX
-        if (1 + extra.size >= max) { Toast.makeText(this, "Multi-view shows up to $max channels", Toast.LENGTH_SHORT).show(); return }
+        val max = maxScreens
+        if (1 + extra.size >= max) { Toast.makeText(this, "This device has memory for $max channels at once", Toast.LENGTH_LONG).show(); return }
         multiViewProblem(2 + extra.size)?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show(); return }
         showControls = false; showInfo = false; multiMenu = false
         pickFor = -1; picking = true; showList = true
@@ -325,7 +340,8 @@ class PlayerActivity : ComponentActivity() {
     /** Opens [slot]'s channel again in a second player, paused, ready to take over. */
     private fun openStandby(slot: Slot) {
         val l = live ?: return
-        if (slot.standby != null) return
+        // A low-memory device can't hold a third stream: there the screen reconnects when its buffer runs out instead.
+        if (slot.standby != null || ramMb < 2048) return
         val sp = buildPlayer(light = true)
         sp.volume = 0f
         listen(slot, sp)
@@ -919,7 +935,7 @@ class PlayerActivity : ComponentActivity() {
         val first = remember { FocusRequester() }
         LaunchedEffect(multiMenu) { if (multiMenu && !PHONE) repeat(5) { try { first.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(50) } } }
         val I = androidx.compose.material.icons.Icons.Rounded
-        val full = n >= io.github.novatv.play.data.MultiView.MAX
+        val full = n >= maxScreens
         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!full) item {
                 io.github.novatv.play.ui.Pill("Add a screen", icon = I.Add, primary = true, modifier = Modifier.focusRequester(first), onClick = { startMulti() })
