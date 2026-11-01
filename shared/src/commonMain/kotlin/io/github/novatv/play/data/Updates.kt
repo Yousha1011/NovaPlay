@@ -37,6 +37,9 @@ object Updates {
 
     /** The release on offer, while the prompt is up. */
     var offer by mutableStateOf<Release?>(null)
+    /** The newest release when it's newer than this one; stays known after "Not now", so Settings › About can install it. */
+    var available by mutableStateOf<Release?>(null)
+        private set
     /** How far the download has got, 0 to 1, while it runs. */
     var progress by mutableStateOf<Float?>(null)
         private set
@@ -85,10 +88,13 @@ object Updates {
                 if (!quiet) io.github.novatv.play.toast("Couldn't check for updates")
                 return@launch
             }
-            if (r != null && newer(r.version, CURRENT)) offer = r
+            if (r != null && newer(r.version, CURRENT)) { available = r; offer = r }
             else if (!quiet) io.github.novatv.play.toast("NovaPlay is up to date ($CURRENT)")
         }
     }
+
+    /** Puts the prompt up again for the release found earlier. */
+    fun reopen() { available?.let { offer = it } }
 
     fun cancel() { if (progress == null) offer = null }
 

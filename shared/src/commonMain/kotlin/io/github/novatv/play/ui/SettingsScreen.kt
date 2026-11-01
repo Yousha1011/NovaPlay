@@ -457,8 +457,12 @@ private fun LazyListScope.aboutPane(st: Repo.LibState, changed: () -> Unit) {
     val s = App.store
     section("NovaPlay")
     item { Action("Version", "A player for your own playlists. It does not provide any channels or content.", Updates.CURRENT) {} }
-    item { Toggle("Check for updates when NovaPlay opens", "Offers a new version as soon as it's released", s.checkUpdates) { s.checkUpdates = it; changed() } }
-    item { Action("Check for updates now", null, null) { Updates.check() } }
+    item(key = "update-now") {
+        val a = Updates.available
+        if (a != null) Action("Update to NovaPlay ${a.version}", "A new version is ready. Your playlists and settings are kept.", "Install") { Updates.reopen() }
+        else Action("Check for updates now", "You have the latest version unless this finds a newer one", null) { Updates.check() }
+    }
+    item { Toggle("Check for updates automatically", "When NovaPlay opens; a new version is offered straight away, and stays here to install later", s.checkUpdates) { s.checkUpdates = it; changed() } }
     item { Action("Playlist in use", st.source?.name ?: "None",
         "${st.lib.channels.size} channels · ${st.lib.movies.size} films · ${st.lib.series.size} series") {} }
     section("Where information comes from")

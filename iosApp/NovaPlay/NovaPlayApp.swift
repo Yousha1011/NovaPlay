@@ -67,7 +67,20 @@ final class PlayerHost {
             player.load(request)
             return
         }
+        // Something else picked while the small window plays: it gives way to the full player.
+        PipKeeper.shared.stop()
+        present(request, resumeMs: nil)
+    }
+
+    /// Back from the small window: the full player opens again, a film where it had got to.
+    func reopen(_ request: PlayRequest, atMs: Int64) {
+        if let player = current { player.resumeMs = atMs; player.load(request); return }
+        present(request, resumeMs: atMs > 0 ? atMs : nil)
+    }
+
+    private func present(_ request: PlayRequest, resumeMs: Int64?) {
         let player = PlayerViewController(request: request)
+        player.resumeMs = resumeMs
         player.modalPresentationStyle = .fullScreen
         current = player
         topController()?.present(player, animated: true) {

@@ -6,7 +6,7 @@ import Shared
 /// The player, in two layouts like IM Player's:
 /// portrait, the picture on top with the channel's details, its guide and "More from" its category below;
 /// landscape, the picture full screen with floating controls, brightness and volume sliders and a More Channels drawer.
-final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICollectionViewDataSource, UICollectionViewDelegate, UIGestureRecognizerDelegate, AVPictureInPictureControllerDelegate {
+final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICollectionViewDataSource, UICollectionViewDelegate, UIGestureRecognizerDelegate {
     private let player = VLCMediaPlayer()
     private var request: PlayRequest
 
@@ -28,13 +28,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     private lazy var rotateButton = iconButton("rectangle.portrait.rotate", target: self, action: #selector(rotate))
     private lazy var expandButton = iconButton("arrow.up.left.and.arrow.down.right", target: self, action: #selector(rotate))
     private lazy var pipButton = iconButton("pip.enter", target: self, action: #selector(startPip))
-
-    // Picture in picture: the same stream in AVPlayer, in a small window over other apps.
-    private var pipPlayer: AVPlayer?
-    private var pipLayer: AVPlayerLayer?
-    private var pip: AVPictureInPictureController?
-    private var pipWatch: NSKeyValueObservation?
-    private var pipRestoring = false
+    private lazy var multiButton = iconButton("rectangle.split.2x2", target: self, action: #selector(openMulti))
+    /// Where to start a film or episode instead of its saved place (back from the small window).
+    var resumeMs: Int64?
     private let settingsButton = UIButton(type: .system)
 
     // Middle.
@@ -157,7 +153,6 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        stopPip()
         saveProgress()
         tickTimer?.invalidate()
         hideTimer?.invalidate()
@@ -174,6 +169,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
                           brightness, volume, resPill, fpsPill, ratePill, lockButton, moreButton] { v.isHidden = !land }
         backButton.isHidden = land
         pipButton.isHidden = !AVPictureInPictureController.isPictureInPictureSupported()
+        multiButton.isHidden = !request.live
         expandButton.isHidden = land
         speedButton.isHidden = true
         backSkip.isHidden = request.live
@@ -236,7 +232,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         settingsButton.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] done in done(self?.settingsMenu() ?? []) }])
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        for b in [pipButton, infoButton, favButton, rotateButton, settingsButton, expandButton] { topBar.addArrangedSubview(b) }
+        for b in [pipButton, multiButton, infoButton, favButton, rotateButton, settingsButton, expandButton] { topBar.addArrangedSubview(b) }
         topBar.axis = .horizontal; topBar.spacing = 6
         topBar.isLayoutMarginsRelativeArrangement = true
         topBar.layoutMargins = UIEdgeInsets(top: 2, left: 10, bottom: 2, right: 10)
@@ -471,9 +467,11 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             spinner.stopAnimating(); errorLabel.isHidden = true
             // VLC's own views inside the picture must never take touches.
             video.subviews.forEach { $0.isUserInteractionEnabled = false }
-            if !didResume && !request.live && request.startMs > 0 {
+            let start = resumeMs ?? request.startMs
+            if !didResume && !request.live && start > 0 {
                 didResume = true
-                player.time = VLCTime(int: Int32(clamping: request.startMs))
+                resumeMs = nil
+                player.time = VLCTime(int: Int32(clamping: start))
             }
         case .buffering, .opening:
             if !player.isPlaying { spinner.startAnimating() }
@@ -727,44 +725,26 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     // MARK: Picture in picture
 
-    /// AVPlayer plays HLS and MP4: an Xtream channel's .ts address has an .m3u8 twin.
-    private func pipURL() -> URL? {
-        var u = request.url
-        if request.live, let q = u.range(of: ".ts", options: [.backwards]), u[q.upperBound...].isEmpty || u[q.upperBound...].hasPrefix("?") {
-            u.replaceSubrange(q, with: ".m3u8")
-        }
-        return URL(string: u)
-    }
-
+    /// Minimise: the stream moves to the small window in the corner (see PipKeeper), this screen closes and the app goes
+    /// to the home screen. The full player lets go of its stream first: many playlists allow only one at a time, and two
+    /// would leave the small window stopped.
     @objc private func startPip() {
-        guard pip == nil, AVPictureInPictureController.isPictureInPictureSupported(), let url = pipURL() else { return }
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": request.userAgent]])
-        let item = AVPlayerItem(asset: asset)
-        let av = AVPlayer(playerItem: item)
-        let layer = AVPlayerLayer(player: av)
-        layer.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
-        layer.opacity = 0.01
-        videoBox.layer.addSublayer(layer)
-        pipPlayer = av; pipLayer = layer
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
         spinner.startAnimating()
-        let startAt = request.live ? 0 : Int64(player.time.intValue)
-        pipWatch = item.observe(\.status, options: [.new]) { [weak self] it, _ in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if it.status == .failed { self.spinner.stopAnimating(); self.stopPip(); self.pipFailed(); return }
-                guard it.status == .readyToPlay, self.pip == nil else { return }
-                if startAt > 0 { av.seek(to: CMTime(value: startAt, timescale: 1000)) }
-                av.play()
-                let c = AVPictureInPictureController(playerLayer: layer)
-                c?.delegate = self
-                self.pip = c
-                // The controller needs a moment before it can start.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { c?.startPictureInPicture() }
-            }
-        }
-        av.play()
+        saveProgress()
+        let at = request.live ? Int64(0) : Int64(player.time.intValue)
+        player.stop()
+        PipKeeper.shared.start(request, at: at, started: { [weak self] in
+            guard let self = self else { return }
+            self.spinner.stopAnimating()
+            self.dismiss(animated: false) { PipKeeper.goHome() }
+        }, failed: { [weak self] in
+            guard let self = self else { return }
+            // Back to the full player where it was.
+            self.resumeMs = at
+            self.load(self.request)
+            self.pipFailed()
+        })
     }
 
     private func pipFailed() {
@@ -773,37 +753,19 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         present(a, animated: true)
     }
 
-    func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) {
-        spinner.stopAnimating()
-        player.pause()
-    }
+    // MARK: Multi-view
 
-    func pictureInPictureControllerFailedToStartPictureInPicture(_ c: AVPictureInPictureController, withError error: Error) {
-        spinner.stopAnimating(); stopPip(); pipFailed()
-    }
-
-    func pictureInPictureController(_ c: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler done: @escaping (Bool) -> Void) {
-        pipRestoring = true
-        done(true)
-    }
-
-    /// Back from the small window: the full player carries on where it got to.
-    func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) {
-        let pos = pipPlayer?.currentTime().seconds ?? 0
-        let back = pipRestoring
-        stopPip()
-        if !request.live && pos > 0 { player.time = VLCTime(int: Int32(clamping: Int(pos * 1000))) }
-        if back { player.play() } else { saveProgress() }
-        updatePlayIcon()
-    }
-
-    private func stopPip() {
-        pipWatch = nil
-        if let c = pip, c.isPictureInPictureActive { c.delegate = nil; c.stopPictureInPicture() }
-        pip = nil
-        pipPlayer?.pause(); pipPlayer = nil
-        pipLayer?.removeFromSuperlayer(); pipLayer = nil
-        pipRestoring = false
+    /// Two to four channels at once: this player lets go of its stream, and multi-view opens over it.
+    @objc private func openMulti() {
+        guard request.live else { return }
+        player.stop()
+        let m = MultiViewController(first: Int(IosPlayback.shared.currentIndex())) { [weak self] position in
+            // Back to this player, with the channel chosen there.
+            self?.spinner.startAnimating()
+            IosPlayback.shared.playIndex(position: Int32(position))
+        }
+        m.modalPresentationStyle = .fullScreen
+        present(m, animated: true)
     }
 
     @objc private func togglePlay() { if player.isPlaying { player.pause() } else { player.play() }; updatePlayIcon(); showControls() }

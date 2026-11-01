@@ -56,6 +56,9 @@ class XtreamProvider(private val s: Source) : Provider {
         list(action, setOf("category_id", "category_name")) { Category(id(it["category_id"]), it["category_name"].orEmpty()) }
     } catch (e: Exception) { emptyList() }
 
+    override fun maxConnections(): Int? =
+        JSONObject(Http.get(api)).optJSONObject("user_info")?.optString("max_connections")?.toIntOrNull()?.takeIf { it > 0 }
+
     override fun load(progress: (String) -> Unit): Library {
         progress("Signing in")
         val info = JSONObject(Http.get(api))

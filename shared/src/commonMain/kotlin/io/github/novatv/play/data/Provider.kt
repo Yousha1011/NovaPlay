@@ -14,6 +14,8 @@ interface Provider {
     fun seriesDetails(s: Series): Details
     /** Now and next for one channel when there is no XMLTV guide. */
     fun shortEpg(ch: Channel): List<Programme> = emptyList()
+    /** How many streams the account may play at once, when the server says (Xtream); null when unknown. Blocking. */
+    fun maxConnections(): Int? = null
 
     companion object {
         fun of(s: Source): Provider = when (s.type) {

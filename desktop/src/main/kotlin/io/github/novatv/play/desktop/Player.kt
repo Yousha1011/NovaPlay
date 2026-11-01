@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Pause
@@ -106,8 +107,10 @@ object Vlc {
 }
 
 /** VLC draws each frame into memory; Compose paints it. */
-private class Frames {
+internal class Frames {
     var bitmap: Bitmap? = null
+    /** When the last frame arrived, to spot a picture that has frozen. */
+    @Volatile var lastFrameAt = 0L
     var size = IntSize.Zero
     private var bytes = ByteArray(0)
     var version by mutableIntStateOf(0)
@@ -134,6 +137,7 @@ private class Frames {
                 buf.get(bytes)
                 b.installPixels(b.imageInfo, bytes, size.width * 4)
             }
+            lastFrameAt = System.currentTimeMillis()
             version++
         }
     }
@@ -220,6 +224,18 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     fun fullscreen() { window.placement = if (window.placement == WindowPlacement.Fullscreen) WindowPlacement.Floating else WindowPlacement.Fullscreen }
     val showUi = now - overlay < 4000 || !playing || error != null
 
+    var multi by remember { mutableStateOf(false) }
+    // Back from multi-view: the keys go to the player again.
+    LaunchedEffect(multi) { if (!multi) repeat(5) { try { focus.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(60) } } }
+    if (multi && live != null) {
+        MultiScreen(live, index, (index + 1).mod(live.channels.size)) { ch ->
+            multi = false
+            if (ch == index) retry++ else index = ch
+        }
+        return
+    }
+    fun startMulti() { if (live == null) return; player.controls().stop(); multi = true }
+
     Box(
         Modifier.fillMaxSize().background(Color.Black)
             .focusRequester(focus).focusable()
@@ -233,6 +249,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                     Key.DirectionLeft -> { seek(-10_000); true }
                     Key.DirectionRight -> { seek(30_000); true }
                     Key.F -> { fullscreen(); true }
+                    Key.M -> { startMulti(); true }
                     Key.Enter -> { if (error != null) retry++ else overlay = System.currentTimeMillis(); true }
                     else -> false
                 }
@@ -241,23 +258,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             .pointerInput(Unit) { detectTapGestures(onDoubleTap = { fullscreen() }, onTap = { toggle() }) },
     ) {
         // The picture, fitted to the window.
-        Canvas(Modifier.fillMaxSize()) {
-            frames.version
-            synchronized(frames) {
-                val b = frames.bitmap ?: return@Canvas
-                val w = frames.size.width.toFloat(); val h = frames.size.height.toFloat()
-                if (w <= 0 || h <= 0) return@Canvas
-                val s = minOf(size.width / w, size.height / h)
-                val dw = w * s; val dh = h * s
-                val img = org.jetbrains.skia.Image.makeFromBitmap(b)
-                drawIntoCanvas { c ->
-                    c.nativeCanvas.drawImageRect(img, org.jetbrains.skia.Rect.makeWH(w, h),
-                        org.jetbrains.skia.Rect.makeXYWH((size.width - dw) / 2, (size.height - dh) / 2, dw, dh),
-                        org.jetbrains.skia.SamplingMode.LINEAR, null, true)
-                }
-                img.close()
-            }
-        }
+        VideoCanvas(frames, Modifier.fillMaxSize())
         if (buffering && error == null) Spinner(Modifier.align(Alignment.Center), size = 56.dp)
         error?.let {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -278,6 +279,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                 Text(live?.channels?.get(index)?.name ?: item.title, style = T.h1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Text(clock(now), style = T.h2)
                 Spacer(Modifier.width(14.dp))
+                if (live != null) { Pill("Multi-view", onClick = { startMulti() }, icon = Icons.Rounded.GridView); Spacer(Modifier.width(10.dp)) }
                 Pill(if (window.placement == WindowPlacement.Fullscreen) "Window" else "Full screen", onClick = { fullscreen() }, icon = Icons.Rounded.Fullscreen)
             }
             // Bottom: now/next and zapping for live TV, the seek bar for films and episodes.
@@ -304,7 +306,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("Space pause · ↑↓ change channel · F full screen · Esc back", style = T.tiny)
+                    Text("Space pause · ↑↓ change channel · M multi-view · F full screen · Esc back", style = T.tiny)
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Pill(if (playing) "Pause" else "Play", onClick = { toggle() }, icon = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow)
@@ -319,6 +321,28 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                     Text("Space pause · ← → skip · F full screen · Esc back", style = T.tiny)
                 }
             }
+        }
+    }
+}
+
+/** The latest frame, fitted to the space. */
+@Composable
+internal fun VideoCanvas(frames: Frames, modifier: Modifier) {
+    Canvas(modifier) {
+        frames.version
+        synchronized(frames) {
+            val b = frames.bitmap ?: return@Canvas
+            val w = frames.size.width.toFloat(); val h = frames.size.height.toFloat()
+            if (w <= 0 || h <= 0) return@Canvas
+            val s = minOf(size.width / w, size.height / h)
+            val dw = w * s; val dh = h * s
+            val img = org.jetbrains.skia.Image.makeFromBitmap(b)
+            drawIntoCanvas { c ->
+                c.nativeCanvas.drawImageRect(img, org.jetbrains.skia.Rect.makeWH(w, h),
+                    org.jetbrains.skia.Rect.makeXYWH((size.width - dw) / 2, (size.height - dh) / 2, dw, dh),
+                    org.jetbrains.skia.SamplingMode.LINEAR, null, true)
+            }
+            img.close()
         }
     }
 }

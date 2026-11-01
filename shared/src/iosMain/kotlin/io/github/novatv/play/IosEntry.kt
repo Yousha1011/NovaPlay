@@ -165,6 +165,39 @@ object IosPlayback {
         resolve()
     }
 
+    // Multi-view: up to MultiView.MAX channels of the list playing, each with its own VLC player on the Swift side.
+
+    /** The channels of the list playing (the category zapped through), for picking multi-view screens. */
+    fun multiChannels(): List<ChannelCard> {
+        val l = item as? PlayItem.Live ?: return emptyList()
+        return l.channels.mapIndexed { i, c -> ChannelCard(c.id, "${if (c.number > 0) "${c.number}  " else ""}${c.name}", c.logo, "", i == index) }
+    }
+
+    fun currentIndex(): Int = index
+
+    /** The stream address of channel [position] of that list. Blocking: call off the main queue. */
+    fun multiUrl(position: Int): String? {
+        val l = item as? PlayItem.Live ?: return null
+        val c = l.channels.getOrNull(position) ?: return null
+        return try { App.repo.provider?.liveUrl(c) } catch (e: Exception) { null }
+    }
+
+    /** A warning when the playlist allows fewer streams than [screens]. Blocking. */
+    fun multiLimitWarning(screens: Int): String? = io.github.novatv.play.data.MultiView.limitWarning(screens)
+
+    fun maxScreens(): Int = io.github.novatv.play.data.MultiView.MAX
+    fun stallMs(): Long = io.github.novatv.play.data.MultiView.STALL_MS
+    fun retryDelayMs(failures: Int): Long = io.github.novatv.play.data.MultiView.retryDelay(failures)
+    fun userAgent(): String = Http.UA
+    fun bufferMs(): Int = App.store.bufferMs
+
+    /** Back from multi-view: the full player carries on with channel [position] of the list. */
+    fun playIndex(position: Int) {
+        val l = item as? PlayItem.Live ?: return
+        index = position.mod(l.channels.size)
+        resolve()
+    }
+
     /** Adds or removes the channel playing from favourites; returns whether it is one now. */
     fun toggleFavourite(): Boolean {
         val c = channel() ?: return false
