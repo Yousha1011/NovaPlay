@@ -186,6 +186,7 @@ object IosPlayback {
     fun multiLimitWarning(screens: Int): String? = io.github.novatv.play.data.MultiView.limitWarning(screens)
 
     fun maxScreens(): Int = io.github.novatv.play.data.MultiView.MAX
+    fun warnAfter(): Int = io.github.novatv.play.data.MultiView.WARN_AFTER
     fun stallMs(): Long = io.github.novatv.play.data.MultiView.STALL_MS
     fun retryDelayMs(failures: Int): Long = io.github.novatv.play.data.MultiView.retryDelay(failures)
     fun userAgent(): String = Http.UA

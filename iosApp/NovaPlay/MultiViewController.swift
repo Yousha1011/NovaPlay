@@ -140,7 +140,6 @@ final class MultiViewController: UIViewController {
         setSound(screens.count - 1)
         layoutGrid()
         addButton.isEnabled = screens.count < Int(IosPlayback.shared.maxScreens())
-        warnLimit()
     }
 
     /// Opens (or reopens) a screen's stream; the address is fetched off the main queue.
@@ -169,6 +168,7 @@ final class MultiViewController: UIViewController {
 
     private func dropped(_ s: Screen) {
         s.failures += 1
+        if s.failures == Int(IosPlayback.shared.warnAfter()) { warnLimit() }
         s.note.text = "Reconnecting…"
         s.note.isHidden = false
         s.player.stop()
@@ -205,7 +205,12 @@ final class MultiViewController: UIViewController {
         }
     }
 
+    private var limitWarned = false
+
+    /// A screen keeps failing: when the playlist's stream limit may be why, say so (once).
     private func warnLimit() {
+        if limitWarned { return }
+        limitWarned = true
         let n = Int32(screens.count)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let msg = IosPlayback.shared.multiLimitWarning(screens: n) else { return }

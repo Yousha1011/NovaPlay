@@ -130,14 +130,18 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
         active = a.coerceIn(0, screens.lastIndex)
         screens.forEachIndexed { i, s -> s.player.audio().isMute = i != active }
     }
+    var limitWarned by remember { mutableStateOf(false) }
+    /** A screen keeps failing: when the playlist's stream limit may be why, say so (once). */
     fun warnLimit() {
+        if (limitWarned) return
+        limitWarned = true
         val n = screens.size
         scope.launch { withContext(IO) { MultiView.limitWarning(n) }?.let { Desktop.toast(it) } }
     }
     fun add(channel: Int) {
         if (screens.size >= MultiView.MAX) return
         val s = VlcScreen(channel.mod(live.channels.size))
-        screens.add(s); open(s); sound(screens.lastIndex); warnLimit()
+        screens.add(s); open(s); sound(screens.lastIndex)
     }
     fun change(i: Int, channel: Int) {
         val s = screens.getOrNull(i) ?: return
@@ -152,7 +156,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
 
     DisposableEffect(Unit) {
         screens.forEach { open(it) }
-        sound(0); warnLimit()
+        sound(0)
         onDispose { screens.forEach { it.release() }; screens.clear() }
     }
     // The watchdog: a dropped stream reconnects after a short wait (longer after each failure in a row); a picture that
@@ -166,6 +170,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
                 when {
                     s.dropped -> {
                         s.failures++
+                        if (s.failures == MultiView.WARN_AFTER) warnLimit()
                         s.error = "Reconnecting…"
                         s.dropped = false
                         val wait = MultiView.retryDelay(s.failures)

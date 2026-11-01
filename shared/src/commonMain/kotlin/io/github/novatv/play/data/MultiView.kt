@@ -12,14 +12,19 @@ object MultiView {
     /** Wait before reconnecting after the [n]th failure in a row: 2, 4, 6... up to 10 seconds. */
     fun retryDelay(n: Int): Long = (2_000L * n.coerceAtLeast(1)).coerceAtMost(10_000L)
 
+    /** Failures in a row before a screen's trouble is put down to the playlist's limit (and said once). */
+    const val WARN_AFTER = 3
+
     /**
-     * A warning when the playlist allows fewer streams than [screens] (Xtream accounts say how many): the server then
-     * cuts one of them off, which looks like a screen stopping. Blocking; null when it fits or the limit is unknown.
+     * Why a screen keeps stopping, when the playlist may be the reason: Xtream accounts say how many streams they allow,
+     * and with more screens than that the server may cut one off. Only asked once a screen has failed [WARN_AFTER]
+     * times in a row: many servers report a lower limit than they enforce, so the number alone proves nothing.
+     * Blocking; null when it fits or the limit is unknown.
      */
     fun limitWarning(screens: Int): String? {
         val max = try { App.repo.provider?.maxConnections() } catch (e: Exception) { null } ?: return null
-        return if (screens > max) "Your playlist allows $max stream${if (max == 1) "" else "s"} at once, so ${screens - max} screen" +
-            "${if (screens - max == 1) "" else "s"} may keep stopping. Ask your provider for more connections." else null
+        return if (screens > max) "A screen keeps stopping. Your playlist says it allows $max stream${if (max == 1) "" else "s"} at once, " +
+            "which may be why: try fewer screens, or ask your provider for more connections." else null
     }
 
     /** The grid for [n] screens: columns × rows (2 side by side; 3 and 4 in two rows). */

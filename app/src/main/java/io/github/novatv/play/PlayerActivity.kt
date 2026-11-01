@@ -282,7 +282,14 @@ class PlayerActivity : ComponentActivity() {
         extra.add(slot)
         useView(extra.size)
         startSlot(slot)
-        // A playlist that allows fewer streams than screens makes one of them stop: say so.
+    }
+
+    private var limitWarned = false
+
+    /** A screen keeps failing: when the playlist's stream limit may be why, say so (once). */
+    private fun maybeWarnLimit(failures: Int) {
+        if (limitWarned || failures != io.github.novatv.play.data.MultiView.WARN_AFTER) return
+        limitWarned = true
         val screens = 1 + extra.size
         lifecycleScope.launch {
             withContext(IO) { io.github.novatv.play.data.MultiView.limitWarning(screens) }?.let { Toast.makeText(this@PlayerActivity, it, Toast.LENGTH_LONG).show() }
@@ -305,6 +312,7 @@ class PlayerActivity : ComponentActivity() {
     private fun reconnect(slot: Slot) {
         if (slot !in extra) return
         slot.failures++
+        maybeWarnLimit(slot.failures)
         slot.error = "Reconnecting…"
         slot.job?.cancel()
         slot.job = lifecycleScope.launch { delay(io.github.novatv.play.data.MultiView.retryDelay(slot.failures)); if (slot in extra) startSlot(slot) }
@@ -312,6 +320,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun reconnectMain() {
         mainFailures++
+        if (multi) maybeWarnLimit(mainFailures)
         error = "Reconnecting…"
         startJob?.cancel()
         startJob = lifecycleScope.launch { delay(io.github.novatv.play.data.MultiView.retryDelay(mainFailures)); startCurrent() }
