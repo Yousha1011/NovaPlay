@@ -148,11 +148,14 @@ final class MultiViewController: UIViewController {
         s.movedAt = Date()
         s.lastTime = -1
         s.spinner.startAnimating()
-        s.name.text = "  " + (channels.indices.contains(s.channel) ? channels[s.channel].name : "")
+        let name = channels.indices.contains(s.channel) ? channels[s.channel].name : ""
+        s.name.text = "  " + name
         let position = Int32(s.channel)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let url = IosPlayback.shared.multiUrl(position: position)
+            let hd = IosPlayback.shared.multiIsHd(position: position)
             DispatchQueue.main.async {
+                s.name.text = "  " + name + (hd ? "  ·  HD" : "")
                 guard let self = self, self.screens.contains(where: { $0 === s }) else { return }
                 guard let u = url, let link = URL(string: u) else { self.dropped(s); return }
                 let media = VLCMedia(url: link)
@@ -268,8 +271,44 @@ final class MultiViewController: UIViewController {
         if let i = screens.firstIndex(where: { $0.view === g.view }) { finish(with: screens[i].channel) }
     }
 
-    @objc private func addScreen() { pick(for: -1) }
-    @objc private func changeChannel() { pick(for: active) }
+    @objc private func addScreen() { choose(for: -1) }
+    @objc private func changeChannel() { choose(for: active) }
+
+    /// Live TV (the channel list) or Sports (a game, then the channels showing it).
+    private func choose(for target: Int) {
+        let a = UIAlertController(title: target < 0 ? "Add a screen" : "Change this screen",
+                                  message: "Pick a channel, or a game and the channel showing it", preferredStyle: .actionSheet)
+        a.addAction(UIAlertAction(title: "Live TV", style: .default) { [weak self] _ in self?.pick(for: target) })
+        a.addAction(UIAlertAction(title: "Sports", style: .default) { [weak self] _ in self?.pickGame(for: target) })
+        a.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        a.popoverPresentationController?.sourceView = bar
+        present(a, animated: true)
+    }
+
+    private func pickGame(for target: Int) {
+        let list = GamePickerController { [weak self] channelId in
+            guard let self = self else { return }
+            let position = Int(IosPlayback.shared.multiAddGameChannel(channelId: channelId))
+            guard position >= 0 else { return }
+            self.channels = IosPlayback.shared.multiChannels()
+            self.place(position, for: target)
+        }
+        let nav = UINavigationController(rootViewController: list)
+        nav.overrideUserInterfaceStyle = .dark
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+
+    /// Channel [position] goes on screen [target], or on a new screen with -1.
+    private func place(_ position: Int, for target: Int) {
+        if target < 0 { add(channel: position) }
+        else if target < screens.count {
+            let s = screens[target]
+            s.channel = position
+            s.failures = 0
+            open(s)
+        }
+    }
     @objc private func fullScreen() { finish(with: screens[active].channel) }
     @objc private func close() { finish(with: screens[active].channel) }
 
@@ -353,5 +392,66 @@ final class ChannelPickerController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         let row = indexPath.row
         dismiss(animated: true) { [picked] in picked(row) }
+    }
+}
+
+/// Games on now and soon; choosing one lists the channels showing it, and choosing a channel hands back its id.
+final class GamePickerController: UITableViewController {
+    private var games: [GameRow] = []
+    private var channels: [ChannelCard] = []
+    private var game: GameRow?
+    private let picked: (String) -> Void
+
+    init(picked: @escaping (String) -> Void) {
+        self.picked = picked
+        super.init(style: .plain)
+        title = "Pick a game"
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "c")
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(cancel))
+        games = IosPlayback.shared.multiGames()
+        tableView.reloadData()
+    }
+
+    @objc private func cancel() {
+        if game != nil { game = nil; title = "Pick a game"; tableView.reloadData() } else { dismiss(animated: true) }
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { game == nil ? games.count : channels.count }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "c", for: indexPath)
+        var c = UIListContentConfiguration.subtitleCell()
+        if game == nil {
+            c.text = games[indexPath.row].title
+            c.secondaryText = games[indexPath.row].detail
+        } else {
+            c.text = channels[indexPath.row].name
+        }
+        cell.contentConfiguration = c
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        if game == nil {
+            let g = games[indexPath.row]
+            game = g
+            title = g.title
+            channels = []
+            tableView.reloadData()
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let list = IosPlayback.shared.multiGameChannels(gameId: g.id)
+                DispatchQueue.main.async { self?.channels = list; self?.tableView.reloadData() }
+            }
+        } else {
+            let id = channels[indexPath.row].id
+            dismiss(animated: true) { [picked] in picked(id) }
+        }
     }
 }

@@ -230,7 +230,13 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     if (multi && live != null) {
         MultiScreen(live, index, (index + 1).mod(live.channels.size)) { ch ->
             multi = false
-            if (ch == index) retry++ else index = ch
+            // One screen again: the channel itself (in 4K), joining the front of the list if it came from Sports.
+            val at = live.channels.indexOfFirst { it.id == ch.id }
+            when {
+                at == index -> retry++
+                at >= 0 -> index = at
+                else -> { item = PlayItem.Live(listOf(ch) + live.channels, 0); index = 0 }
+            }
         }
         return
     }

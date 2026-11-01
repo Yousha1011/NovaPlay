@@ -29,6 +29,10 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.SportsSoccer
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -109,6 +113,8 @@ private class VlcScreen(var channel: Int) {
     var failures = 0
     /** When it was (re)opened, to give a new stream time before the frozen-picture check. */
     var openedAt = 0L
+    /** Playing the HD version of a 4K channel. */
+    var hd by mutableStateOf(false)
     /** When the picture started (0 until it has), and when the stream last grew. */
     var playingSince = 0L
     var lastBytes = 0
@@ -137,7 +143,13 @@ private class VlcScreen(var channel: Int) {
  * to carry on with full screen.
  */
 @Composable
-fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> Unit) {
+fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github.novatv.play.data.Channel) -> Unit) {
+    // The channels screens play: the list being zapped, plus any picked from Sports.
+    val chans = remember { mutableStateListOf<io.github.novatv.play.data.Channel>().apply { addAll(live.channels) } }
+    /** A Sports channel joins the list (once) so a screen can hold it by position. */
+    fun indexOf(ch: io.github.novatv.play.data.Channel): Int = chans.indexOfFirst { it.id == ch.id }.takeIf { it >= 0 } ?: run { chans.add(ch); chans.lastIndex }
+    /** In multi-view a 4K channel plays its HD version, when the playlist has one. Blocking. */
+    fun streamFor(ch: io.github.novatv.play.data.Channel) = io.github.novatv.play.data.HdTwin.of(ch, App.repo.state.value.lib.channels) ?: ch
     val screens = remember { mutableStateListOf(VlcScreen(first), VlcScreen(second)) }
     var active by remember { mutableIntStateOf(0) }
     /** The channel list is open for screen [picking], or for a new screen when it's -1; null when closed. */
@@ -153,7 +165,9 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
         if (!quiet) { s.error = null; s.buffering = true }
         s.frames.lastFrameAt = 0L
         scope.launch {
-            val url = withContext(IO) { try { App.repo.provider?.liveUrl(live.channels[s.channel]) } catch (e: Exception) { null } }
+            val stream = withContext(IO) { streamFor(chans[s.channel]) }
+            s.hd = stream.id != chans[s.channel].id
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(stream) } catch (e: Exception) { null } }
             if (s !in screens) return@launch
             if (url == null) { s.current.dropped = true; return@launch }
             val v = s.current
@@ -167,7 +181,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
         s.listen(sb)
         s.standby = sb
         scope.launch {
-            val url = withContext(IO) { try { App.repo.provider?.liveUrl(live.channels[s.channel]) } catch (e: Exception) { null } }
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(streamFor(chans[s.channel])) } catch (e: Exception) { null } }
             if (url == null || s.standby !== sb) return@launch
             withContext(IO) { sb.player.media().play(url, *opts, ":start-paused") }
         }
@@ -198,16 +212,16 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
     }
     fun add(channel: Int) {
         if (screens.size >= MultiView.MAX) return
-        val s = VlcScreen(channel.mod(live.channels.size))
+        val s = VlcScreen(channel.mod(chans.size))
         screens.add(s); open(s); sound(screens.lastIndex)
     }
     fun change(i: Int, channel: Int) {
         val s = screens.getOrNull(i) ?: return
-        s.channel = channel.mod(live.channels.size); s.failures = 0
+        s.channel = channel.mod(chans.size); s.failures = 0
         open(s)
     }
     fun remove(i: Int) {
-        if (screens.size <= 2) { onExit(screens[if (i == 0) 1 else 0].channel); return }
+        if (screens.size <= 2) { onExit(chans[screens[if (i == 0) 1 else 0].channel]); return }
         screens.removeAt(i).release()
         sound(minOf(active, screens.lastIndex))
     }
@@ -261,7 +275,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
         .onKeyEvent { e ->
             if (e.type != KeyEventType.KeyDown || picking != null) return@onKeyEvent false
             when (e.key) {
-                Key.Escape, Key.Backspace -> { onExit(screens[active].channel); true }
+                Key.Escape, Key.Backspace -> { onExit(chans[screens[active].channel]); true }
                 Key.DirectionLeft -> { sound((active - 1).mod(n)); true }
                 Key.DirectionRight -> { sound((active + 1).mod(n)); true }
                 Key.DirectionUp -> { if (active - cols >= 0) sound(active - cols); true }
@@ -284,10 +298,10 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
                         val s = screens.getOrNull(i)
                         if (s == null) continue
                         key(System.identityHashCode(s)) {
-                            val c = live.channels.getOrNull(s.channel)
+                            val c = chans.getOrNull(s.channel)
                             Box(Modifier.size(tileW, tileH).clip(RoundedCornerShape(10.dp)).background(Color(0xFF0B0E13))
                                 .border(if (active == i) 3.dp else 1.dp, if (active == i) C.accent else C.line, RoundedCornerShape(10.dp))
-                                .pointerInput(i) { detectTapGestures(onTap = { sound(i) }, onDoubleTap = { onExit(s.channel) }) }) {
+                                .pointerInput(i) { detectTapGestures(onTap = { sound(i) }, onDoubleTap = { onExit(chans[s.channel]) }) }) {
                                 VideoCanvas(s.current.frames, Modifier.fillMaxSize().padding(3.dp))
                                 if (s.error != null) Text(s.error!!, style = T.small.copy(color = C.text), modifier = Modifier.align(Alignment.Center))
                                 else if (s.buffering) Spinner(Modifier.align(Alignment.Center), size = 36.dp)
@@ -296,6 +310,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
                                     verticalAlignment = Alignment.CenterVertically) {
                                     if (c.number > 0) { Text("${c.number}", style = T.body); Spacer(Modifier.width(8.dp)) }
                                     Text(c.name, style = T.small.copy(color = C.text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    if (s.hd) { Spacer(Modifier.width(8.dp)); Text("HD", style = T.tiny.copy(color = C.accent)) }
                                     if (active == i) Text("♪", style = T.h2.copy(color = C.accent))
                                 }
                             }
@@ -305,26 +320,117 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Pill("Back", onClick = { onExit(screens[active].channel) }, icon = Icons.AutoMirrored.Rounded.ArrowBack)
+                Pill("Back", onClick = { onExit(chans[screens[active].channel]) }, icon = Icons.AutoMirrored.Rounded.ArrowBack)
                 if (n < MultiView.MAX) Pill("Add a screen", onClick = { picking = -1 }, icon = Icons.Rounded.Add, primary = true)
                 Pill("Change channel", onClick = { picking = active }, icon = Icons.Rounded.List)
                 Pill("Remove this screen", onClick = { remove(active) }, icon = Icons.Rounded.Close)
-                Pill("Full screen", onClick = { onExit(screens[active].channel) }, icon = Icons.Rounded.Fullscreen)
+                Pill("Full screen", onClick = { onExit(chans[screens[active].channel]) }, icon = Icons.Rounded.Fullscreen)
                 Spacer(Modifier.weight(1f))
                 Text("Click: sound · Double-click: full screen · ←→↑↓ choose · PgUp/PgDn zap · Esc back", style = T.tiny)
             }
         }
         picking?.let { target ->
-            ChannelPicker(live, if (target >= 0) screens.getOrNull(target)?.channel ?: 0 else screens[active].channel,
-                if (target < 0) "Pick a channel to add" else "Pick a channel for this screen",
-                onPick = { ch -> picking = null; if (target < 0) add(ch) else change(target, ch) }, onCancel = { picking = null })
+            ScreenPicker(chans, if (target >= 0) screens.getOrNull(target)?.channel ?: 0 else screens[active].channel,
+                if (target < 0) "Add a screen" else "Change this screen",
+                onPick = { ch -> picking = null; val at = indexOf(ch); if (target < 0) add(at) else change(target, at) }, onCancel = { picking = null })
+        }
+    }
+}
+
+/** Adding or changing a screen: Live TV (the channel list) or Sports (a game, then the channels showing it). */
+@Composable
+private fun ScreenPicker(chans: List<io.github.novatv.play.data.Channel>, current: Int, title: String,
+                         onPick: (io.github.novatv.play.data.Channel) -> Unit, onCancel: () -> Unit) {
+    var source by remember { mutableStateOf<String?>(null) }
+    var game by remember { mutableStateOf<io.github.novatv.play.sports.SportEvent?>(null) }
+    val back = { when { game != null -> game = null; source != null -> source = null; else -> onCancel() } }
+    when (source) {
+        null -> Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures(onTap = { onCancel() }) }
+            .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onCancel(); true } else false },
+            contentAlignment = Alignment.Center) {
+            Column(Modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xF00A0E17)).pointerInput(Unit) { detectTapGestures { } }.padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, style = T.h1)
+                Spacer(Modifier.height(6.dp))
+                Text("Pick a channel, or a game and the channel showing it", style = T.small)
+                Spacer(Modifier.height(22.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Pill("Live TV", onClick = { source = "live" }, icon = Icons.Rounded.LiveTv, primary = true)
+                    Pill("Sports", onClick = { source = "sports" }, icon = Icons.Rounded.SportsSoccer)
+                    Pill("Cancel", onClick = onCancel)
+                }
+            }
+        }
+        "live" -> ChannelPicker(chans, current, "Pick a channel", onPick, back)
+        else -> GamePicker(game, { game = it }, onPick, back)
+    }
+}
+
+/** Games on now and in the next 12 hours (live first); with one chosen, the user's channels showing it. */
+@Composable
+private fun GamePicker(game: io.github.novatv.play.sports.SportEvent?, choose: (io.github.novatv.play.sports.SportEvent) -> Unit,
+                       onPick: (io.github.novatv.play.data.Channel) -> Unit, onBack: () -> Unit) {
+    val sports by App.repo.sports.collectAsState()
+    LaunchedEffect(Unit) { App.repo.sportsRepo.refresh() }
+    Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures(onTap = { onBack() }) }
+        .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onBack(); true } else false }) {
+        Column(Modifier.width(560.dp).fillMaxHeight().background(Color(0xF00A0E17)).pointerInput(Unit) { detectTapGestures { } }) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(game?.title ?: "Pick a game", style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Pill("Back", onClick = onBack)
+            }
+            if (game == null) {
+                val now = System.currentTimeMillis()
+                val games = remember(sports.events) {
+                    sports.events.filter { it.state == io.github.novatv.play.sports.State.LIVE ||
+                        (it.state == io.github.novatv.play.sports.State.PRE && it.start - now < 12 * 3600_000L) }
+                        .sortedWith(compareBy({ it.state != io.github.novatv.play.sports.State.LIVE }, { it.start }))
+                }
+                if (games.isEmpty()) Text(if (sports.loading) "Loading games…" else "No games on now or in the next 12 hours", style = T.small, modifier = Modifier.padding(16.dp))
+                LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(games, key = { _, g -> g.id }) { _, g ->
+                        val live = g.state == io.github.novatv.play.sports.State.LIVE
+                        Tile({ choose(g) }, Modifier.fillMaxWidth().height(66.dp), shape = RoundedCornerShape(10.dp), scale = 1.02f, color = Color.Transparent) {
+                            Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.Center) {
+                                Text(g.title, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text((if (live) "LIVE · ${g.detail}" else io.github.novatv.play.ui.clock(g.start)) + " · ${g.league.name}",
+                                    style = T.tiny.copy(color = if (live) C.live else C.dim), maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            } else {
+                val epg = App.repo.state.collectAsState().value.epgVersion
+                val airings by produceState<List<io.github.novatv.play.sports.Airing>?>(null, game.id, epg) {
+                    value = withContext(IO) { App.repo.matcher().airings(game, limit = 60) }
+                    val more = withContext(IO) { App.repo.matcher().airings(game, io.github.novatv.play.sports.Broadcasters.forEvent(game), limit = 60) }
+                    value = (value.orEmpty() + more).distinctBy { it.channel.id }
+                }
+                val list = airings
+                when {
+                    list == null -> Text("Looking through your channels…", style = T.small, modifier = Modifier.padding(16.dp))
+                    list.isEmpty() -> Text("None of your channels show this game.", style = T.small, modifier = Modifier.padding(16.dp))
+                }
+                LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(list.orEmpty(), key = { _, a -> a.channel.id }) { _, a ->
+                        Tile({ onPick(a.channel) }, Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(10.dp), scale = 1.02f, color = Color.Transparent) {
+                            Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Logo(a.channel.logo, a.channel.name, Modifier.width(56.dp).height(38.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text(a.channel.name, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 /** The channel list down the left, for multi-view. */
 @Composable
-private fun ChannelPicker(live: PlayItem.Live, current: Int, title: String, onPick: (Int) -> Unit, onCancel: () -> Unit) {
+private fun ChannelPicker(chans: List<io.github.novatv.play.data.Channel>, current: Int, title: String,
+                          onPick: (io.github.novatv.play.data.Channel) -> Unit, onCancel: () -> Unit) {
     val state = rememberLazyListState(initialFirstVisibleItemIndex = (current - 4).coerceAtLeast(0))
     Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures(onTap = { onCancel() }) }
         .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onCancel(); true } else false }) {
@@ -334,8 +440,8 @@ private fun ChannelPicker(live: PlayItem.Live, current: Int, title: String, onPi
                 Pill("Cancel", onClick = onCancel)
             }
             LazyColumn(state = state, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                itemsIndexed(live.channels, key = { _, c -> c.id }) { i, c ->
-                    Tile({ onPick(i) }, Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(10.dp), scale = 1.02f,
+                itemsIndexed(chans, key = { _, c -> c.id }) { i, c ->
+                    Tile({ onPick(c) }, Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(10.dp), scale = 1.02f,
                         color = if (i == current) C.accent.copy(alpha = 0.25f) else Color.Transparent) {
                         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("${c.number}", style = T.small, modifier = Modifier.width(52.dp))

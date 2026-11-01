@@ -15,6 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeUIViewController
+import io.github.novatv.play.data.Channel
 import io.github.novatv.play.data.Http
 import io.github.novatv.play.data.PlayItem
 import io.github.novatv.play.data.Programme
@@ -100,6 +101,9 @@ class ChannelCard(val id: String, val name: String, val logo: String?, val now: 
 
 class CategoryTab(val id: String, val name: String)
 
+/** A game in multi-view's Sports picker. */
+class GameRow(val id: String, val title: String, val detail: String)
+
 /**
  * The bridge to the Swift player: Kotlin resolves streams (Stalker portals hand out links on request), keeps watch
  * progress and zaps through channels; Swift shows the picture and the controls. Blocking calls (guide, lists) are
@@ -175,11 +179,51 @@ object IosPlayback {
 
     fun currentIndex(): Int = index
 
-    /** The stream address of channel [position] of that list. Blocking: call off the main queue. */
+    /**
+     * The stream address of channel [position] of that list: the HD version of a 4K channel when the playlist has one
+     * (a small screen loses nothing, and it needs a quarter of the memory and bandwidth). Blocking: call off the main queue.
+     */
     fun multiUrl(position: Int): String? {
         val l = item as? PlayItem.Live ?: return null
         val c = l.channels.getOrNull(position) ?: return null
-        return try { App.repo.provider?.liveUrl(c) } catch (e: Exception) { null }
+        val stream = io.github.novatv.play.data.HdTwin.of(c, App.repo.state.value.lib.channels) ?: c
+        return try { App.repo.provider?.liveUrl(stream) } catch (e: Exception) { null }
+    }
+
+    /** Whether channel [position] plays its HD version in multi-view. Blocking. */
+    fun multiIsHd(position: Int): Boolean {
+        val c = (item as? PlayItem.Live)?.channels?.getOrNull(position) ?: return false
+        return io.github.novatv.play.data.HdTwin.of(c, App.repo.state.value.lib.channels) != null
+    }
+
+    /** Games on now and in the next 12 hours, live ones first, for adding a screen from Sports. */
+    fun multiGames(): List<GameRow> {
+        App.repo.sportsRepo.refresh()
+        val now = nowMs()
+        return App.repo.sports.value.events
+            .filter { it.state == io.github.novatv.play.sports.State.LIVE || (it.state == io.github.novatv.play.sports.State.PRE && it.start - now < 12 * 3600_000L) }
+            .sortedWith(compareBy({ it.state != io.github.novatv.play.sports.State.LIVE }, { it.start }))
+            .map { GameRow(it.id, it.title, (if (it.state == io.github.novatv.play.sports.State.LIVE) "LIVE · ${it.detail}" else clock(it.start)) + " · ${it.league.name}") }
+    }
+
+    private var gameChannels: List<Channel> = emptyList()
+
+    /** The user's channels showing game [gameId]. Blocking: call off the main queue. */
+    fun multiGameChannels(gameId: String): List<ChannelCard> {
+        val e = App.repo.sports.value.events.firstOrNull { it.id == gameId } ?: return emptyList()
+        val m = App.repo.matcher()
+        gameChannels = (m.airings(e, limit = 60) + m.airings(e, io.github.novatv.play.sports.Broadcasters.forEvent(e), limit = 60))
+            .map { it.channel }.distinctBy { it.id }
+        return gameChannels.map { ChannelCard(it.id, it.name, it.logo, "", false) }
+    }
+
+    /** Channel [channelId] from a game's list joins the list playing (once); returns its position there. */
+    fun multiAddGameChannel(channelId: String): Int {
+        val l = item as? PlayItem.Live ?: return -1
+        l.channels.indexOfFirst { it.id == channelId }.takeIf { it >= 0 }?.let { return it }
+        val c = gameChannels.firstOrNull { it.id == channelId } ?: return -1
+        item = PlayItem.Live(l.channels + c, index)
+        return l.channels.size
     }
 
     /** A warning when the playlist allows fewer streams than [screens]. Blocking. */
