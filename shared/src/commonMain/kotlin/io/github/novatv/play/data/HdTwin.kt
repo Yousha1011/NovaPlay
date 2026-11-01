@@ -46,8 +46,8 @@ object HdTwin {
         return s
     }
 
-    private var indexed: List<Channel>? = null
-    private var byCore: Map<String, List<Channel>> = emptyMap()
+    /** The index for one library: its channel list and their non-4K versions by name. Replaced whole, so no lock is needed. */
+    private var index: Pair<List<Channel>, Map<String, List<Channel>>>? = null
 
     /**
      * The HD version of [ch] among [all], or null when [ch] isn't 4K or has none. Prefers the same region as [ch] when it
@@ -55,10 +55,8 @@ object HdTwin {
      */
     fun of(ch: Channel, all: List<Channel>): Channel? {
         if (!is4k(ch.name)) return null
-        val map = synchronized(this) {
-            if (indexed !== all) { byCore = all.filter { !is4k(it.name) }.groupBy { core(it.name) }; indexed = all }
-            byCore
-        }
+        val map = index?.takeIf { it.first === all }?.second
+            ?: all.filter { !is4k(it.name) }.groupBy { core(it.name) }.also { index = all to it }
         val key = core(ch.name).ifBlank { return null }
         val candidates = map[key] ?: return null
         val region = Regex("""^\s*([A-Z]{2,3})\s*[:|]""").find(plain(ch.name))?.groupValues?.get(1)?.takeIf { it != "4K" && it != "UHD" }
