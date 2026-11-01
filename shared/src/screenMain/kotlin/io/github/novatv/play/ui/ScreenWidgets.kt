@@ -100,7 +100,7 @@ private fun Modifier.combinedClickableCompat(src: MutableInteractionSource, onCl
     combinedClickable(interactionSource = src, indication = null, onClick = onClick)
 
 @Composable
-actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit) {
+actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit, url: Boolean) {
     var text by remember { mutableStateOf(value) }
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
@@ -113,7 +113,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
         cursorBrush = SolidColor(Color.White),
         interactionSource = src,
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = if (password) KeyboardType.Password else KeyboardType.Uri,
+        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = if (password) KeyboardType.Password else if (url) KeyboardType.Uri else KeyboardType.Text,
             imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
         decorationBox = { inner ->

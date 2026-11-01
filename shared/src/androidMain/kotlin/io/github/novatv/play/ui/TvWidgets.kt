@@ -88,8 +88,11 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
 }
 
 /**
- * A text box typed with the Fire TV's own keyboard (an EditText: fast, voice dictation with the remote's mic,
- * and typing from the Fire TV phone app). OK opens the keyboard.
+ * A text box typed with the TV's own keyboard (an EditText: fast, voice dictation with the remote's mic,
+ * and typing from the Fire TV or Google TV phone app). OK opens the keyboard.
+ *
+ * TV keyboards turn their mic off for boxes marked as passwords, web addresses or "no suggestions", so only boxes
+ * that hold a web address ([url]) or a secret ([password]) say so; everything else is plain text, which voice can fill.
  *
  * The remote moves over it as over any control: the box itself takes focus, and the EditText only gets focus while
  * typing (OK). An EditText that could take focus by itself sat outside Compose's sense of where things are, so Up
@@ -97,7 +100,7 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
  * the controls around it, Back stops typing, and Left and Right move the cursor.
  */
 @Composable
-actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit) {
+actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit, url: Boolean) {
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val boxFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
     val ui = androidx.compose.runtime.remember { FieldState() }
@@ -124,8 +127,11 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
                     setTextColor(android.graphics.Color.WHITE)
                     setHintTextColor(0x80FFFFFF.toInt())
                     setPadding(36, 0, 36, 0)
-                    inputType = if (password) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-                        else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_URI
+                    inputType = when {
+                        password -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                        url -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                        else -> InputType.TYPE_CLASS_TEXT
+                    }
                     imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
                     // Not focusable until OK is pressed on the box.
                     isFocusable = false; isFocusableInTouchMode = false

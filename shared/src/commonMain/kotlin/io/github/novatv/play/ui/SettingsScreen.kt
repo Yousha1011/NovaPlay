@@ -174,7 +174,7 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: St
                 modifier = Modifier.padding(bottom = 6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 var url by remember { mutableStateOf(App.store.extraEpg.joinToString(" ")) }
-                InputField(url, "http://example.com/epg.xml.gz", { url = it }, Modifier.weight(1f))
+                InputField(url, "http://example.com/epg.xml.gz", { url = it }, Modifier.weight(1f), url = true)
                 Pill("Save and reload", onClick = { App.store.extraEpg = url.split(' ', ',').map { it.trim() }.filter { it.startsWith("http") }; App.repo.reloadGuide() })
             }
         }
@@ -549,7 +549,7 @@ fun AddSourceScreen(nav: Nav) {
             Label(when (type) { SourceType.XTREAM -> "Server URL"; SourceType.M3U -> "Playlist URL"; SourceType.STALKER -> "Portal URL" })
             InputField(url, when (type) {
                 SourceType.XTREAM -> "http://example.com:8080"; SourceType.M3U -> "http://example.com/playlist.m3u"; SourceType.STALKER -> "http://example.com:8080/c/"
-            }, { url = it }, Modifier.fillMaxWidth())
+            }, { url = it }, Modifier.fillMaxWidth(), url = true)
         } }
         if (type == SourceType.XTREAM) {
             item { Column { Label("Username"); InputField(user, "Username", { user = it }, Modifier.fillMaxWidth()) } }
@@ -558,7 +558,7 @@ fun AddSourceScreen(nav: Nav) {
         if (type == SourceType.STALKER) item { Column { Label("MAC address"); InputField(mac, "00:1A:79:XX:XX:XX", { mac = it }, Modifier.fillMaxWidth()) } }
         item { Column {
             Label(if (type == SourceType.XTREAM) "TV guide URL (optional, the server's own guide is used by default)" else "TV guide (XMLTV) URL (optional)")
-            InputField(epg, "http://example.com/epg.xml.gz", { epg = it }, Modifier.fillMaxWidth())
+            InputField(epg, "http://example.com/epg.xml.gz", { epg = it }, Modifier.fillMaxWidth(), url = true)
         } }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 10.dp)) {

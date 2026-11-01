@@ -38,7 +38,8 @@ expect fun Pill(text: String, onClick: () -> Unit, modifier: Modifier = Modifier
 
 /** A one-line text box. */
 @Composable
-expect fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, password: Boolean = false, onDone: () -> Unit = {})
+expect fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, password: Boolean = false, onDone: () -> Unit = {},
+    url: Boolean = false)
 
 /** Colours and the app's 1280-unit-wide canvas. */
 @Composable
