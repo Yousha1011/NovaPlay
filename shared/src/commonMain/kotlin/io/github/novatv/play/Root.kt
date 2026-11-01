@@ -204,7 +204,7 @@ fun ImageLoaderSetup() {
         // Logos and posters: a memory cache sized for a TV and a 250 MB disk cache.
         ImageLoader.Builder(ctx)
             .components { add(KtorNetworkFetcherFactory(httpClient = { Http.client })) }
-            .memoryCache { MemoryCache.Builder().maxSizePercent(ctx, 0.20).build() }
+            .memoryCache { MemoryCache.Builder().maxSizePercent(ctx, if (App.host.lowMemory) 0.10 else 0.20).build() }
             .diskCache { DiskCache.Builder().directory(cacheDir() / "images").maxSizeBytes(250L * 1024 * 1024).build() }
             .build()
     }

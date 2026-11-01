@@ -48,10 +48,12 @@ object LibraryCache {
                 val at = i.readLong()
                 val epg = i.str()
                 val lc = i.cats(); val mc = i.cats(); val sc = i.cats()
-                val channels = List(i.readInt()) { Channel(i.str()!!, i.str()!!, i.str(), i.str()!!, i.str(), i.str(), i.readInt(), i.bool(), i.str()) }
-                val movies = List(i.readInt()) { Movie(i.str()!!, i.str()!!, i.str(), i.str()!!, i.str(), i.str(), i.str(), i.str(), i.readLong(), i.str()) }
+                // Repeated texts are read into one shared copy each (see Dedupe).
+                val d = Dedupe()
+                val channels = List(i.readInt()) { Channel(i.str()!!, i.str()!!, d.of(i.str()), d.req(i.str()!!), d.of(i.str()), i.str(), i.readInt(), i.bool(), i.str()) }
+                val movies = List(i.readInt()) { Movie(i.str()!!, i.str()!!, d.of(i.str()), d.req(i.str()!!), d.of(i.str()), d.of(i.str()), i.str(), d.of(i.str()), i.readLong(), i.str()) }
                 val series = List(i.readInt()) {
-                    val id = i.str()!!; val name = i.str()!!; val poster = i.str(); val cat = i.str()!!; val rating = i.str(); val plot = i.str(); val year = i.str(); val added = i.readLong()
+                    val id = i.str()!!; val name = i.str()!!; val poster = d.of(i.str()); val cat = d.req(i.str()!!); val rating = d.of(i.str()); val plot = i.str(); val year = d.of(i.str()); val added = i.readLong()
                     val eps = List(i.readInt()) { Episode(i.str()!!, i.readInt(), i.readInt(), i.str()!!, i.str(), i.str(), i.readInt(), i.str(), i.str(), i.str()) }
                     Series(id, name, poster, cat, rating, plot, year, added, eps)
                 }

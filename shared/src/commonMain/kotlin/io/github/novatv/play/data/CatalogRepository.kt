@@ -79,7 +79,7 @@ class CatalogRepository(
             if (force || cached == null || cached.second < clock() - maxAgeMs) {
                 state.update { it.copy(loading = true, status = "Loading ${src.name}", error = null) }
                 try {
-                    val lib = p.load { msg -> state.update { s -> s.copy(status = msg) } }
+                    val lib = Dedupe.library(p.load { msg -> state.update { s -> s.copy(status = msg) } })
                     cache.write(src.id, lib)
                     onSynced(src.id, clock(), null)
                     onLibraryChanged()
@@ -106,7 +106,7 @@ class CatalogRepository(
     suspend fun sync(src: Source): String? {
         val p = if (state.value.source?.id == src.id) provider ?: providerOf(src) else providerOf(src)
         return try {
-            val lib = p.load { }
+            val lib = Dedupe.library(p.load { })
             cache.write(src.id, lib)
             onSynced(src.id, clock(), null)
             if (state.value.source?.id == src.id) {

@@ -34,6 +34,9 @@ class NovaApp : Application() {
             override fun scheduleOvernight(enabled: Boolean, hour: Int) = Overnight.schedule(this@NovaApp, enabled, hour)
             override fun runOvernightNow() = SyncService.start(this@NovaApp)
             override val updateAsset = Installer.asset
+            override val lowMemory = android.app.ActivityManager.MemoryInfo().also {
+                getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(it)
+            }.totalMem < 2048L * 1024 * 1024
             override fun installUpdate(file: String) = Installer.install(this@NovaApp, java.io.File(file))
         })
         // Re-armed at every start: alarms don't survive an update or a restart (the boot receiver starts the app).

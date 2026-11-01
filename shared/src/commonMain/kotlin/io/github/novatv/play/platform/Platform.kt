@@ -60,6 +60,8 @@ interface Host {
     val updateAsset: Regex? get() = null
     /** Installs a downloaded update (Android's installer, the Windows setup). */
     fun installUpdate(file: String) {}
+    /** Under 2 GB of memory (a Fire TV Stick): caches are kept smaller. */
+    val lowMemory: Boolean get() = false
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */
