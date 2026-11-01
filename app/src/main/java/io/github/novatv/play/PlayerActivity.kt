@@ -139,13 +139,26 @@ class PlayerActivity : ComponentActivity() {
 
     /** One more screen in multi-view: its own player, channel and reconnecting. The first screen is [player]. */
     private inner class Slot(var channel: Int) {
-        val player = buildPlayer(light = true)
+        /** The player on screen; replaced by [standby] when its stream is cut off. */
+        var player by mutableStateOf(buildPlayer(light = true))
+        /** The next stream, opened while the current one plays out what it has buffered after being cut off. */
+        var standby: ExoPlayer? = null
+        var standbyJob: Job? = null
         var loading by mutableStateOf(true)
+        /** Reconnecting straight after playing a while: the last picture stays, with no spinner or message. */
+        var quiet by mutableStateOf(false)
+        /** When it started playing (0 while it isn't). */
+        var playingSince = 0L
         var error by mutableStateOf<String?>(null)
         var job: Job? = null
         /** When it started waiting for picture (0 while playing), for the stall watchdog. */
         var waitingSince = 0L
         var failures = 0
+
+        fun release() {
+            job?.cancel(); standbyJob?.cancel()
+            player.release(); standby?.release(); standby = null
+        }
     }
 
     // Multi-view: up to MultiView.MAX screens; the one with sound (and a cyan frame) is [active].
@@ -173,7 +186,10 @@ class PlayerActivity : ComponentActivity() {
             override fun onPlaybackStateChanged(state: Int) {
                 loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
                 if (loading) { if (mainWaitingSince == 0L) mainWaitingSince = System.currentTimeMillis() } else mainWaitingSince = 0L
-                if (state == Player.STATE_READY) { error = null; retried = false; mainFailures = 0; length = player.duration.coerceAtLeast(0) }
+                if (state == Player.STATE_READY) {
+                    error = null; retried = false; mainFailures = 0; mainQuiet = false; length = player.duration.coerceAtLeast(0)
+                    if (mainPlayingSince == 0L) mainPlayingSince = System.currentTimeMillis()
+                }
                 // A live stream that "ends" has dropped: open it again.
                 if (state == Player.STATE_ENDED) { if (item is PlayItem.Live) reconnectMain() else onEnded() }
             }
@@ -182,7 +198,7 @@ class PlayerActivity : ComponentActivity() {
             override fun onPlayerError(e: PlaybackException) {
                 // Live streams drop now and then: one quiet retry before showing the error.
                 // In multi-view every screen keeps reconnecting, so one dropped stream never stays stopped.
-                if (item is PlayItem.Live && multi) { reconnectMain(); return }
+                if (item is PlayItem.Live && multi) { multiLog("screen 1 error ${e.errorCodeName}: ${e.cause?.message ?: e.message}"); reconnectMain(); return }
                 if (item is PlayItem.Live && !retried) { retried = true; lifecycleScope.launch { delay(1500); startCurrent() }; return }
                 error = playbackMessage(e)
             }
@@ -270,18 +286,71 @@ class PlayerActivity : ComponentActivity() {
     private fun addScreen(index: Int) {
         val l = live ?: return
         val slot = Slot(index.mod(l.channels.size))
-        slot.player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                slot.loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
-                if (slot.loading) { if (slot.waitingSince == 0L) slot.waitingSince = System.currentTimeMillis() } else slot.waitingSince = 0L
-                if (state == Player.STATE_READY) { slot.error = null; slot.failures = 0 }
-                if (state == Player.STATE_ENDED) reconnect(slot)
-            }
-            override fun onPlayerError(e: PlaybackException) { reconnect(slot) }
-        })
+        listen(slot, slot.player)
         extra.add(slot)
         useView(extra.size)
         startSlot(slot)
+    }
+
+    /** Events of one of [slot]'s players: the one on screen, or its standby. */
+    private fun listen(slot: Slot, p: ExoPlayer) {
+        p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (p !== slot.player) return
+                slot.loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
+                if (slot.loading) { if (slot.waitingSince == 0L) slot.waitingSince = System.currentTimeMillis() } else slot.waitingSince = 0L
+                if (state == Player.STATE_READY) {
+                    if (slot.quiet) multiLog("screen ${extra.indexOf(slot) + 2} back")
+                    slot.error = null; slot.failures = 0; slot.quiet = false
+                    if (slot.playingSince == 0L) slot.playingSince = System.currentTimeMillis()
+                }
+                if (state == Player.STATE_ENDED) { multiLog("screen ${extra.indexOf(slot) + 2} stream ended"); if (slot.standby != null) handOver(slot) else reconnect(slot) }
+            }
+            // The server closed the stream: what's buffered still plays, and the next stream opens meanwhile.
+            override fun onIsLoadingChanged(isLoading: Boolean) {
+                if (isLoading || p !== slot.player || p.playbackState != Player.STATE_READY) return
+                if (System.currentTimeMillis() - slot.playingSince < io.github.novatv.play.data.MultiView.SEAMLESS_AFTER_MS) return
+                multiLog("screen ${extra.indexOf(slot) + 2} cut off, ${p.bufferedPosition - p.currentPosition} ms left to play")
+                openStandby(slot)
+            }
+            override fun onPlayerError(e: PlaybackException) {
+                if (p === slot.standby) { slot.standby = null; p.release(); return }
+                if (p !== slot.player) return
+                multiLog("screen ${extra.indexOf(slot) + 2} error ${e.errorCodeName}: ${e.cause?.message ?: e.message}")
+                if (slot.standby != null) handOver(slot) else reconnect(slot)
+            }
+        })
+    }
+
+    /** Opens [slot]'s channel again in a second player, paused, ready to take over. */
+    private fun openStandby(slot: Slot) {
+        val l = live ?: return
+        if (slot.standby != null) return
+        val sp = buildPlayer(light = true)
+        sp.volume = 0f
+        listen(slot, sp)
+        slot.standby = sp
+        slot.standbyJob = lifecycleScope.launch {
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(l.channels[slot.channel]) } catch (e: Exception) { null } }
+            if (url == null || slot.standby !== sp) return@launch
+            sp.setMediaItem(mediaItem(url)); sp.prepare(); sp.playWhenReady = false
+        }
+    }
+
+    /** The standby takes over the screen (its picture follows the old one's last frame). */
+    private fun handOver(slot: Slot) {
+        val sp = slot.standby ?: return reconnect(slot)
+        val old = slot.player
+        slot.standby = null
+        slot.player = sp
+        val i = extra.indexOf(slot)
+        sp.volume = if (active == i + 1) 1f else 0f
+        sp.playWhenReady = true
+        slot.quiet = sp.playbackState != Player.STATE_READY
+        slot.loading = slot.quiet
+        slot.playingSince = System.currentTimeMillis()
+        multiLog("screen ${i + 2} handed over (${if (slot.quiet) "next stream still opening" else "next stream ready"})")
+        old.release()
     }
 
     private var limitWarned = false
@@ -311,6 +380,16 @@ class PlayerActivity : ComponentActivity() {
     /** A screen's stream dropped: try again shortly, and keep trying. */
     private fun reconnect(slot: Slot) {
         if (slot !in extra) return
+        val now = System.currentTimeMillis()
+        val wasPlaying = slot.playingSince > 0 && now - slot.playingSince > io.github.novatv.play.data.MultiView.SEAMLESS_AFTER_MS
+        slot.playingSince = 0
+        if (wasPlaying) {
+            // Cut off after playing a while (often the server's stream limit): straight back, keeping the picture.
+            slot.failures = 0
+            slot.quiet = true
+            startSlot(slot)
+            return
+        }
         slot.failures++
         maybeWarnLimit(slot.failures)
         slot.error = "Reconnecting…"
@@ -318,7 +397,22 @@ class PlayerActivity : ComponentActivity() {
         slot.job = lifecycleScope.launch { delay(io.github.novatv.play.data.MultiView.retryDelay(slot.failures)); if (slot in extra) startSlot(slot) }
     }
 
+    /** What happens to multi-view's screens, for working out why one stops (adb logcat -s NovaMulti). */
+    private fun multiLog(msg: String) = android.util.Log.i("NovaMulti", msg)
+
+    private var mainPlayingSince = 0L
+    private var mainQuiet by mutableStateOf(false)
+
     private fun reconnectMain() {
+        val now = System.currentTimeMillis()
+        val wasPlaying = mainPlayingSince > 0 && now - mainPlayingSince > io.github.novatv.play.data.MultiView.SEAMLESS_AFTER_MS
+        mainPlayingSince = 0
+        if (wasPlaying) {
+            mainFailures = 0
+            mainQuiet = true
+            startCurrent()
+            return
+        }
         mainFailures++
         if (multi) maybeWarnLimit(mainFailures)
         error = "Reconnecting…"
@@ -330,9 +424,9 @@ class PlayerActivity : ComponentActivity() {
     private fun watchdog() {
         val now = System.currentTimeMillis()
         val limit = io.github.novatv.play.data.MultiView.STALL_MS
-        if (mainWaitingSince > 0 && now - mainWaitingSince > limit) { mainWaitingSince = now; startCurrent() }
+        if (mainWaitingSince > 0 && now - mainWaitingSince > limit) { multiLog("screen 1 stalled, reopening"); mainWaitingSince = now; startCurrent() }
         for (slot in extra.toList()) {
-            if (slot.waitingSince > 0 && now - slot.waitingSince > limit) { slot.waitingSince = now; startSlot(slot) }
+            if (slot.waitingSince > 0 && now - slot.waitingSince > limit) { multiLog("screen ${extra.indexOf(slot) + 2} stalled, reopening"); slot.waitingSince = now; startSlot(slot) }
             // Paused by the system (audio focus, a decoder reset): carry on.
             if (!slot.player.playWhenReady && slot.player.playbackState == Player.STATE_READY) slot.player.play()
         }
@@ -353,16 +447,16 @@ class PlayerActivity : ComponentActivity() {
         if (i == 0) {
             // The first screen's player goes on with the next screen's channel.
             val next = extra.removeAt(0)
-            next.job?.cancel(); next.player.release()
+            next.release()
             channelIndex = next.channel; zap(0)
-        } else extra.removeAt(i - 1).let { it.job?.cancel(); it.player.release() }
+        } else extra.removeAt(i - 1).release()
         useView(minOf(active, extra.size))
     }
 
     /** Leaves multi-view, keeping screen [keep] full screen. */
     private fun endMulti(keep: Int) {
         val ch = channelOf(keep)
-        for (slot in extra) { slot.job?.cancel(); slot.player.release() }
+        for (slot in extra) slot.release()
         extra.clear()
         picking = false; multiMenu = false
         player.volume = 1f; active = 0; mainFailures = 0
@@ -577,7 +671,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         if (::player.isInitialized) player.release()
-        extra.forEach { it.job?.cancel(); it.player.release() }
+        extra.forEach { it.release() }
         extra.clear()
     }
 
@@ -794,10 +888,12 @@ class PlayerActivity : ComponentActivity() {
                                 PlayerView(ctx).apply {
                                     useController = false
                                     setShutterBackgroundColor(android.graphics.Color.BLACK)
+                                    // A screen that reconnects keeps its last picture meanwhile.
+                                    setKeepContentOnPlayerReset(true)
                                     layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                 }
                             }, update = { v -> v.player = slot?.player ?: player }, modifier = Modifier.fillMaxSize().padding(3.dp))
-                            val busy = if (slot == null) loading else slot.loading
+                            val busy = if (slot == null) loading && !mainQuiet else slot.loading && !slot.quiet
                             val err = if (slot == null) error else slot.error
                             if (busy && err == null) Spinner(Modifier.align(Alignment.Center), 36.dp)
                             err?.let { Text(it, style = T.small.copy(color = C.text), modifier = Modifier.align(Alignment.Center)) }

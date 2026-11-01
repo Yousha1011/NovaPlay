@@ -71,33 +71,64 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
+import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer
+
+/** What happens to multi-view's screens, for working out why one stops: %TEMP%\novaplay-multiview.log, when NOVAPLAY_LOG is set. */
+internal fun multiLog(msg: String) {
+    if (System.getenv("NOVAPLAY_LOG") == null) return
+    runCatching { java.io.File(System.getProperty("java.io.tmpdir"), "novaplay-multiview.log").appendText("${java.time.LocalTime.now().withNano(0)} $msg\n") }
+}
+
+/** A VLC player drawing into its own frames. */
+private class Vlcp(val frames: Frames = Frames()) {
+    val player: EmbeddedMediaPlayer = Vlc.factory.mediaPlayers().newEmbeddedMediaPlayer().also {
+        it.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
+    }
+    @Volatile var dropped = false
+    private val stats = uk.co.caprica.vlcj.media.MediaStatistics()
+
+    /** Bytes read from the stream so far (stops growing when the server closes it). */
+    fun bytesRead(): Int = runCatching { if (player.media().info().statistics(stats)) stats.inputBytesRead() else -1 }.getOrDefault(-1)
+
+    fun release() { runCatching { player.controls().stop() }; runCatching { player.release() } }
+}
 
 /**
- * One multi-view screen: its own VLC player and picture. VLC's events only raise flags (calling the player from its
- * own event thread can deadlock it); the screen's loop acts on them.
+ * One multi-view screen: its VLC player and picture. VLC's events only raise flags (calling the player from its own
+ * event thread can deadlock it); the screen's loop acts on them.
+ *
+ * Servers that allow fewer streams than screens close the extra ones every half minute or so. VLC still plays what it
+ * has cached, so as soon as the stream stops arriving a [standby] player opens the channel again, paused, and takes over
+ * the screen when the cache runs out: the picture carries on.
  */
 private class VlcScreen(var channel: Int) {
-    val frames = Frames()
-    val player = Vlc.factory.mediaPlayers().newEmbeddedMediaPlayer()
+    var current by mutableStateOf(Vlcp())
+    var standby: Vlcp? = null
     var buffering by mutableStateOf(true)
     var error by mutableStateOf<String?>(null)
-    @Volatile var dropped = false
     var failures = 0
     /** When it was (re)opened, to give a new stream time before the frozen-picture check. */
     var openedAt = 0L
+    /** When the picture started (0 until it has), and when the stream last grew. */
+    var playingSince = 0L
+    var lastBytes = 0
+    var bytesAt = 0L
 
-    init {
-        player.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
-        player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
-            override fun playing(mediaPlayer: MediaPlayer) { buffering = false; error = null }
-            override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) { buffering = newCache < 100f }
-            override fun error(mediaPlayer: MediaPlayer) { dropped = true }
-            override fun finished(mediaPlayer: MediaPlayer) { dropped = true }
-            override fun stopped(mediaPlayer: MediaPlayer) {}
+    val player get() = current.player
+    val frames get() = current.frames
+
+    init { listen(current) }
+
+    fun listen(v: Vlcp) {
+        v.player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
+            override fun playing(mediaPlayer: MediaPlayer) { if (v === current) { buffering = false; error = null } }
+            override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) { if (v === current) buffering = newCache < 100f }
+            override fun error(mediaPlayer: MediaPlayer) { multiLog("channel $channel: stream error"); v.dropped = true }
+            override fun finished(mediaPlayer: MediaPlayer) { multiLog("channel $channel: stream ended"); v.dropped = true }
         })
     }
 
-    fun release() { runCatching { player.controls().stop() }; runCatching { player.release() } }
+    fun release() { current.release(); standby?.release(); standby = null }
 }
 
 /**
@@ -115,16 +146,43 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
 
-    fun open(s: VlcScreen) {
-        s.dropped = false; s.error = null; s.buffering = true; s.openedAt = System.currentTimeMillis()
+    // A few seconds of cache at least, so a closed stream plays on while the next one opens.
+    val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(5000, 15000)}")
+    fun open(s: VlcScreen, quiet: Boolean = false) {
+        s.current.dropped = false; s.openedAt = System.currentTimeMillis(); s.playingSince = 0L; s.lastBytes = 0; s.bytesAt = s.openedAt
+        if (!quiet) { s.error = null; s.buffering = true }
         s.frames.lastFrameAt = 0L
         scope.launch {
             val url = withContext(IO) { try { App.repo.provider?.liveUrl(live.channels[s.channel]) } catch (e: Exception) { null } }
             if (s !in screens) return@launch
-            if (url == null) { s.dropped = true; return@launch }
-            val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
-            withContext(IO) { s.player.media().play(url, *opts) }
+            if (url == null) { s.current.dropped = true; return@launch }
+            val v = s.current
+            withContext(IO) { v.player.media().play(url, *opts) }
         }
+    }
+    /** Opens [s]'s channel again in a paused standby player, ready to take over. */
+    fun openStandby(s: VlcScreen) {
+        if (s.standby != null) return
+        val sb = Vlcp()
+        s.listen(sb)
+        s.standby = sb
+        scope.launch {
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(live.channels[s.channel]) } catch (e: Exception) { null } }
+            if (url == null || s.standby !== sb) return@launch
+            withContext(IO) { sb.player.media().play(url, *opts, ":start-paused") }
+        }
+    }
+    /** The standby takes over [s]: its picture carries on from the old one's last frame. */
+    fun handOver(s: VlcScreen, now: Long) {
+        val sb = s.standby ?: return
+        val old = s.current
+        s.standby = null
+        s.current = sb
+        sb.player.audio().isMute = screens.indexOf(s) != active
+        sb.player.controls().play()
+        s.openedAt = now; s.playingSince = now; s.lastBytes = 0; s.bytesAt = now
+        multiLog("channel ${s.channel}: handed over")
+        scope.launch(IO) { old.release() }
     }
     fun sound(a: Int) {
         active = a.coerceIn(0, screens.lastIndex)
@@ -167,17 +225,29 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
             val now = System.currentTimeMillis()
             for (s in screens.toList()) {
                 val last = maxOf(s.frames.lastFrameAt, s.openedAt)
+                if (s.playingSince == 0L && s.frames.lastFrameAt > s.openedAt) s.playingSince = now
+                // The stream stopped arriving after playing a while: the server closed it. Open the next one now.
+                val bytes = s.current.bytesRead()
+                if (bytes > s.lastBytes) { s.lastBytes = bytes; s.bytesAt = now }
+                else if (s.standby == null && s.playingSince > 0 && now - s.playingSince > MultiView.SEAMLESS_AFTER_MS && now - s.bytesAt > 1500) {
+                    multiLog("channel ${s.channel}: cut off, opening the next stream")
+                    openStandby(s)
+                }
+                s.standby?.let { sb -> if (sb.dropped) { s.standby = null; scope.launch(IO) { sb.release() } } }
+                val wasPlaying = s.playingSince > 0 && now - s.playingSince > MultiView.SEAMLESS_AFTER_MS
                 when {
-                    s.dropped -> {
+                    (s.current.dropped || now - last > MultiView.STALL_MS) && s.standby != null -> handOver(s, now)
+                    s.current.dropped && wasPlaying -> { s.failures = 0; open(s, quiet = true) }
+                    s.current.dropped -> {
                         s.failures++
                         if (s.failures == MultiView.WARN_AFTER) warnLimit()
                         s.error = "Reconnecting…"
-                        s.dropped = false
+                        s.current.dropped = false
                         val wait = MultiView.retryDelay(s.failures)
                         s.openedAt = now + wait
                         launch { delay(wait); if (s in screens) open(s) }
                     }
-                    now - last > MultiView.STALL_MS -> { s.error = "Reconnecting…"; open(s) }
+                    now - last > MultiView.STALL_MS -> { multiLog("channel ${s.channel}: picture frozen, reopening"); s.error = "Reconnecting…"; open(s) }
                     s.frames.lastFrameAt > s.openedAt -> s.failures = 0
                 }
             }
@@ -218,7 +288,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (Int) -> U
                             Box(Modifier.size(tileW, tileH).clip(RoundedCornerShape(10.dp)).background(Color(0xFF0B0E13))
                                 .border(if (active == i) 3.dp else 1.dp, if (active == i) C.accent else C.line, RoundedCornerShape(10.dp))
                                 .pointerInput(i) { detectTapGestures(onTap = { sound(i) }, onDoubleTap = { onExit(s.channel) }) }) {
-                                VideoCanvas(s.frames, Modifier.fillMaxSize().padding(3.dp))
+                                VideoCanvas(s.current.frames, Modifier.fillMaxSize().padding(3.dp))
                                 if (s.error != null) Text(s.error!!, style = T.small.copy(color = C.text), modifier = Modifier.align(Alignment.Center))
                                 else if (s.buffering) Spinner(Modifier.align(Alignment.Center), size = 36.dp)
                                 if (c != null) Row(Modifier.align(Alignment.BottomStart).fillMaxWidth()

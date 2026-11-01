@@ -9,6 +9,13 @@ object MultiView {
     /** How long a screen may sit buffering before its stream is opened again. */
     const val STALL_MS = 12_000L
 
+    /**
+     * A screen that had been playing at least this long when its stream ended reconnects at once, keeping its last
+     * picture, with no message: servers that allow fewer streams than screens cut the extra ones off every half minute
+     * or so, and a quick reconnect makes that a blink instead of a stop.
+     */
+    const val SEAMLESS_AFTER_MS = 10_000L
+
     /** Wait before reconnecting after the [n]th failure in a row: 2, 4, 6... up to 10 seconds. */
     fun retryDelay(n: Int): Long = (2_000L * n.coerceAtLeast(1)).coerceAtMost(10_000L)
 
