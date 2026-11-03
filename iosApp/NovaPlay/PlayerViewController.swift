@@ -467,7 +467,12 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         stopAV()
         if request.live, AVPictureInPictureController.isPictureInPictureSupported(), let twin = PipKeeper.url(for: request) {
             player.stop()
-            startAV(twin)
+            // AVPlayer only when the server's .m3u8 is real live HLS; otherwise VLC plays the .ts (see isLiveHls).
+            let asked = request
+            PipKeeper.isLiveHls(twin, userAgent: request.userAgent) { [weak self] ok in
+                guard let self = self, self.request === asked else { return }
+                if ok { self.startAV(twin) } else { self.playVLC() }
+            }
         } else {
             playVLC()
         }

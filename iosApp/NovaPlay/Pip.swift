@@ -33,9 +33,44 @@ final class PipKeeper: NSObject, AVPictureInPictureControllerDelegate {
         return URL(string: u)
     }
 
+    /// Servers whose .m3u8 is a real live playlist (true) or a stub (false), by host: asked once per server.
+    private static var hlsByHost: [String: Bool] = [:]
+
+    /**
+     * Whether [url] is a live HLS playlist AVPlayer can follow. Some servers answer .m3u8 with a stub: one "10 second"
+     * segment that is really the endless .ts stream, then #EXT-X-ENDLIST. AVPlayer takes that for a finished clip and
+     * stalls and restarts all the time; VLC plays the .ts itself smoothly. Calls [done] on the main queue.
+     */
+    static func isLiveHls(_ url: URL, userAgent: String, done: @escaping (Bool) -> Void) {
+        let host = url.host ?? ""
+        if let known = hlsByHost[host] { done(known); return }
+        var req = URLRequest(url: url, timeoutInterval: 5)
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let segments = text.split(separator: "\n").filter { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+            let live = text.hasPrefix("#EXTM3U") && !(text.contains("#EXT-X-ENDLIST") && segments <= 1)
+            DispatchQueue.main.async {
+                if !text.isEmpty { hlsByHost[host] = live }
+                done(live)
+            }
+        }.resume()
+    }
+
     func start(_ request: PlayRequest, at ms: Int64, started: @escaping () -> Void, failed: @escaping () -> Void) {
         stop()
         guard AVPictureInPictureController.isPictureInPictureSupported(), let url = PipKeeper.url(for: request) else { failed(); return }
+        // A live channel whose server has no real HLS can't go in the small window without stalling.
+        if request.live && url.absoluteString != request.url {
+            PipKeeper.isLiveHls(url, userAgent: request.userAgent) { [weak self] ok in
+                if ok { self?.begin(request, url: url, at: ms, started: started, failed: failed) } else { failed() }
+            }
+            return
+        }
+        begin(request, url: url, at: ms, started: started, failed: failed)
+    }
+
+    private func begin(_ request: PlayRequest, url: URL, at ms: Int64, started: @escaping () -> Void, failed: @escaping () -> Void) {
         self.request = request
         onStarted = started
         onFailed = failed
