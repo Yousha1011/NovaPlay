@@ -3,7 +3,8 @@ platform :ios, '15.0'
 target 'NovaPlay' do
   use_frameworks!
   # VLC's engine: live TS and HLS channels the iPhone's own player cannot open.
-  pod 'MobileVLCKit', '~> 3.6.0'
+  # VLCKit 4: its picture can go in the small window (picture in picture) as it plays.
+  pod 'VLCKit', '4.0.0a25'
 end
 
 post_install do |installer|

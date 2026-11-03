@@ -1,5 +1,5 @@
 import UIKit
-import MobileVLCKit
+import VLCKit
 import Shared
 
 /// Multi-view: two to four channels of the list playing, each with its own VLC player, in a grid. A tap picks the
@@ -158,7 +158,7 @@ final class MultiViewController: UIViewController {
                 s.name.text = "  " + name + (hd ? "  ·  HD" : "")
                 guard let self = self, self.screens.contains(where: { $0 === s }) else { return }
                 guard let u = url, let link = URL(string: u) else { self.dropped(s); return }
-                let media = VLCMedia(url: link)
+                guard let media = VLCMedia(url: link) else { self.dropped(s); return }
                 media.addOption(":http-user-agent=\(IosPlayback.shared.userAgent())")
                 media.addOption(":network-caching=\(max(1000, min(15000, Int(IosPlayback.shared.bufferMs()))))")
                 media.addOption(":http-reconnect")
@@ -188,7 +188,7 @@ final class MultiViewController: UIViewController {
             // A stream that failed or ended (given a few seconds to get going after opening).
             if now.timeIntervalSince(s.movedAt) > 4 {
                 switch s.player.state {
-                case .error, .ended, .stopped:
+                case .error, .stopped, .stopping:
                     dropped(s); continue
                 default: break
                 }

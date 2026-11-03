@@ -1,6 +1,6 @@
 import UIKit
 import AVKit
-import MobileVLCKit
+import VLCKit
 import Shared
 
 /// The player, in two layouts like IM Player's:
@@ -46,6 +46,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     /// The small window was started with the button (not by going home), so the app goes home once it is up.
     private var pipByButton = false
     private var pipRestoring = false
+    /// VLC's own small window (VLCKit 4): ready once VLC draws, for any stream VLC plays.
+    private let vlcDrawable = VLCPipDrawable()
+    private var vlcPip: VLCPictureInPictureWindowControlling?
     private let settingsButton = UIButton(type: .system)
 
     // Middle.
@@ -143,7 +146,10 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             page.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        player.drawable = video
+        vlcDrawable.view = video
+        vlcDrawable.controls.player = player
+        vlcDrawable.onReady = { [weak self] c in DispatchQueue.main.async { self?.vlcPipReady(c) } }
+        player.drawable = vlcDrawable
         player.delegate = self
         brightness.value = Float(UIScreen.main.brightness)
         brightness.onChange = { UIScreen.main.brightness = CGFloat($0) }
@@ -176,7 +182,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         tickTimer?.invalidate()
         hideTimer?.invalidate()
         stopAV()
-        player.stop()
+        stopVLC()
     }
 
     /// Switches between the portrait page and the full-screen controls.
@@ -466,7 +472,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
         stopAV()
         if request.live, AVPictureInPictureController.isPictureInPictureSupported(), let twin = PipKeeper.url(for: request) {
-            player.stop()
+            stopVLC()
             // AVPlayer only when the server's .m3u8 is real live HLS; otherwise VLC plays the .ts (see isLiveHls).
             let asked = request
             PipKeeper.isLiveHls(twin, userAgent: request.userAgent) { [weak self] ok in
@@ -481,11 +487,11 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     private func playVLC() {
         guard let url = URL(string: request.url) else { showError("This stream address is not valid"); return }
-        let media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else { showError("This stream address is not valid"); return }
         media.addOption(":http-user-agent=\(request.userAgent)")
         media.addOption(":network-caching=\(max(1000, min(15000, Int(request.bufferMs))))")
         player.media = media
-        if let a = aspect { player.videoAspectRatio = UnsafeMutablePointer<CChar>(mutating: (a as NSString).utf8String) }
+        if let a = aspect { player.videoAspectRatio = a }
         player.play()
     }
 
@@ -612,9 +618,24 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         showControls(stay: true)
     }
 
-    func mediaPlayerStateChanged(_ aNotification: Notification) {
-        switch player.state {
+    func mediaPlayerStateChanged(_ newState: VLCMediaPlayerState) {
+        // VLCKit 4 reports from its own thread.
+        DispatchQueue.main.async { [weak self] in self?.stateChanged(newState) }
+    }
+
+    /// Set while this screen stops VLC itself (zapping, minimising), so the stop isn't taken for a film ending.
+    private var stoppingOnPurpose = false
+
+    private func stopVLC() {
+        stoppingOnPurpose = true
+        player.stop()
+    }
+
+    private func stateChanged(_ state: VLCMediaPlayerState) {
+        vlcPip?.invalidatePlaybackState()
+        switch state {
         case .playing:
+            stoppingOnPurpose = false
             spinner.stopAnimating(); errorLabel.isHidden = true
             // VLC's own views inside the picture must never take touches.
             video.subviews.forEach { $0.isUserInteractionEnabled = false }
@@ -624,12 +645,13 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
                 resumeMs = nil
                 player.time = VLCTime(int: Int32(clamping: start))
             }
-        case .buffering, .opening:
+        case .opening:
             if !player.isPlaying { spinner.startAnimating() }
         case .error:
             showError("This stream could not be played")
-        case .ended:
-            if !request.live {
+        case .stopped:
+            // VLCKit 4 has no "ended": a film that stops by itself has reached its end.
+            if !request.live && !stoppingOnPurpose && av == nil {
                 let dur = Int64(player.media?.length.intValue ?? 0)
                 if !IosPlayback.shared.ended(durMs: dur) { dismiss(animated: true) }
             }
@@ -639,7 +661,14 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     }
 
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
-        if spinner.isAnimating { spinner.stopAnimating() }
+        DispatchQueue.main.async { [weak self] in if self?.spinner.isAnimating == true { self?.spinner.stopAnimating() } }
+    }
+
+    func mediaPlayerBufferingChanged(_ progress: Float) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.av == nil else { return }
+            if progress < 100 && !self.player.isPlaying { self.spinner.startAnimating() }
+        }
     }
 
     private func updatePlayIcon() {
@@ -675,14 +704,8 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     }
 
     private func fps() -> Double? {
-        guard let tracks = player.media?.tracksInformation as? [[String: Any]] else { return nil }
-        for t in tracks where (t[VLCMediaTracksInformationType] as? String) == VLCMediaTracksInformationTypeVideo {
-            if let num = t[VLCMediaTracksInformationFrameRate] as? NSNumber,
-               let den = t[VLCMediaTracksInformationFrameRateDenominator] as? NSNumber, den.doubleValue > 0 {
-                return num.doubleValue / den.doubleValue
-            }
-        }
-        return nil
+        guard let v = player.media?.tracksInformation.first(where: { $0.type == .video })?.video, v.frameRateDenominator > 0 else { return nil }
+        return Double(v.frameRate) / Double(v.frameRateDenominator)
     }
 
     private func saveProgress() {
@@ -886,10 +909,16 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             if let c = avPip, c.isPictureInPicturePossible { c.startPictureInPicture() } else { pipWanted = true; spinner.startAnimating() }
             return
         }
+        // VLC playing: its own small window takes the picture as it is, with no new stream to open.
+        if let c = vlcPip, player.isPlaying {
+            vlcPipByButton = true
+            c.startPictureInPicture()
+            return
+        }
         spinner.startAnimating()
         saveProgress()
         let at = request.live ? Int64(0) : Int64(player.time.intValue)
-        player.stop()
+        stopVLC()
         PipKeeper.shared.start(request, at: at, started: { [weak self] in
             guard let self = self else { return }
             self.spinner.stopAnimating()
@@ -901,6 +930,33 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             self.load(self.request)
             self.pipFailed()
         })
+    }
+
+    /// Minimise was tapped (rather than going home), so the app goes home once the small window is up.
+    private var vlcPipByButton = false
+
+    private func vlcPipReady(_ c: VLCPictureInPictureWindowControlling) {
+        vlcPip = c
+        c.stateChangeEventHandler = { [weak self] started in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if started {
+                    self.spinner.stopAnimating()
+                    if self.vlcPipByButton { self.vlcPipByButton = false; PipKeeper.goHome() }
+                    return
+                }
+                // Stopped: back to the app with its button (the app comes forward), or closed with the × (it stays in
+                // the background). Closed means playing stops and the player screen goes, as with AVPlayer.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    if UIApplication.shared.applicationState != .active {
+                        self.stopVLC()
+                        self.dismiss(animated: false)
+                    } else {
+                        self.showControls()
+                    }
+                }
+            }
+        }
     }
 
     private func pipFailed() {
@@ -915,7 +971,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     @objc private func openMulti() {
         guard request.live else { return }
         stopAV()
-        player.stop()
+        stopVLC()
         let m = MultiViewController(first: Int(IosPlayback.shared.currentIndex())) { [weak self] position in
             // Back to this player, with the channel chosen there.
             self?.spinner.startAnimating()
@@ -1019,9 +1075,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         if value == "fill" {
             let b = videoBox.bounds.size
             let r = "\(Int(b.width)):\(Int(b.height))"
-            player.videoAspectRatio = UnsafeMutablePointer<CChar>(mutating: (r as NSString).utf8String)
+            player.videoAspectRatio = r
         } else if let v = value {
-            player.videoAspectRatio = UnsafeMutablePointer<CChar>(mutating: (v as NSString).utf8String)
+            player.videoAspectRatio = v
         } else {
             player.videoAspectRatio = nil
         }
@@ -1109,4 +1165,42 @@ final class VerticalSlider: UIView {
         value = Float(max(0, min(1, 1 - y / bounds.height)))
         onChange?(value)
     }
+}
+
+/// What VLC draws into (VLCKit 4): the player's video view, plus what its small window needs. Kept apart from the
+/// view itself so VLC's "bounds" method doesn't clash with UIView's.
+final class VLCPipDrawable: NSObject, VLCDrawable, VLCPictureInPictureDrawable {
+    weak var view: UIView?
+    let controls = VLCPipControls()
+    var onReady: ((VLCPictureInPictureWindowControlling) -> Void)?
+
+    func addSubview(_ v: UIView) {
+        v.isUserInteractionEnabled = false
+        view?.addSubview(v)
+        v.frame = view?.bounds ?? .zero
+        v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+
+    func bounds() -> CGRect { view?.bounds ?? .zero }
+
+    func mediaController() -> VLCPictureInPictureMediaControlling { controls }
+
+    func pictureInPictureReady() -> ((VLCPictureInPictureWindowControlling) -> Void) {
+        { [weak self] c in self?.onReady?(c) }
+    }
+}
+
+/// The small window's play, pause and seek buttons, on the player. Live TV has no length, so it can't be seeked.
+final class VLCPipControls: NSObject, VLCPictureInPictureMediaControlling {
+    weak var player: VLCMediaPlayer?
+
+    func play() { player?.play() }
+    func pause() { player?.pause() }
+    func seek(by offset: Int64, completion: @escaping () -> Void) {
+        guard let p = player, p.jump(withOffset: Int32(clamping: offset), completion: completion) else { completion(); return }
+    }
+    func mediaLength() -> Int64 { player?.media?.length.value?.int64Value ?? 0 }
+    func mediaTime() -> Int64 { player?.time.value?.int64Value ?? 0 }
+    func isMediaSeekable() -> Bool { player?.isSeekable ?? false }
+    func isMediaPlaying() -> Bool { player?.isPlaying ?? false }
 }
