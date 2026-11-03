@@ -402,8 +402,8 @@ private fun GamePicker(game: io.github.novatv.play.sports.SportEvent?, choose: (
             } else {
                 val epg = App.repo.state.collectAsState().value.epgVersion
                 val airings by produceState<List<io.github.novatv.play.sports.Airing>?>(null, game.id, epg) {
-                    value = withContext(IO) { App.repo.matcher().airings(game, limit = 60) }
-                    val more = withContext(IO) { App.repo.matcher().airings(game, io.github.novatv.play.sports.Broadcasters.forEvent(game), limit = 60) }
+                    value = withContext(IO) { App.repo.matcher().airings(game, limit = 150) }
+                    val more = withContext(IO) { App.repo.matcher().airings(game, io.github.novatv.play.sports.Broadcasters.forEvent(game), limit = 150) }
                     value = (value.orEmpty() + more).distinctBy { it.channel.id }
                 }
                 val list = airings

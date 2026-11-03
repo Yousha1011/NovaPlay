@@ -145,8 +145,8 @@ private fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit)
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
     val close = remember { androidx.compose.ui.focus.FocusRequester() }
     val airings by produceState<List<Airing>?>(null, e.id, epgVersion) {
-        value = withContext(IO) { App.repo.matcher().airings(e, limit = 60) }
-        val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 60) }
+        value = withContext(IO) { App.repo.matcher().airings(e, limit = 150) }
+        val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 150) }
         // Keep what is already listed in place, so the row under the cursor doesn't move.
         value = (value.orEmpty() + more).distinctBy { it.channel.id }
     }

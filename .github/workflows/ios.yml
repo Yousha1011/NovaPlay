@@ -59,3 +59,73 @@ jobs:
           name: NovaPlay-ipa
           path: iosApp/NovaPlay.ipa
           retention-days: 30
+
+  # Starts the app in the iPhone Simulator, saves screenshots and fails if it crashes: a check before the .ipa is
+  # released. It has no playlist, so it covers start-up and the first screens, not playback.
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Tools
+        run: |
+          chmod +x gradlew
+          brew install xcodegen
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Xcode project
+        working-directory: iosApp
+        run: |
+          xcodegen generate
+          pod install
+
+      - name: Build for the Simulator
+        working-directory: iosApp
+        run: |
+          xcodebuild -workspace NovaPlay.xcworkspace -scheme NovaPlay -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+
+      - name: Run and screenshot
+        working-directory: iosApp
+        run: |
+          mkdir -p shots
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E "iPhone 1[5-7]( Pro)? \(" | grep -oE "[0-9A-F-]{36}")
+          echo "Simulator: $DEVICE"
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          APP=build/Build/Products/Debug-iphonesimulator/NovaPlay.app
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
+          xcrun simctl install "$DEVICE" "$APP"
+          xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE" > shots/console.log 2>&1 &
+          for t in 5 15 30; do
+            sleep $([ $t = 5 ] && echo 5 || echo 10)
+            xcrun simctl io "$DEVICE" screenshot "shots/after-${t}s.png"
+          done
+          # Still running after 30 s, or it crashed.
+          if ! xcrun simctl spawn "$DEVICE" launchctl list | grep -q "$BUNDLE"; then
+            echo "::error::NovaPlay is not running in the Simulator: it crashed or quit. See console.log."
+            cp ~/Library/Logs/DiagnosticReports/NovaPlay* shots/ 2>/dev/null || true
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NovaPlay-simulator
+          path: iosApp/shots
+          retention-days: 14

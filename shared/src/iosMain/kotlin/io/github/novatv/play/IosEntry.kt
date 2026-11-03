@@ -212,7 +212,7 @@ object IosPlayback {
     fun multiGameChannels(gameId: String): List<ChannelCard> {
         val e = App.repo.sports.value.events.firstOrNull { it.id == gameId } ?: return emptyList()
         val m = App.repo.matcher()
-        gameChannels = (m.airings(e, limit = 60) + m.airings(e, io.github.novatv.play.sports.Broadcasters.forEvent(e), limit = 60))
+        gameChannels = (m.airings(e, limit = 150) + m.airings(e, io.github.novatv.play.sports.Broadcasters.forEvent(e), limit = 150))
             .map { it.channel }.distinctBy { it.id }
         return gameChannels.map { ChannelCard(it.id, it.name, it.logo, "", false) }
     }

@@ -174,8 +174,8 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     val tv by produceState<List<Broadcast>?>(null, e.id) { value = withContext(IO) { Broadcasters.forEvent(e) } }
     // What is known locally first, then the online broadcasters added below it.
     val airings by produceState<List<Airing>?>(null, e.id, st.epgVersion) {
-        value = withContext(IO) { App.repo.matcher().airings(e, limit = 60) }
-        val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 60) }
+        value = withContext(IO) { App.repo.matcher().airings(e, limit = 150) }
+        val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 150) }
         value = (value.orEmpty() + more).distinctBy { it.channel.id }
     }
     Pushed(nav) {

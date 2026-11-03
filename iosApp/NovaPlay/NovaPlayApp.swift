@@ -51,22 +51,31 @@ final class PlayerHost {
     func connect() {
         IosPlayback.shared.presenter = { [weak self] request in self?.show(request) }
         IosPlayback.shared.failed = { [weak self] message in
-            if let player = self?.current { player.showError(message) } else { self?.alert(message) }
+            if let player = self?.onScreen { player.showError(message) } else { self?.alert(message) }
         }
     }
 
     private func topController() -> UIViewController? {
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         var top = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
-        while let presented = top?.presentedViewController { top = presented }
+        // Skip a screen on its way out (a player closing): presenting over it does nothing.
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed { top = presented }
         return top
     }
 
+    /// The player, while it is on screen. A closed or minimised one can outlive its screen for a while (a timer or
+    /// VLC still holds it); loading into that one shows nothing, so it no longer counts.
+    private var onScreen: PlayerViewController? {
+        guard let p = current, p.viewIfLoaded?.window != nil, !p.isBeingDismissed, p.presentingViewController != nil else { return nil }
+        return p
+    }
+
     private func show(_ request: PlayRequest) {
-        if let player = current {
+        if let player = onScreen {
             player.load(request)
             return
         }
+        current = nil
         // Something else picked while the small window plays: it gives way to the full player.
         PipKeeper.shared.stop()
         present(request, resumeMs: nil)
@@ -74,7 +83,7 @@ final class PlayerHost {
 
     /// Back from the small window: the full player opens again, a film where it had got to.
     func reopen(_ request: PlayRequest, atMs: Int64) {
-        if let player = current { player.resumeMs = atMs; player.load(request); return }
+        if let player = onScreen { player.resumeMs = atMs; player.load(request); return }
         present(request, resumeMs: atMs > 0 ? atMs : nil)
     }
 
@@ -83,7 +92,16 @@ final class PlayerHost {
         player.resumeMs = resumeMs
         player.modalPresentationStyle = .fullScreen
         current = player
-        topController()?.present(player, animated: true) {
+        guard let top = topController() else { return }
+        // Mid-transition (a screen still closing), UIKit drops the request without a word: try again once it settles.
+        if top.transitionCoordinator != nil || top.presentedViewController?.isBeingDismissed == true {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self = self, self.current === player, player.presentingViewController == nil else { return }
+                self.topController()?.present(player, animated: true) { if !request.live { Orientation.landscape() } }
+            }
+            return
+        }
+        top.present(player, animated: true) {
             // Films and episodes play full screen; live channels open on their page upright, as in IM Player.
             if !request.live { Orientation.landscape() }
         }
