@@ -16,19 +16,16 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okio.ByteString
-import okio.ByteString.Companion.decodeBase64
 import okio.ByteString.Companion.encodeUtf8
-import kotlin.random.Random
 
 /**
  * NovaPlay accounts: a username and password, and the account's playlists, guides, favourites, Sports picks, keys and
- * history ([Store.syncedKeys]), kept as accounts/<username>.json in a private GitHub repository ([AccountsConfig]).
- * The password itself is never stored, only a salted, many-times-hashed fingerprint of it. Changes go up a few seconds
- * after they're made; each device looks for others' changes when it starts and every minute. Every setting carries
- * the time it last changed: the newer one wins, setting by setting.
+ * history ([Store.syncedKeys]). The accounts server ([AccountsConfig.SERVER], the user's sports proxy) keeps them in a
+ * private GitHub repository and holds its key: the apps carry none. Logging in gives a session this device keeps (never
+ * the password). Changes go up a few seconds after they're made; each device looks for others' changes when it starts
+ * and every minute. Every setting carries the time it last changed: the newer one wins, setting by setting.
  */
 object AccountSync {
-    private const val API = "https://api.github.com"
     private const val EVERY_MS = 60_000L
     /** Changes are sent this long after the last one, so a run of edits goes up together. */
     private const val SETTLE_MS = 4_000L
@@ -48,11 +45,15 @@ object AccountSync {
     val user: StateFlow<String?> = _user
 
     /** Whether this build knows where accounts are kept (local.properties when it was built). */
-    val available: Boolean get() = AccountsConfig.REPO.isNotBlank() && AccountsConfig.TOKEN.isNotBlank()
+    val available: Boolean get() = AccountsConfig.SERVER.isNotBlank()
 
-    /** At start-up: watches this device's changes, and syncs now and every minute while logged in. */
-    fun start() {
-        _user.value = App.store.accountName.ifBlank { null }
+    /**
+     * Before anything else at start-up: from here on every change to a synced setting is time-stamped, including the
+     * app's own updates to settings (a guide added in a new version), so they win over the account's older values.
+     */
+    fun watch() {
+        // Logged in means a session from the accounts server (devices on the first, GitHub-key version log in once more).
+        _user.value = App.store.accountName.takeIf { it.isNotBlank() && App.store.accountSession.isNotBlank() }
         App.store.onSyncedChange = { k ->
             val t = App.store.syncTimes
             t.put(k, nowMs())
@@ -62,6 +63,10 @@ object AccountSync {
                 push = scope.launch { delay(SETTLE_MS); sync() }
             }
         }
+    }
+
+    /** Once the app is up: syncs now and every minute while logged in. */
+    fun start() {
         if (loop == null) loop = scope.launch {
             while (isActive) {
                 if (_user.value != null && available) sync()
@@ -73,22 +78,19 @@ object AccountSync {
     /** "Ali_99" -> "ali_99"; null when it can't be a username. */
     fun cleanName(name: String): String? = name.trim().lowercase().takeIf { Regex("[a-z0-9._-]{3,32}").matches(it) }
 
-    /**
-     * Makes account [name] with [password], holding this device's settings. Returns null, or what went wrong.
-     */
+    /** Makes account [name] with [password], holding this device's settings. Returns null, or what went wrong. */
     suspend fun signUp(name: String, password: String): String? = withContext(IO) {
         val n = cleanName(name) ?: return@withContext "Use 3 to 32 letters, numbers, dots, dashes or underscores"
         if (password.length < 6) return@withContext "Use a password of at least 6 characters"
         if (!available) return@withContext NOT_SET_UP
         try {
             lock.withLock {
-                if (fetch(n) != null) return@withLock "That username is taken"
-                val salt = ByteString.of(*Random.nextBytes(16))
-                val account = JSONObject().put("user", n).put("salt", salt.base64()).put("rounds", ROUNDS)
-                    .put("hash", fingerprint(password, salt, ROUNDS)).put("created", nowMs()).put("settings", JSONObject())
-                save(n, account, null)
-                begin(n)
-                exchange()
+                val store = App.store
+                val mine = merge(store.syncedKeys, store.syncTimes, store::raw, JSONObject(), nowMs())
+                val r = post("signup", JSONObject().put("name", n).put("password", password).put("settings", mine.upload ?: JSONObject()))
+                store.syncTimes = mine.times
+                begin(n, r.optString("session"))
+                done()
                 null
             }
         } catch (e: Exception) { e.message ?: "Couldn't create the account" }
@@ -100,14 +102,11 @@ object AccountSync {
         if (!available) return@withContext NOT_SET_UP
         try {
             lock.withLock {
-                val (account, _) = fetch(n) ?: return@withLock "Wrong username or password"
-                val salt = account.optString("salt").decodeBase64() ?: return@withLock "This account is damaged"
-                if (fingerprint(password, salt, account.optLong("rounds", ROUNDS.toLong()).toInt()) != account.optString("hash"))
-                    return@withLock "Wrong username or password"
+                val r = post("login", JSONObject().put("name", n).put("password", password))
                 // A new device takes everything from the account: its own settings count as never changed.
                 App.store.syncTimes = JSONObject()
-                begin(n)
-                exchange()
+                begin(n, r.optString("session"))
+                absorb(r.optJSONObject("settings") ?: JSONObject())
                 null
             }
         } catch (e: Exception) { e.message ?: "Couldn't log in" }
@@ -116,13 +115,15 @@ object AccountSync {
     /** This device leaves the account; its settings stay as they are, and the login page shows again. */
     fun logOut() {
         App.store.accountName = ""
+        App.store.accountSession = ""
         App.store.syncTimes = JSONObject()
         _status.value = null
         _user.value = null
     }
 
-    private fun begin(name: String) {
+    private fun begin(name: String, session: String) {
         App.store.accountName = name
+        App.store.accountSession = session
         _user.value = name
     }
 
@@ -135,17 +136,27 @@ object AccountSync {
 
     /** Takes the account's newer settings, then sends this device's newer ones. */
     private fun exchange() {
+        val name = App.store.accountName.ifBlank { return }
+        absorb(post("get", session(name)).optJSONObject("settings") ?: JSONObject())
+    }
+
+    /** Merges the account's [remote] settings in, and sends this device's newer ones up. */
+    private fun absorb(remote: JSONObject) {
         val store = App.store
-        val name = store.accountName.ifBlank { return }
-        val (account, sha) = fetch(name) ?: throw IllegalStateException("The account $name no longer exists")
-        val m = merge(store.syncedKeys, store.syncTimes, store::raw, account.optJSONObject("settings") ?: JSONObject(), nowMs())
+        val m = merge(store.syncedKeys, store.syncTimes, store::raw, remote, nowMs())
         for ((k, v) in m.arrived) store.putFromSync(k, v)
-        m.upload?.let { save(name, account.put("settings", it), sha) }
+        m.upload?.let { post("put", session(store.accountName).put("settings", it)) }
         store.syncTimes = m.times
-        store.syncedAt = nowMs()
-        _status.value = "Synced ${io.github.novatv.play.ui.clock(store.syncedAt)}"
+        done()
         if (m.arrived.isNotEmpty()) App.repo.afterSync(m.arrived.keys)
     }
+
+    private fun done() {
+        App.store.syncedAt = nowMs()
+        _status.value = "Synced ${io.github.novatv.play.ui.clock(App.store.syncedAt)}"
+    }
+
+    private fun session(name: String) = JSONObject().put("name", name).put("session", App.store.accountSession)
 
     /** What one sync does: settings to take from the account, the settings to send (null when nothing is newer here), times. */
     class Merge(val arrived: Map<String, String?>, val upload: JSONObject?, val times: JSONObject)
@@ -189,41 +200,17 @@ object AccountSync {
     }
 
     private const val NONE = "\u0000none"
-    const val NOT_SET_UP = "Accounts aren't set up in this build (local.properties needs novaplay.accountsRepo and novaplay.accountsToken)"
+    const val NOT_SET_UP = "Accounts aren't set up in this build (local.properties needs novaplay.accountsServer)"
 
-    private fun headers(raw: Boolean = false) = mapOf(
-        "Authorization" to "Bearer ${AccountsConfig.TOKEN}",
-        "Accept" to if (raw) "application/vnd.github.raw+json" else "application/vnd.github+json",
-        "X-GitHub-Api-Version" to "2022-11-28",
-    )
-
-    private fun path(name: String) = "$API/repos/${AccountsConfig.REPO}/contents/accounts/$name.json"
-
-    /** The account file and its version (needed to replace it), or null when there's no such account. */
-    private fun fetch(name: String): Pair<JSONObject, String>? {
-        val (code, text) = Http.send("GET", path(name), headers())
-        if (code == 404) return null
-        check(code)
-        val o = JSONObject(text)
-        val b64 = o.optString("content").replace("\n", "")
-        // Over a megabyte, GitHub leaves the content out: it comes raw on request.
-        val body = if (b64.isNotBlank()) b64.decodeBase64()?.utf8() ?: "{}" else Http.send("GET", path(name), headers(raw = true)).second
-        return JSONObject(body) to o.optString("sha")
-    }
-
-    private fun save(name: String, account: JSONObject, sha: String?) {
-        val body = JSONObject().put("message", "NovaPlay: $name").put("content", account.toString().encodeUtf8().base64())
-        if (sha != null) body.put("sha", sha)
-        val (code, _) = Http.send("PUT", path(name), headers(), body.toString())
-        if (code == 409 || code == 422) throw IllegalStateException("another device saved at the same moment; trying again shortly")
-        check(code)
-    }
-
-    private fun check(code: Int) {
-        when {
-            code == 401 -> throw IllegalStateException("the accounts key in this build isn't accepted by GitHub")
-            code == 403 || code == 404 -> throw IllegalStateException("the accounts key can't use ${AccountsConfig.REPO}")
-            code !in 200..299 -> throw IllegalStateException("GitHub answered $code")
+    /** A call to the accounts server; its error message when it refuses. */
+    private fun post(action: String, body: JSONObject): JSONObject {
+        val (code, text) = Http.send("POST", AccountsConfig.SERVER.trimEnd('/') + "/account/$action", emptyMap(), body.toString())
+        val reply = try { JSONObject(text) } catch (e: Exception) { JSONObject() }
+        if (code == 401 && (action == "get" || action == "put")) {
+            // The password was changed elsewhere, or the session ended: this device logs in again.
+            scope.launch(kotlinx.coroutines.Dispatchers.Main) { logOut() }
         }
+        if (code !in 200..299) throw IllegalStateException(reply.optString("error").ifBlank { "The accounts server answered $code" })
+        return reply
     }
 }

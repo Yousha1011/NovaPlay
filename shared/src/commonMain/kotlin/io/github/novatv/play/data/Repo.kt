@@ -98,6 +98,7 @@ class Repo(val store: Store, val epg: Epg) {
     @Volatile private var matcher: Pair<Int, Matcher>? = null
 
     fun start() {
+        wakeServers()
         store.addSportsGuides()
         epg.loadIndex()
         catalog.initialSource()?.let { open(it, force = false) }
@@ -148,6 +149,26 @@ class Repo(val store: Store, val epg: Epg) {
         _state.update { it.copy(epgVersion = it.epgVersion + 1) }
     }
 
+    @Volatile private var wokeAt = 0L
+
+    /**
+     * Wakes playlist servers on hosts that sleep when idle (a proxy on Render's free plan takes up to 50 s to start):
+     * one small request each when the app opens or comes back, at most every 5 minutes, so they're up by the time a
+     * channel is picked. Not a stream: the playlist's one-connection limit isn't touched.
+     */
+    fun wakeServers() {
+        val now = nowMs()
+        if (now - wokeAt < 5 * 60_000L) return
+        wokeAt = now
+        val sleepers = listOf("onrender.com", "glitch.me", "herokuapp.com", "fly.dev", "railway.app", "koyeb.app", "repl.co")
+        for (s in store.sources) {
+            val host = s.url.substringAfter("://").substringBefore('/').substringBefore(':').lowercase()
+            if (sleepers.none { host == it || host.endsWith(".$it") }) continue
+            val base = s.url.substringBefore('?').trimEnd('/')
+            scope.launch(IO) { try { Http.get(base) } catch (e: Exception) { } }
+        }
+    }
+
     /** Reimports the TV guide now. */
     fun reloadGuide() { scope.launch { loadGuide(force = true) } }
 
@@ -193,6 +214,7 @@ class Repo(val store: Store, val epg: Epg) {
 
     /** Coming back to the app: reads the open playlist and the guide again if their interval has passed. */
     fun refreshIfDue() {
+        wakeServers()
         val src = _state.value.source ?: return
         val now = nowMs()
         // Not while opening: the open itself reads a playlist that is due.

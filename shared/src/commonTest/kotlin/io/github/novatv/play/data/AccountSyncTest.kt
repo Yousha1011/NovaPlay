@@ -66,6 +66,8 @@ class AccountSyncTest {
         assertTrue(a != AccountSync.fingerprint("secret2", salt, 1000))
         assertTrue(a != AccountSync.fingerprint("secret1", okio.ByteString.of(1, 2, 3, 5), 1000))
         assertTrue("secret1" !in a)
+        // The same as the server computes it (accounts.js), so accounts made by the apps log in through it.
+        assertEquals("8ejUVah3G0lm2Du7eNgygvPHs8dUtaFTaCZQCFKz5eY=", a)
     }
 
     @Test fun usernames() {

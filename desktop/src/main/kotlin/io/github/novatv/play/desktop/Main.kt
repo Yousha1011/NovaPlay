@@ -97,6 +97,14 @@ fun main() {
             },
         ) {
             val frame = this@Window.window
+            // Back to NovaPlay's window: playlist servers that sleep when idle are woken (see Repo.wakeServers).
+            androidx.compose.runtime.DisposableEffect(frame) {
+                val l = object : java.awt.event.WindowAdapter() {
+                    override fun windowGainedFocus(e: java.awt.event.WindowEvent) { App.repo.wakeServers() }
+                }
+                frame.addWindowFocusListener(l)
+                onDispose { frame.removeWindowFocusListener(l) }
+            }
             LaunchedEffect(wake) {
                 if (wake == 0) return@LaunchedEffect
                 if (window.isMinimized) window.isMinimized = false

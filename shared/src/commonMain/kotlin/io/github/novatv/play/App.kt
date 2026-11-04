@@ -46,6 +46,7 @@ object App {
         store.backup = { host.saveBackup(it) }
         if (store.sources.isNotEmpty()) host.saveBackup(store.snapshot())
         io.github.novatv.play.platform.Time.use24h = store.clock24
+        io.github.novatv.play.data.AccountSync.watch()
         repo = Repo(store, Epg())
         repo.start()
         io.github.novatv.play.data.AccountSync.start()

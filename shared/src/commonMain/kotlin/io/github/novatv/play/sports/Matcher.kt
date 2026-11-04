@@ -74,12 +74,20 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
             }
         }
         // Broadcasters ESPN lists ("Sky Sports Main Event", "ESPN", "beIN SPORTS 1"), matched against channel names.
+        val guideFound = out.values.any { it.programme != null || it.why == "Match feed" }
+        val mine = preferredRegions()
         for (b in broadcasts) {
             // Exact first: the broadcaster's own guide id in its country ("TNT Sports 2", United Kingdom -> tntsports2.uk),
             // so "TNT SPORTS 2 HEVC 4K" or "TNT 2" in another country aren't mistaken for it.
             val codes = b.country?.let { countryCodes[it] ?: listOf(it.lowercase().take(2)) }
             if (codes != null) for (id in epg.idsFor(broadcasterCore(b.channel), codes))
                 for (c in byKey[id].orEmpty()) out.putNew(c.id, Airing(c, null, "Broadcaster: ${b.channel} (${b.country})"))
+            // By name only, a broadcaster from another country (ESPN's "Paramount+" is for US viewers) is a guess among
+            // dozens of like-named channels ("Paramount+ 04", "05"…): left out once the guide has found the game.
+            if (guideFound) {
+                val theirs = b.country?.let { c -> (countryCodes[c] ?: listOf(c.lowercase().take(2))).map { it.uppercase() } } ?: listOf("US")
+                if (mine.isEmpty() || theirs.none { it in mine }) continue
+            }
             val n = broadcasterCore(b.channel)
             if (n.length < 4) continue
             val why = "Broadcaster: ${b.channel}" + (b.country?.let { " ($it)" } ?: "")
@@ -96,7 +104,6 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
         }
         // The user's own region first ("UK: TNT SPORTS 2" for a UK viewer): of 100+ channels worldwide, those are the
         // ones they can follow. Then match feeds (often only a holding picture until kick-off), then the rest.
-        val mine = preferredRegions()
         val ordered = out.values.sortedBy { a ->
             val own = mine.isNotEmpty() && regionOf(a.channel.name) in mine
             when { own && a.why != "Match feed" -> 0; own -> 1; a.why == "Match feed" -> 2; else -> 3 }

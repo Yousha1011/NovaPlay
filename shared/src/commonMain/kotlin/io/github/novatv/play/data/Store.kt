@@ -122,9 +122,10 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
             sp.putBoolean("sportsGuidesAdded", true)
         }
         // Added later: the UK guide names the teams on TNT and Sky ("Live UEFA Champions League Slavia Prague v Arsenal").
-        if (!sp.getBoolean("ukGuideAdded", false)) {
+        // (Asked again under a new name: the first time, on devices logged in to an account, the account's older list won.)
+        if (!sp.getBoolean("ukGuideAdded2", false)) {
             extraEpg = (extraEpg + UK_GUIDE).distinct()
-            sp.putBoolean("ukGuideAdded", true)
+            sp.putBoolean("ukGuideAdded2", true)
         }
     }
 
@@ -366,6 +367,10 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     var accountName: String
         get() = sp.getString("accountName", "") ?: ""
         set(v) { sp.putString("accountName", v) }
+    /** The accounts server's session for [accountName] (never the password). Never synced. */
+    var accountSession: String
+        get() = sp.getString("accountSession", "") ?: ""
+        set(v) { sp.putString("accountSession", v) }
     /** When each synced setting last changed, as known here: setting -> ms. */
     var syncTimes: JSONObject
         get() = obj("syncTimes")
