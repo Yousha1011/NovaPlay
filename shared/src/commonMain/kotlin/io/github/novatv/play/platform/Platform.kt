@@ -62,6 +62,8 @@ interface Host {
     fun installUpdate(file: String) {}
     /** Under 2 GB of memory (a Fire TV Stick): caches are kept smaller. */
     val lowMemory: Boolean get() = false
+    /** A fixed size for decoded logos and posters, or null for a share of the app's memory. */
+    val imageCacheBytes: Long? get() = null
 }
 
 /** Percent-encodes [s] as UTF-8, as URLEncoder does for query values. */

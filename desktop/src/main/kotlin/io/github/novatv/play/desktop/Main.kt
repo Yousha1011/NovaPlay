@@ -39,6 +39,8 @@ import kotlinx.coroutines.delay
 /** What the window shows over the app: the player, and a short message. */
 object Desktop : Host {
     override val device = Device.DESKTOP
+    /** 96 MB: a screen of logos and posters fits easily, and old ones are decoded again from the disk cache. */
+    override val imageCacheBytes: Long = 96L * 1024 * 1024
     var playing by mutableStateOf<PlayItem?>(null)
     var message by mutableStateOf<Pair<String, Long>?>(null)
     override fun play(item: PlayItem) { playing = item }

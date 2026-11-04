@@ -20,7 +20,11 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "io.github.novatv.play.desktop.MainKt"
-        jvmArgs += listOf("-Xmx2g", "-Dfile.encoding=UTF-8")
+        // A big playlist needs about 150 MB of heap; 1 GB leaves room. Java keeps the heap it has grown to unless told:
+        // these give unused memory back to Windows within a minute, and share repeated texts.
+        // -Xms: Java otherwise starts at, and never shrinks below, 1/64 of the PC's memory (500 MB on 32 GB).
+        jvmArgs += listOf("-Xms64m", "-Xmx1g", "-XX:+UseG1GC", "-XX:G1PeriodicGCInterval=60000", "-XX:MinHeapFreeRatio=10",
+            "-XX:MaxHeapFreeRatio=25", "-XX:+UseStringDeduplication", "-Dfile.encoding=UTF-8")
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "NovaPlay"
