@@ -8,7 +8,8 @@ on:
 
 jobs:
   ipa:
-    runs-on: macos-15
+    # Intel Macs: GitHub's Apple-chip Macs are often too busy to start a job. The .ipa is built for iPhones either way.
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
