@@ -1,8 +1,31 @@
+import java.util.Properties
+
 plugins {
     kotlin("multiplatform")
     id("com.android.library")
     kotlin("plugin.compose")
     id("org.jetbrains.compose")
+}
+
+/**
+ * Where NovaPlay accounts are kept: a private GitHub repository and a token that can write only to it, read from
+ * local.properties (never committed) and compiled in. Without them the build works, but logging in says accounts aren't set up.
+ *   novaplay.accountsRepo=owner/novaplay-accounts
+ *   novaplay.accountsToken=github_pat_...
+ */
+val secretsDir = layout.buildDirectory.dir("generated/secrets/kotlin").get().asFile
+run {
+    val p = Properties()
+    rootProject.file("local.properties").takeIf { it.exists() }?.reader()?.use { p.load(it) }
+    fun q(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
+    val f = File(secretsDir, "io/github/novatv/play/data/AccountsConfig.kt")
+    val text = "package io.github.novatv.play.data\n\n" +
+        "/** Generated from local.properties by shared/build.gradle.kts. */\n" +
+        "internal object AccountsConfig {\n" +
+        "    const val REPO = ${q(p.getProperty("novaplay.accountsRepo", ""))}\n" +
+        "    const val TOKEN = ${q(p.getProperty("novaplay.accountsToken", ""))}\n" +
+        "}\n"
+    if (!f.exists() || f.readText() != text) { f.parentFile.mkdirs(); f.writeText(text) }
 }
 
 /** iOS builds need Xcode, so the iPhone targets only exist on a Mac (the cloud build). */
@@ -29,6 +52,7 @@ kotlin {
             getByName("iosSimulatorArm64Main").dependsOn(ios)
             ios.dependencies { implementation("io.ktor:ktor-client-darwin:3.1.3") }
         }
+        commonMain.get().kotlin.srcDir(secretsDir)
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)

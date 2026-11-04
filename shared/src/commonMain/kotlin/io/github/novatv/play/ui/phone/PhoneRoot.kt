@@ -102,7 +102,13 @@ fun PhoneRoot() {
 private fun PhoneBody() {
     val nav = remember { Nav() }
     val state by App.repo.state.collectAsState()
+    val account by io.github.novatv.play.data.AccountSync.user.collectAsState()
     Box(Modifier.fillMaxSize().background(P.background)) {
+        // Logging in comes first (when this build knows where accounts are kept).
+        if (account == null && io.github.novatv.play.data.AccountSync.available) {
+            PhoneLogin()
+            return@Box
+        }
         if (state.source == null && nav.stack.isEmpty()) {
             PhoneWelcome(nav)
             return@Box

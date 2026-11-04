@@ -233,8 +233,14 @@ private fun RootBody() {
             Back.EXIT -> {}
         }
     }
+    val account by io.github.novatv.play.data.AccountSync.user.collectAsState()
     Box(Modifier.fillMaxSize()) {
         Backdrop()
+        // Logging in comes first (when this build knows where accounts are kept).
+        if (account == null && io.github.novatv.play.data.AccountSync.available) {
+            io.github.novatv.play.ui.LoginScreen()
+            return@Box
+        }
         if (state.source == null && nav.stack.isEmpty()) {
             WelcomeScreen(nav)
             return@Box

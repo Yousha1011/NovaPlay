@@ -344,7 +344,7 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         if (k in backedUp) { backup?.invoke(snapshot()); onSyncedChange?.invoke(k) }
     }
 
-    // ---------- account sync (a private GitHub Gist; see AccountSync) ----------
+    // ---------- account (see AccountSync) ----------
 
     /** Called with each synced setting changed on this device (not when one arrives from another device). */
     var onSyncedChange: ((String) -> Unit)? = null
@@ -353,13 +353,10 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     /** Writes a setting that came from another device. */
     fun putFromSync(k: String, v: String?) { sp.putString(k, v); backup?.invoke(snapshot()) }
 
-    /** This device's GitHub token (never synced) and the account's Gist. */
-    var syncToken: String
-        get() = sp.getString("syncToken", "") ?: ""
-        set(v) { sp.putString("syncToken", v) }
-    var syncGist: String
-        get() = sp.getString("syncGist", "") ?: ""
-        set(v) { sp.putString("syncGist", v) }
+    /** The account this device is logged in to ("" when none). Never synced. */
+    var accountName: String
+        get() = sp.getString("accountName", "") ?: ""
+        set(v) { sp.putString("accountName", v) }
     /** When each synced setting last changed, as known here: setting -> ms. */
     var syncTimes: JSONObject
         get() = obj("syncTimes")

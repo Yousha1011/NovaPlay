@@ -144,14 +144,17 @@ internal fun FieldLabel(text: String) = Text(text, style = P.head.copy(color = P
 
 /** A labelled text box at the phone's size (press and hold in it to paste). */
 @Composable
-internal fun Field(label: String, value: String, hint: String, keyboard: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
+internal fun Field(label: String, value: String, hint: String, keyboard: KeyboardType = KeyboardType.Text, password: Boolean = false,
+                   onChange: (String) -> Unit) {
     Column {
         FieldLabel(label)
         Row(Modifier.fillMaxWidth().height(54.dp).glass(RoundedCornerShape(16.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
                 if (value.isEmpty()) Text(hint, style = P.body.copy(color = Color(0x66FFFFFF), fontSize = 17.sp), maxLines = 1)
                 BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, textStyle = P.body.copy(fontSize = 17.sp),
-                    cursorBrush = SolidColor(P.blue), keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrectEnabled = false))
+                    cursorBrush = SolidColor(P.blue), keyboardOptions = KeyboardOptions(keyboardType = keyboard, autoCorrectEnabled = false),
+                    visualTransformation = if (password) androidx.compose.ui.text.input.PasswordVisualTransformation()
+                        else androidx.compose.ui.text.input.VisualTransformation.None)
             }
         }
     }

@@ -616,42 +616,20 @@ private fun ApiKey(title: String, what: String, current: String, save: (String) 
     }
 }
 
-/**
- * Signing this device in to the account kept in a private Gist on the user's GitHub (AccountSync): playlists,
- * favourites and the rest then follow from device to device.
- */
+/** The NovaPlay account this device is logged in to: when it last synced, a sync now, and logging out. */
 @Composable
 private fun AccountBox(changed: () -> Unit) {
     val sync = io.github.novatv.play.data.AccountSync
-    var signedIn by remember { mutableStateOf(sync.signedIn) }
-    var token by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
+    val user by sync.user.collectAsState()
     val status by sync.status.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (signedIn) {
-            Text("Signed in with GitHub · ${status ?: "Syncing…"}", style = T.body)
-            Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device signed in with " +
-                "this GitHub account. The newest change wins.", style = T.small)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Pill("Sync now", onClick = { scope.launch { sync.sync() } })
-                Pill("Sign out", onClick = { sync.signOut(); signedIn = false; changed() })
-            }
-        } else {
-            Text("Sign in on each device with a GitHub token to keep your playlists, favourites and settings the same everywhere. " +
-                "Make one at github.com/settings/tokens with Gists read and write permission.", style = T.small)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                InputField(token, "GitHub token", { token = it }, Modifier.weight(1f), password = true)
-                Pill("Sign in", onClick = {
-                    message = "Signing in…"
-                    scope.launch {
-                        val err = sync.signIn(token)
-                        message = err
-                        if (err == null) { signedIn = true; token = ""; changed() }
-                    }
-                }, primary = true)
-            }
-            message?.let { Text(it, style = T.small) }
+        Text(user?.let { "Logged in as $it · ${status ?: "Syncing…"}" } ?: "Not logged in", style = T.body)
+        Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device logged in to this account. " +
+            "The newest change wins.", style = T.small)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Pill("Sync now", onClick = { scope.launch { sync.sync() } })
+            Pill("Log out", onClick = { sync.logOut(); changed() })
         }
     }
 }

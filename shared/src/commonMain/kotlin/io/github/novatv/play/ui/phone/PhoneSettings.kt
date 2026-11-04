@@ -207,39 +207,21 @@ private fun KeyCard(title: String, what: String, current: String, save: (String)
     }
 }
 
-/** Signing this phone in to the account kept on the user's GitHub (AccountSync). */
+/** The NovaPlay account this phone is logged in to: when it last synced, a sync now, and logging out. */
 @Composable
 private fun AccountCard() {
     val sync = io.github.novatv.play.data.AccountSync
-    var signedIn by remember { mutableStateOf(sync.signedIn) }
-    var token by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
+    val user by sync.user.collectAsState()
     val status by sync.status.collectAsState()
     val scope = rememberCoroutineScope()
     Card {
-        if (signedIn) {
-            Text("Signed in with GitHub", style = P.head)
-            Text(status ?: "Syncing…", style = P.small)
-            Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device signed in with this GitHub account.",
-                style = P.small)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SmallButton("Sync now") { scope.launch { sync.sync() } }
-                SmallButton("Sign out") { sync.signOut(); signedIn = false }
-            }
-        } else {
-            Text("Sync with GitHub", style = P.head)
-            Text("Keep playlists, favourites and settings the same on every device. Make a token at github.com/settings/tokens " +
-                "with Gists read and write permission.", style = P.small)
-            Field("Token", token, "GitHub token") { token = it }
-            SmallButton("Sign in") {
-                message = "Signing in…"
-                scope.launch {
-                    val err = sync.signIn(token)
-                    message = err
-                    if (err == null) { signedIn = true; token = "" }
-                }
-            }
-            message?.let { Text(it, style = P.small) }
+        Text(user?.let { "Logged in as $it" } ?: "Not logged in", style = P.head)
+        Text(status ?: "Syncing…", style = P.small)
+        Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device logged in to this account.",
+            style = P.small)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SmallButton("Sync now") { scope.launch { sync.sync() } }
+            SmallButton("Log out") { sync.logOut() }
         }
     }
 }

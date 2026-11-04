@@ -58,4 +58,20 @@ class AccountSyncTest {
         assertTrue("recentCh" in m.arrived)
         assertNull(m.arrived["recentCh"])
     }
+
+    @Test fun passwordFingerprints() {
+        val salt = okio.ByteString.of(1, 2, 3, 4)
+        val a = AccountSync.fingerprint("secret1", salt, 1000)
+        assertEquals(a, AccountSync.fingerprint("secret1", salt, 1000))
+        assertTrue(a != AccountSync.fingerprint("secret2", salt, 1000))
+        assertTrue(a != AccountSync.fingerprint("secret1", okio.ByteString.of(1, 2, 3, 5), 1000))
+        assertTrue("secret1" !in a)
+    }
+
+    @Test fun usernames() {
+        assertEquals("ali_99", AccountSync.cleanName(" Ali_99 "))
+        assertNull(AccountSync.cleanName("ab"))
+        assertNull(AccountSync.cleanName("no spaces"))
+        assertNull(AccountSync.cleanName("../etc"))
+    }
 }
