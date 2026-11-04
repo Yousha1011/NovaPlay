@@ -1038,11 +1038,13 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
 
     /// Subtitles, audio and video tracks, and the picture's shape.
     private func settingsMenu() -> [UIMenuElement] {
-        func tracks(_ title: String, _ icon: String, names: [Any]?, ids: [Any]?, current: Int32, pick: @escaping (Int32) -> Void) -> UIMenu {
-            let n = (names as? [String]) ?? []
-            let i = (ids as? [NSNumber]) ?? []
-            let actions = zip(n, i).map { name, id in
-                UIAction(title: name, state: id.int32Value == current ? .on : .off) { _ in pick(id.int32Value) }
+        // VLCKit 4: each track says whether it is selected; picking one selects it alone.
+        func tracks(_ title: String, _ icon: String, _ list: [VLCMediaPlayerTrack], canTurnOff: Bool = false) -> UIMenu {
+            var actions = list.map { t in
+                UIAction(title: t.trackName, state: t.isSelected ? .on : .off) { _ in t.isSelectedExclusively = true }
+            }
+            if canTurnOff && !list.isEmpty {
+                actions.insert(UIAction(title: "Off", state: list.contains { $0.isSelected } ? .off : .on) { _ in list.forEach { $0.isSelected = false } }, at: 0)
             }
             return UIMenu(title: title, image: UIImage(systemName: icon), children: actions.isEmpty ? [UIAction(title: "None", attributes: .disabled) { _ in }] : actions)
         }
@@ -1059,9 +1061,9 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
             UIAction(title: name, state: self.aspect == value ? .on : .off) { [weak self] _ in self?.setAspect(value) }
         })
         return [
-            tracks("Subtitles Tracks", "captions.bubble", names: p.videoSubTitlesNames, ids: p.videoSubTitlesIndexes, current: p.currentVideoSubTitleIndex) { p.currentVideoSubTitleIndex = $0 },
-            tracks("Audio Tracks", "waveform", names: p.audioTrackNames, ids: p.audioTrackIndexes, current: p.currentAudioTrackIndex) { p.currentAudioTrackIndex = $0 },
-            tracks("Video Tracks", "video", names: p.videoTrackNames, ids: p.videoTrackIndexes, current: p.currentVideoTrackIndex) { p.currentVideoTrackIndex = $0 },
+            tracks("Subtitles Tracks", "captions.bubble", p.textTracks, canTurnOff: true),
+            tracks("Audio Tracks", "waveform", p.audioTracks),
+            tracks("Video Tracks", "video", p.videoTracks),
             UIMenu(title: "Playback Speed", image: UIImage(systemName: "speedometer"), children: [0.5, 0.75, 1, 1.25, 1.5, 2].map { r in
                 UIAction(title: "\(r)×", state: abs(Double(p.rate) - r) < 0.01 ? .on : .off) { _ in p.rate = Float(r) }
             }),
@@ -1185,8 +1187,8 @@ final class VLCPipDrawable: NSObject, VLCDrawable, VLCPictureInPictureDrawable {
 
     func mediaController() -> VLCPictureInPictureMediaControlling { controls }
 
-    func pictureInPictureReady() -> ((VLCPictureInPictureWindowControlling) -> Void) {
-        { [weak self] c in self?.onReady?(c) }
+    func pictureInPictureReady() -> ((VLCPictureInPictureWindowControlling?) -> Void)? {
+        { [weak self] c in if let c = c { self?.onReady?(c) } }
     }
 }
 
