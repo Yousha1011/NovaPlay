@@ -94,8 +94,11 @@ fun <T> matchAll(items: List<T>, query: String, name: (T) -> String): List<T> {
     if (q.isEmpty()) return emptyList()
     val words = q.split(' ')
     return items.mapNotNull { item ->
-        val n = normalise(name(item))
-        if (words.all { n.contains(it) }) item to when { n == q -> 0; n.startsWith(q) -> 1; n.contains(q) -> 2; else -> 3 } else null
+        val raw = name(item)
+        val n = normalise(raw)
+        // Playlists head their sections with dummy entries ("####### TNT SPORT #######"): last, so they don't push the
+        // real channels past the results shown.
+        if (words.all { n.contains(it) }) item to (if (raw.trimStart().startsWith("##")) 9 else when { n == q -> 0; n.startsWith(q) -> 1; n.contains(q) -> 2; else -> 3 }) else null
     }.sortedWith(compareBy({ it.second }, { name(it.first).length })).map { it.first }
 }
 
@@ -116,10 +119,11 @@ private fun SearchBody(nav: Nav, scope: String?) {
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     if (scope != null) androidx.compose.runtime.LaunchedEffect(Unit) { delay(300); runCatching { focus.requestFocus() } }
     var historyVersion by remember { mutableIntStateOf(0) }
-    val found by produceState(Found(), q) {
+    // Searches again when the playlist finishes loading.
+    val lib = App.repo.state.collectAsState().value.lib
+    val found by produceState(Found(), q, lib) {
         delay(250)
         if (normalise(q).isEmpty()) { value = Found(); return@produceState }
-        val lib = App.repo.state.value.lib
         value = withContext(Dispatchers.Default) {
             Found(if (scope == null || scope == "live") matchAll(lib.channels, q) { it.name }.take(200) else emptyList(),
                 if (scope == null || scope == "movies") matchAll(lib.movies, q) { it.name }.take(200) else emptyList(),

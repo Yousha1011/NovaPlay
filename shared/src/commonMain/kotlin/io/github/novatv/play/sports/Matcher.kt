@@ -12,7 +12,9 @@ data class Airing(val channel: Channel, val programme: Programme?, val why: Stri
  * Finds where a match airs in the user's own playlist: first in the TV guide (a programme around kick-off whose
  * title names both sides, or the competition), then by the broadcasters ESPN lists against channel names.
  */
-class Matcher(private val epg: Epg, channels: List<Channel>) {
+class Matcher(private val epg: Epg, all: List<Channel>) {
+    /** Section headings playlists list as channels ("####### SKY SPORT AUSTRIA #######") play nothing: left out. */
+    private val channels = all.filterNot { it.name.trimStart().startsWith("##") }
     /** Channels by guide key and by normalised name, built once per playlist. */
     private val byKey: Map<String, List<Channel>> = channels.mapNotNull { c -> epg.key(c)?.let { it to c } }.groupBy({ it.first }, { it.second })
     private val named: List<Pair<String, Channel>> = channels.map { Epg.norm(it.name) to it }
@@ -77,16 +79,41 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
             if (n.length < 4) continue
             val why = "Broadcaster: ${b.channel}" + (b.country?.let { " ($it)" } ?: "")
             // A streaming service ("Paramount+") is only its own feeds ("US: PARAMOUNT+ 04"), not the TV channels it shares a name with.
+            // "Paramount+" must be followed by its + or "plus" in the channel's name: "PLAY+: PARAMOUNT NETWORK" is not it.
             val streaming = b.channel.trim().endsWith("+")
+            val ownFeed = Regex(Regex.escape(b.channel.trim().dropLast(1).trim()) + """\s*(\+|plus)""", RegexOption.IGNORE_CASE)
             for ((name, c) in named) if (name == n || name.startsWith(n) || (n.length >= 6 && name.contains(n))) {
                 val words = c.name.lowercase()
-                if (streaming && '+' !in c.name && "plus" !in words) continue
+                if (streaming && !ownFeed.containsMatchIn(c.name)) continue
                 if (name != n && notSport.any { Regex("""\b$it\b""").containsMatchIn(words) }) continue
                 out.putNew(c.id, Airing(c, null, why))
             }
         }
-        return out.values.take(maxOf(limit, out.values.count { it.why == "Match feed" }))
+        // The user's own region first ("UK: TNT SPORTS 2" for a UK viewer): of 100+ channels worldwide, those are the
+        // ones they can follow. Then match feeds (often only a holding picture until kick-off), then the rest.
+        val mine = preferredRegions()
+        val ordered = out.values.sortedBy { a ->
+            val own = mine.isNotEmpty() && regionOf(a.channel.name) in mine
+            when { own && a.why != "Match feed" -> 0; own -> 1; a.why == "Match feed" -> 2; else -> 3 }
+        }
+        return ordered.take(maxOf(limit, ordered.count { it.why == "Match feed" }))
     }
+
+    private val byId: Map<String, Channel> by lazy { named.associate { it.second.id to it.second } }
+
+    /**
+     * Regions the user watches: Settings' Sports country, else the region most of their recent channels carry
+     * ("UK" when most begin "UK:").
+     */
+    private fun preferredRegions(): Set<String> {
+        countryCodes[io.github.novatv.play.App.store.sportsCountry]?.let { return it.map { c -> c.uppercase() }.toSet() }
+        val recent = io.github.novatv.play.App.store.recentChannels.mapNotNull { k -> byId[k.substringAfterLast(':')]?.let { regionOf(it.name) } }
+        val top = recent.groupingBy { it }.eachCount().maxByOrNull { it.value } ?: return emptySet()
+        return if (top.value >= 2) setOf(top.key) else emptySet()
+    }
+
+    /** "UK: TNT SPORTS 2" -> "UK"; null when the name starts with no region. */
+    private fun regionOf(name: String): String? = regionPrefix.find(name)?.groupValues?.get(1)?.uppercase()
 
     /** Sports on the user's channels between [from] and [to], from the guide alone (any sport, any country). */
     fun guideSports(from: Long, to: Long): List<Airing> = epg.sportsNow(from, to).flatMap { p ->
@@ -137,7 +164,8 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
         /** Lower case without accents: "Çorum" and "corum", "Göztepe" and "goztepe" match. */
         fun fold(s: String): String = io.github.novatv.play.platform.foldAccents(s)
 
-        /** Short upper-case words that are part of a channel's name, not a country code. */
+        /** A region in front of a channel's name: "UK:", "US|". */
+        private val regionPrefix = Regex("""^\s*([A-Za-z]{2,3})\s*[:|]""")
         /** Settings' Sports countries as playlists and guides abbreviate them. */
         private val countryCodes = mapOf("United Kingdom" to listOf("uk", "gb"), "Ireland" to listOf("ie", "irl"),
             "United States" to listOf("us", "usa"), "Canada" to listOf("ca"), "Pakistan" to listOf("pk"), "India" to listOf("in"),
@@ -151,7 +179,8 @@ class Matcher(private val epg: Epg, channels: List<Channel>) {
             "crime", "family", "docs?", "documentary", "novelas", "music", "junior", "nick")
         /** Programmes about a competition rather than one of its games. */
         private val notLive = listOf("youth", "goals", "highlights", "review", "magazine", "stories", "show", "classic", "rewind", "preview")
-        private val keepTails =setOf("tv", "hd", "uhd", "one", "max", "ppv", "plus")
+        /** Short upper-case words that are part of a channel's name, not a country code. */
+        private val keepTails = setOf("tv", "hd", "uhd", "one", "max", "ppv", "plus")
         private val generic = setOf("fc", "afc", "cf", "sc", "club", "united", "city", "town", "real", "athletic", "sporting",
             "the", "and", "de", "del", "la", "le", "los", "las", "women", "men", "u19", "u21", "u23", "team", "county", "rovers", "wanderers")
     }

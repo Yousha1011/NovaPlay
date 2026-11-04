@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,10 +38,11 @@ private data class Results(val channels: List<Channel> = emptyList(), val movies
 fun SearchScreen(nav: Nav) {
     var q by remember { mutableStateOf("") }
     val box = remember { FocusRequester() }
-    val res by produceState(Results(), q) {
+    // Searches again when the playlist finishes loading: a search typed while it loads would otherwise stay empty.
+    val lib = App.repo.state.collectAsState().value.lib
+    val res by produceState(Results(), q, lib) {
         delay(250)
         if (io.github.novatv.play.ui.phone.normalise(q).isEmpty()) { value = Results(); return@produceState }
-        val lib = App.repo.state.value.lib
         value = withContext(Dispatchers.Default) {
             Results(
                 io.github.novatv.play.ui.phone.matchAll(lib.channels, q) { it.name }.take(80),
