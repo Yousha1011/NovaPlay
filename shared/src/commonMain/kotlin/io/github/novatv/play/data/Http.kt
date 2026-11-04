@@ -6,6 +6,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
+import io.ktor.client.request.prepareRequest
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.utils.io.readAvailable
@@ -39,6 +41,16 @@ object Http {
             if (r.status.value !in 200..299) throw IOException("HTTP ${r.status.value}")
             r.bodyAsText()
         }
+    }
+
+    /** Blocking: a request with a JSON [body] (GitHub's API); returns the status code and the reply. */
+    fun send(method: String, url: String, headers: Map<String, String>, body: String? = null): Pair<Int, String> = runBlocking {
+        client.prepareRequest(url) {
+            this.method = io.ktor.http.HttpMethod.parse(method)
+            header("User-Agent", "NovaPlay")
+            headers.forEach { (k, v) -> header(k, v) }
+            if (body != null) setBody(io.ktor.http.content.TextContent(body, io.ktor.http.ContentType.Application.Json))
+        }.execute { r -> r.status.value to r.bodyAsText() }
     }
 
     /**

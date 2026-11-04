@@ -48,6 +48,7 @@ object App {
         io.github.novatv.play.platform.Time.use24h = store.clock24
         repo = Repo(store, Epg())
         repo.start()
+        io.github.novatv.play.data.AccountSync.start()
     }
 
     val device: Device get() = host.device

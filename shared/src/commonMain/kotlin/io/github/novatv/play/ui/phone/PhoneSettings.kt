@@ -83,6 +83,8 @@ fun PhonePlaylists(nav: Nav) {
                 }
             }
             item { BigButton("Add a playlist", Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)) { nav.push(Route.AddSource) } }
+            item { SectionLabel("Account") }
+            item { AccountCard() }
         }
     }
 }
@@ -201,6 +203,43 @@ private fun KeyCard(title: String, what: String, current: String, save: (String)
             save(key)
             status = "Checking…"
             scope.launch { status = withContext(IO) { if (key.isBlank()) "Not set" else test() } ?: "Working" }
+        }
+    }
+}
+
+/** Signing this phone in to the account kept on the user's GitHub (AccountSync). */
+@Composable
+private fun AccountCard() {
+    val sync = io.github.novatv.play.data.AccountSync
+    var signedIn by remember { mutableStateOf(sync.signedIn) }
+    var token by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+    val status by sync.status.collectAsState()
+    val scope = rememberCoroutineScope()
+    Card {
+        if (signedIn) {
+            Text("Signed in with GitHub", style = P.head)
+            Text(status ?: "Syncing…", style = P.small)
+            Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device signed in with this GitHub account.",
+                style = P.small)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SmallButton("Sync now") { scope.launch { sync.sync() } }
+                SmallButton("Sign out") { sync.signOut(); signedIn = false }
+            }
+        } else {
+            Text("Sync with GitHub", style = P.head)
+            Text("Keep playlists, favourites and settings the same on every device. Make a token at github.com/settings/tokens " +
+                "with Gists read and write permission.", style = P.small)
+            Field("Token", token, "GitHub token") { token = it }
+            SmallButton("Sign in") {
+                message = "Signing in…"
+                scope.launch {
+                    val err = sync.signIn(token)
+                    message = err
+                    if (err == null) { signedIn = true; token = "" }
+                }
+            }
+            message?.let { Text(it, style = P.small) }
         }
     }
 }

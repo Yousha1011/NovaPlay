@@ -135,6 +135,19 @@ class Repo(val store: Store, val epg: Epg) {
 
     fun refresh() = catalog.refresh()
 
+    /**
+     * Settings [keys] arrived from another device (AccountSync): a new or changed playlist opens, new guides load, and
+     * screens showing favourites or recents redraw.
+     */
+    fun afterSync(keys: Set<String>) {
+        if ("sources" in keys || "active" in keys) {
+            val src = store.sources.firstOrNull { it.id == store.activeSourceId } ?: store.sources.firstOrNull()
+            if (src != null) open(src, force = false)
+        }
+        if ("extraEpg" in keys) reloadGuide()
+        _state.update { it.copy(epgVersion = it.epgVersion + 1) }
+    }
+
     /** Reimports the TV guide now. */
     fun reloadGuide() { scope.launch { loadGuide(force = true) } }
 

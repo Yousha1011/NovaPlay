@@ -341,8 +341,32 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     /** Writes [k], and refreshes the backup when it is a value worth keeping across reinstalls. */
     private fun ps(k: String, v: String?) {
         sp.putString(k, v)
-        if (k in backedUp) backup?.invoke(snapshot())
+        if (k in backedUp) { backup?.invoke(snapshot()); onSyncedChange?.invoke(k) }
     }
+
+    // ---------- account sync (a private GitHub Gist; see AccountSync) ----------
+
+    /** Called with each synced setting changed on this device (not when one arrives from another device). */
+    var onSyncedChange: ((String) -> Unit)? = null
+    val syncedKeys: Set<String> get() = backedUp
+    fun raw(k: String): String? = sp.getString(k, null)
+    /** Writes a setting that came from another device. */
+    fun putFromSync(k: String, v: String?) { sp.putString(k, v); backup?.invoke(snapshot()) }
+
+    /** This device's GitHub token (never synced) and the account's Gist. */
+    var syncToken: String
+        get() = sp.getString("syncToken", "") ?: ""
+        set(v) { sp.putString("syncToken", v) }
+    var syncGist: String
+        get() = sp.getString("syncGist", "") ?: ""
+        set(v) { sp.putString("syncGist", v) }
+    /** When each synced setting last changed, as known here: setting -> ms. */
+    var syncTimes: JSONObject
+        get() = obj("syncTimes")
+        set(v) { sp.putString("syncTimes", v.toString()) }
+    var syncedAt: Long
+        get() = sp.getString("syncedAt", "0")?.toLongOrNull() ?: 0L
+        set(v) { sp.putString("syncedAt", "$v") }
 
     // ---------- backup (iPhone: kept in the Keychain, which outlives reinstalling the app) ----------
 
