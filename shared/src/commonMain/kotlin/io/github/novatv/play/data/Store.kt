@@ -117,12 +117,21 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
 
     /** Adds the sports guides once, after the user's own; removing them in Settings later sticks. */
     fun addSportsGuides() {
-        if (sp.getBoolean("sportsGuidesAdded", false)) return
-        extraEpg = (extraEpg + sportsGuides).distinct()
-        sp.putBoolean("sportsGuidesAdded", true)
+        if (!sp.getBoolean("sportsGuidesAdded", false)) {
+            extraEpg = (extraEpg + sportsGuides).distinct()
+            sp.putBoolean("sportsGuidesAdded", true)
+        }
+        // Added later: the UK guide names the teams on TNT and Sky ("Live UEFA Champions League Slavia Prague v Arsenal").
+        if (!sp.getBoolean("ukGuideAdded", false)) {
+            extraEpg = (extraEpg + UK_GUIDE).distinct()
+            sp.putBoolean("ukGuideAdded", true)
+        }
     }
 
+    private val UK_GUIDE = "https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz"
+
     private val sportsGuides = listOf(
+        "https://epgshare01.online/epgshare01/epg_ripper_UK1.xml.gz",
         "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/Sports_guide.xml.gz",
         "https://epgshare01.online/epgshare01/epg_ripper_DE1.xml.gz",
         "https://raw.githubusercontent.com/acidjesuz/EPGTalk/master/US_guide.xml.gz",

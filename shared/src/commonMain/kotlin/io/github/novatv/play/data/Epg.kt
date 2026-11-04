@@ -120,18 +120,21 @@ class Epg {
                                 val ch = x.attr("channel") ?: ""
                                 val start = time(x.attr("start"))
                                 val stop = time(x.attr("stop")).let { if (it <= start) start + 3600_000L else it }
-                                var title = ""; var desc: String? = null; var cat: String? = null
+                                var title = ""; var sub = ""; var desc: String? = null; var cat: String? = null
                                 while (true) {
                                     val e = x.next()
                                     if (e == XmlReader.Event.EOF || (e == XmlReader.Event.END && x.name == "programme")) break
                                     if (e != XmlReader.Event.START) continue
                                     when (x.name) {
                                         "title" -> x.nextText().let { if (title.isEmpty()) title = it }
+                                        // Many guides name the game here: "Live UEFA Champions League" / "Slavia Prague v Arsenal".
+                                        "sub-title" -> x.nextText().let { if (sub.isEmpty()) sub = it }
                                         "desc" -> x.nextText().let { if (desc == null) desc = it }
                                         "category" -> x.nextText().let { if (cat == null) cat = it }
                                         else -> x.skipElement()
                                     }
                                 }
+                                if (sub.isNotBlank() && !title.contains(sub, true)) title = "$title: $sub"
                                 if (stop > from && start < to) {
                                     ins.bindText(1, ch); ins.bindLong(2, start); ins.bindLong(3, stop); ins.bindText(4, title)
                                     ins.text(5, desc); ins.text(6, cat)
@@ -178,10 +181,38 @@ class Epg {
 
     /** Reads the channel ids and names once, so [key] needs no query. */
     fun loadIndex() {
-        val m = HashMap<String, String>(); val s = HashSet<String>()
-        read { db -> db.prepare("SELECT id, norm FROM chan").use { while (it.step()) { val id = it.getText(0); s.add(id); if (it.getText(1) !in m) m[it.getText(1)] = id } } }
-        byName = m; ids = s
+        val m = HashMap<String, String>(); val s = HashSet<String>(); val same = HashMap<String, MutableSet<String>>()
+        read { db -> db.prepare("SELECT id, norm FROM chan").use { while (it.step()) {
+            val id = it.getText(0); val n = it.getText(1)
+            s.add(id); if (n !in m) m[n] = id
+            // Every guide names the same channel its own way ("tntsports2.uk", "TNT.Sports.2.HD.uk"): linked by name and country.
+            for (k in listOf(n, norm(id))) if (k.isNotEmpty()) same.getOrPut(k + "|" + country(id)) { HashSet() }.add(id)
+        } } }
+        byName = m; ids = s; twins = same
     }
+
+    /** Guide ids by normalised name and country ("tntsports2|uk"): one channel as each guide calls it. */
+    @Volatile private var twins: Map<String, Set<String>> = emptyMap()
+
+    /**
+     * Every guide's id for [ch]'s channel: its own ([key]) and the other guides' for the same channel in the same
+     * country, so a guide that names the teams ("RB Leipzig v Manchester City" on TNT.Sports.2.HD.uk) reaches a
+     * playlist channel tagged tntsports2.uk.
+     */
+    fun keys(ch: Channel): Set<String> {
+        val own = key(ch) ?: return emptySet()
+        val c = country(own)
+        return (twins[norm(own) + "|" + c].orEmpty() + ch.epgId?.let { twins[norm(it) + "|" + c] }.orEmpty() + own).toSet()
+    }
+
+    /** Guide ids of the channel [name] ("TNT Sports 2") in [countries] ("uk", "gb"), for broadcasters a listing names. */
+    fun idsFor(name: String, countries: Collection<String>): Set<String> {
+        val n = norm(name)
+        return countries.flatMap { twins["$n|${it.lowercase()}"].orEmpty() }.toSet()
+    }
+
+    /** "TNT.Sports.2.HD.uk" -> "uk"; "" when the id names no country. */
+    private fun country(id: String): String = id.substringBefore('@').substringAfterLast('.', "").lowercase().takeIf { it.length in 2..3 && it.all { c -> c.isLetter() } } ?: ""
 
     /** The guide's channel id for [ch]: its own guide id when the guide has it, else a name match. */
     fun key(ch: Channel): String? {
@@ -231,7 +262,7 @@ class Epg {
 
     companion object {
         /** Bumped when the tables change; the guide is then imported again. */
-        private const val VERSION = 5
+        private const val VERSION = 6
 
         fun time(v: String?): Long = Time.parseXmltv(v)
 

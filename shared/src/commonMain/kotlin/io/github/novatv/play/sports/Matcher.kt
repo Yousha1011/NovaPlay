@@ -16,7 +16,7 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
     /** Section headings playlists list as channels ("####### SKY SPORT AUSTRIA #######") play nothing: left out. */
     private val channels = all.filterNot { it.name.trimStart().startsWith("##") }
     /** Channels by guide key and by normalised name, built once per playlist. */
-    private val byKey: Map<String, List<Channel>> = channels.mapNotNull { c -> epg.key(c)?.let { it to c } }.groupBy({ it.first }, { it.second })
+    private val byKey: Map<String, List<Channel>> = channels.flatMap { c -> epg.keys(c).map { it to c } }.groupBy({ it.first }, { it.second })
     private val named: List<Pair<String, Channel>> = channels.map { Epg.norm(it.name) to it }
     /** Match feeds: channels named after one match ("Next | Auxerre vs. Le Mans | ... | FR: SOCCER PPV 78"). */
     private val feeds: List<Pair<String, Channel>> = channels.filter { c ->
@@ -75,6 +75,11 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
         }
         // Broadcasters ESPN lists ("Sky Sports Main Event", "ESPN", "beIN SPORTS 1"), matched against channel names.
         for (b in broadcasts) {
+            // Exact first: the broadcaster's own guide id in its country ("TNT Sports 2", United Kingdom -> tntsports2.uk),
+            // so "TNT SPORTS 2 HEVC 4K" or "TNT 2" in another country aren't mistaken for it.
+            val codes = b.country?.let { countryCodes[it] ?: listOf(it.lowercase().take(2)) }
+            if (codes != null) for (id in epg.idsFor(broadcasterCore(b.channel), codes))
+                for (c in byKey[id].orEmpty()) out.putNew(c.id, Airing(c, null, "Broadcaster: ${b.channel} (${b.country})"))
             val n = broadcasterCore(b.channel)
             if (n.length < 4) continue
             val why = "Broadcaster: ${b.channel}" + (b.country?.let { " ($it)" } ?: "")
