@@ -112,6 +112,22 @@ object AccountSync {
         } catch (e: Exception) { e.message ?: "Couldn't log in" }
     }
 
+    /**
+     * A new password for the account this device is logged in to; [current] is checked first. This device stays logged
+     * in; the account's other devices ask for the new password. Returns null, or what went wrong.
+     */
+    suspend fun changePassword(current: String, new: String): String? = withContext(IO) {
+        val name = App.store.accountName.ifBlank { return@withContext "Not logged in" }
+        if (new.length < 6) return@withContext "Use a new password of at least 6 characters"
+        try {
+            lock.withLock {
+                val r = post("password", JSONObject().put("name", name).put("password", current).put("newPassword", new))
+                App.store.accountSession = r.optString("session")
+                null
+            }
+        } catch (e: Exception) { e.message ?: "Couldn't change the password" }
+    }
+
     /** This device leaves the account; its settings stay as they are, and the login page shows again. */
     fun logOut() {
         App.store.accountName = ""

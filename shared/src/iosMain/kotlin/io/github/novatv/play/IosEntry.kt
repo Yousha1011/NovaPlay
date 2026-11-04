@@ -35,7 +35,13 @@ import kotlinx.coroutines.withContext
 import platform.UIKit.UIViewController
 
 /** Called once by the iPhone app before it shows anything. */
-fun start() = App.start(IosHost)
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
+fun start() {
+    // Kotlin errors nothing caught: written down (CrashLog, shown in Settings › About), then iOS closes the app.
+    var previous: ReportUnhandledExceptionHook? = null
+    previous = setUnhandledExceptionHook { e -> io.github.novatv.play.data.CrashLog.record(e, "iPhone"); previous?.invoke(e) }
+    App.start(IosHost)
+}
 
 /** The whole app as one view controller; the Swift side shows it full screen. */
 @Suppress("FunctionName", "unused")

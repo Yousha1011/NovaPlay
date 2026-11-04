@@ -173,7 +173,26 @@ fun PhoneConfigurations(nav: Nav) {
             item { KeyCard("SportMonks API token", "TV stations for football.", store.sportMonksKey,
                 { store.sportMonksKey = it }, { io.github.novatv.play.sports.Broadcasters.testSportMonks() }) }
             item { SectionLabel("About") }
-            item { Card { Text("NovaPlay 1.1 · a player for your own playlists. It does not provide any channels or content.", style = P.small) } }
+            item {
+                Card {
+                    Text("NovaPlay ${io.github.novatv.play.data.Updates.CURRENT} · a player for your own playlists. It does not provide any channels or content.",
+                        style = P.small)
+                    val a = io.github.novatv.play.data.Updates.available
+                    if (a != null) SmallButton("Update to ${a.version}") { io.github.novatv.play.data.Updates.reopen() }
+                    else SmallButton("Check for updates") { io.github.novatv.play.data.Updates.check() }
+                }
+            }
+            // The last time NovaPlay closed on an error (CrashLog).
+            io.github.novatv.play.data.CrashLog.last()?.let { crash ->
+                item {
+                    Card {
+                        Text("Last problem", style = P.head)
+                        Text("NovaPlay closed unexpectedly. A screenshot of this helps fix it.", style = P.small)
+                        Text(crash, style = P.small.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 11.sp))
+                        SmallButton("Clear") { io.github.novatv.play.data.CrashLog.clear() }
+                    }
+                }
+            }
         }
     }
 }
@@ -219,9 +238,29 @@ private fun AccountCard() {
         Text(status ?: "Syncing…", style = P.small)
         Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device logged in to this account.",
             style = P.small)
+        var changing by remember { mutableStateOf(false) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SmallButton("Sync now") { scope.launch { sync.sync() } }
+            SmallButton("Change password") { changing = !changing }
             SmallButton("Log out") { sync.logOut() }
+        }
+        if (changing) {
+            var current by remember { mutableStateOf("") }
+            var new by remember { mutableStateOf("") }
+            var again by remember { mutableStateOf("") }
+            var note by remember { mutableStateOf<String?>(null) }
+            Field("Current password", current, "Current password", password = true) { current = it }
+            Field("New password", new, "New password", password = true) { new = it }
+            Field("New password again", again, "New password again", password = true) { again = it }
+            SmallButton("Save new password") {
+                if (new != again) { note = "The new passwords don't match"; return@SmallButton }
+                note = "Saving…"
+                scope.launch {
+                    note = sync.changePassword(current, new) ?: "Password changed. Your other devices will ask for it."
+                    if (note!!.startsWith("Password changed")) { current = ""; new = ""; again = "" }
+                }
+            }
+            note?.let { Text(it, style = P.small) }
         }
     }
 }

@@ -465,6 +465,13 @@ private fun LazyListScope.aboutPane(st: Repo.LibState, changed: () -> Unit) {
         else Action("Check for updates now", "You have the latest version unless this finds a newer one", null) { Updates.check() }
     }
     item { Toggle("Check for updates automatically", "When NovaPlay opens; a new version is offered straight away, and stays here to install later", s.checkUpdates) { s.checkUpdates = it; changed() } }
+    // The last time NovaPlay closed on an error (CrashLog): readable here on devices that can't be debugged.
+    io.github.novatv.play.data.CrashLog.last()?.let { crash ->
+        section("Last problem")
+        item { Text("NovaPlay closed unexpectedly. A photo of this helps fix it.", style = T.small) }
+        item { Text(crash, style = T.small.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)) }
+        item { Action("Clear this", "Remove the report once it's been looked at", "Clear") { io.github.novatv.play.data.CrashLog.clear(); changed() } }
+    }
     item { Action("Playlist in use", st.source?.name ?: "None",
         "${st.lib.channels.size} channels · ${st.lib.movies.size} films · ${st.lib.series.size} series") {} }
     section("Where information comes from")
@@ -627,9 +634,29 @@ private fun AccountBox(changed: () -> Unit) {
         Text(user?.let { "Logged in as $it · ${status ?: "Syncing…"}" } ?: "Not logged in", style = T.body)
         Text("Playlists, guides, favourites, Sports picks, keys and history follow you to every device logged in to this account. " +
             "The newest change wins.", style = T.small)
+        var changing by remember { mutableStateOf(false) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Pill("Sync now", onClick = { scope.launch { sync.sync() } })
+            Pill("Change password", onClick = { changing = !changing })
             Pill("Log out", onClick = { sync.logOut(); changed() })
+        }
+        if (changing) {
+            var current by remember { mutableStateOf("") }
+            var new by remember { mutableStateOf("") }
+            var again by remember { mutableStateOf("") }
+            var note by remember { mutableStateOf<String?>(null) }
+            InputField(current, "Current password", { current = it }, Modifier.fillMaxWidth(), password = true)
+            InputField(new, "New password", { new = it }, Modifier.fillMaxWidth(), password = true)
+            InputField(again, "New password again", { again = it }, Modifier.fillMaxWidth(), password = true)
+            Pill("Save new password", primary = true, onClick = {
+                if (new != again) { note = "The new passwords don't match"; return@Pill }
+                note = "Saving…"
+                scope.launch {
+                    note = sync.changePassword(current, new) ?: "Password changed. Your other devices will ask for it."
+                    if (note!!.startsWith("Password changed")) { current = ""; new = ""; again = "" }
+                }
+            })
+            note?.let { Text(it, style = T.small) }
         }
     }
 }

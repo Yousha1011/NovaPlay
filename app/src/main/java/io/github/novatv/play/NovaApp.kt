@@ -17,6 +17,12 @@ class NovaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         appContext = this
+        // Errors nothing caught: written down (CrashLog, shown in Settings › About), then Android closes the app as usual.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            io.github.novatv.play.data.CrashLog.record(e, "${android.os.Build.MODEL}, ${t.name}")
+            previous?.uncaughtException(t, e)
+        }
         migratePrefs()
         // TVs use the big-screen look (graphite and cyan); the phone draws its own screens with its themes.
         io.github.novatv.play.ui.Look.modern = false

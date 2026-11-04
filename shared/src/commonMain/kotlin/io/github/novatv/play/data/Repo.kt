@@ -141,11 +141,14 @@ class Repo(val store: Store, val epg: Epg) {
      * screens showing favourites or recents redraw.
      */
     fun afterSync(keys: Set<String>) {
+        var opened = false
         if ("sources" in keys || "active" in keys) {
             val src = store.sources.firstOrNull { it.id == store.activeSourceId } ?: store.sources.firstOrNull()
-            if (src != null) open(src, force = false)
+            if (src != null) { open(src, force = false); opened = true }
         }
-        if ("extraEpg" in keys) reloadGuide()
+        // Opening a playlist loads the guide after it (with the new guide list): a second, forced import on top would
+        // read every guide twice, which a Fire TV Stick or iPhone just logged in can't afford.
+        if ("extraEpg" in keys && !opened) reloadGuide()
         _state.update { it.copy(epgVersion = it.epgVersion + 1) }
     }
 

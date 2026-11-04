@@ -78,6 +78,8 @@ private fun firstInstance(): Boolean {
 
 fun main() {
     if (!firstInstance()) return
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { t, e -> io.github.novatv.play.data.CrashLog.record(e, "Windows, ${t.name}"); previous?.uncaughtException(t, e) }
     App.start(Desktop)
     application {
         val window = rememberWindowState(size = DpSize(1440.dp, 860.dp))
