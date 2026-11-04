@@ -119,8 +119,14 @@ jobs:
           done
           # Still running after 30 s, or it crashed.
           if ! xcrun simctl spawn "$DEVICE" launchctl list | grep -q "$BUNDLE"; then
-            echo "::error::NovaPlay is not running in the Simulator: it crashed or quit. See console.log."
-            cp ~/Library/Logs/DiagnosticReports/NovaPlay* shots/ 2>/dev/null || true
+            echo "::error::NovaPlay is not running in the Simulator: it crashed or quit. See crash.txt and system.log."
+            # Kotlin's exception and Apple's crash report, to see where it stopped.
+            xcrun simctl spawn "$DEVICE" log show --last 3m --style compact --predicate 'process == "NovaPlay"' > shots/system.log 2>&1 || true
+            sleep 5
+            for f in ~/Library/Logs/DiagnosticReports/NovaPlay*; do [ -f "$f" ] && cp "$f" shots/; done
+            ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -5 > shots/reports.txt
+            grep -h -A40 -E "Uncaught Kotlin exception|Exception Type|Termination Reason|crashed" shots/system.log shots/NovaPlay* 2>/dev/null | head -120 > shots/crash.txt || true
+            cat shots/crash.txt
             exit 1
           fi
 
