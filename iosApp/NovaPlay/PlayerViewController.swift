@@ -1039,7 +1039,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     /// Subtitles, audio and video tracks, and the picture's shape.
     private func settingsMenu() -> [UIMenuElement] {
         // VLCKit 4: each track says whether it is selected; picking one selects it alone.
-        func tracks(_ title: String, _ icon: String, _ list: [VLCMediaPlayerTrack], canTurnOff: Bool = false) -> UIMenu {
+        func tracks(_ title: String, _ icon: String, _ list: [VLCMediaPlayer.Track], canTurnOff: Bool = false) -> UIMenu {
             var actions = list.map { t in
                 UIAction(title: t.trackName, state: t.isSelected ? .on : .off) { _ in t.isSelectedExclusively = true }
             }
