@@ -47,6 +47,17 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 
+      - name: Check image decoding isn't bound to VLCKit
+        working-directory: iosApp
+        run: |
+          # Skia must use its own libpng: one bound to VLCKit's copy crashes on the first channel logo.
+          BIN=build/Build/Products/Release-iphoneos/NovaPlay.app/NovaPlay
+          if nm -m "$BIN" | grep -E "\(undefined\).*_png_" | grep -i vlckit; then
+            echo "::error::png functions are taken from VLCKit (see OTHER_LDFLAGS order in project.yml)"
+            exit 1
+          fi
+          echo "png functions: not from VLCKit"
+
       - name: Package the .ipa
         working-directory: iosApp
         run: |

@@ -22,7 +22,9 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         # The Kotlin framework (static) built by Gradle in the step below.
         FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
-        OTHER_LDFLAGS: "$(inherited) -framework Shared"
+        # Shared first: Skia inside it has its own libpng, and VLCKit 4 exports another. Listed after the Pods, the linker
+        # bound Skia's png calls to VLCKit's copy, and decoding a channel logo crashed (pointer being freed was not allocated).
+        OTHER_LDFLAGS: "-framework Shared $(inherited)"
         # Unsigned: Sideloadly or AltStore signs it with the user's Apple ID.
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
