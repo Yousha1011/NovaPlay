@@ -18,6 +18,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
@@ -51,7 +52,15 @@ fun LoginScreen() {
         }
     }
 
+    // QR sign-in: scan with a phone and log in there, so nothing has to be typed with the remote.
+    val code by androidx.compose.runtime.produceState<String?>(null, signUp) { if (!signUp) value = AccountSync.pairStart() }
+    androidx.compose.runtime.LaunchedEffect(code) {
+        val c = code ?: return@LaunchedEffect
+        repeat(300) { kotlinx.coroutines.delay(2000); if (AccountSync.pairPoll(c)) return@LaunchedEffect }
+    }
+
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+      androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(620.dp)) {
             androidx.compose.foundation.Image(org.jetbrains.compose.resources.painterResource(io.github.novatv.play.res.Res.drawable.logo), "NovaPlay",
                 Modifier.size(200.dp))
@@ -76,6 +85,20 @@ fun LoginScreen() {
             }
             message?.let { Spacer(Modifier.height(14.dp)); Text(it, style = T.body.copy(color = C.dim)) }
         }
+        code?.let { c ->
+            Spacer(Modifier.width(56.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(340.dp)) {
+                Text("Or scan with your phone", style = T.h2)
+                Spacer(Modifier.height(12.dp))
+                val link = AccountSync.serverUrl("/pair/$c")
+                coil3.compose.AsyncImage(AccountSync.serverUrl("/qr?data=" + io.github.novatv.play.platform.urlEncode(link)), "QR code",
+                    Modifier.size(260.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)))
+                Spacer(Modifier.height(12.dp))
+                Text("Log in on your phone, and this TV logs in by itself.", style = T.small, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("Code $c", style = T.small.copy(color = C.dim))
+            }
+        }
+      }
     }
     AutoFocus(first)
 }

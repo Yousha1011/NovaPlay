@@ -128,6 +128,36 @@ object AccountSync {
         } catch (e: Exception) { e.message ?: "Couldn't change the password" }
     }
 
+    /** The accounts server's address of a page or image ("/qr?data=…"). */
+    fun serverUrl(path: String) = AccountsConfig.SERVER.trimEnd('/') + path
+
+    /** QR sign-in: a code from the server; the phone opens [serverUrl]("/pair/<code>") to log in. Null when it can't. */
+    suspend fun pairStart(): String? = withContext(IO) {
+        if (!available) return@withContext null
+        try { post("pair/start", JSONObject()).optString("code").ifBlank { null } } catch (e: Exception) { null }
+    }
+
+    /** Whether the phone has logged in for [code]; when it has, this device is logged in with the account's settings. */
+    suspend fun pairPoll(code: String): Boolean = withContext(IO) {
+        try {
+            val (status, text) = Http.send("POST", serverUrl("/account/pair/poll"), emptyMap(), JSONObject().put("code", code).toString())
+            if (status != 200) return@withContext false
+            val r = JSONObject(text)
+            lock.withLock {
+                App.store.syncTimes = JSONObject()
+                begin(r.optString("name"), r.optString("session"))
+                absorb(r.optJSONObject("settings") ?: JSONObject())
+            }
+            true
+        } catch (e: Exception) { false }
+    }
+
+    /** A crash report kept on the server for a day, for a phone to open by QR; its page's address, or null. */
+    suspend fun shareReport(text: String): String? = withContext(IO) {
+        if (!available) return@withContext null
+        try { post("report", JSONObject().put("text", text)).optString("id").ifBlank { null }?.let { serverUrl("/report/$it") } } catch (e: Exception) { null }
+    }
+
     /** This device leaves the account; its settings stay as they are, and the login page shows again. */
     fun logOut() {
         App.store.accountName = ""

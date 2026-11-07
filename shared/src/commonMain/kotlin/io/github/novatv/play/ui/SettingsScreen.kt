@@ -470,6 +470,7 @@ private fun LazyListScope.aboutPane(st: Repo.LibState, changed: () -> Unit) {
         section("Last problem")
         item { Text("NovaPlay closed unexpectedly. A photo of this helps fix it.", style = T.small) }
         item { Text(crash, style = T.small.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)) }
+        item { CrashQr(crash) }
         item { Action("Clear this", "Remove the report once it's been looked at", "Clear") { io.github.novatv.play.data.CrashLog.clear(); changed() } }
     }
     item { Action("Playlist in use", st.source?.name ?: "None",
@@ -657,6 +658,23 @@ private fun AccountBox(changed: () -> Unit) {
                 }
             })
             note?.let { Text(it, style = T.small) }
+        }
+    }
+}
+
+/** The crash report as a QR code: the phone opens it and can copy and send it on (kept on the accounts server for a day). */
+@Composable
+private fun CrashQr(text: String) {
+    var link by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Pill(if (link == null) "Show QR code for my phone" else "QR code shown", onClick = {
+            scope.launch { link = io.github.novatv.play.data.AccountSync.shareReport(text) ?: run { toast("Couldn't make a QR code"); null } }
+        })
+        link?.let { l ->
+            Spacer(Modifier.width(18.dp))
+            coil3.compose.AsyncImage(io.github.novatv.play.data.AccountSync.serverUrl("/qr?data=" + io.github.novatv.play.platform.urlEncode(l)), "QR code",
+                Modifier.size(200.dp).clip(RoundedCornerShape(10.dp)))
         }
     }
 }
