@@ -625,6 +625,16 @@ class PlayerActivity : ComponentActivity() {
         startCurrent()
     }
 
+    /** A channel picked in the overlay guide: from the list playing, or from another group, which then becomes the list zapped through. */
+    private fun playFrom(list: List<Channel>, index: Int) {
+        val l = live ?: return
+        if (list === l.channels) { jumpTo(index); return }
+        showList = false
+        item = PlayItem.Live(list, index)
+        channelIndex = index.coerceIn(0, list.lastIndex)
+        zap(0)
+    }
+
     private fun jumpTo(index: Int) {
         val l = live ?: return
         showList = false
@@ -810,7 +820,12 @@ class PlayerActivity : ComponentActivity() {
                 }
                 AnimatedVisibility(showInfo, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) { Overlay() }
             }
-            AnimatedVisibility(showList, enter = slideInHorizontally { -it } + fadeIn(), exit = slideOutHorizontally { -it } + fadeOut()) { ChannelList() }
+            AnimatedVisibility(showList, enter = slideInHorizontally { -it } + fadeIn(), exit = slideOutHorizontally { -it } + fadeOut()) {
+                // Picking a multi-view screen keeps the plain list; watching gets the overlay guide.
+                val l = live
+                if (picking || l == null) ChannelList()
+                else io.github.novatv.play.ui.OverlayGuide(l.channels, channelIndex) { list, i -> playFrom(list, i) }
+            }
             if (picking && pickSource == PickSource.CHOOSE) SourceChooser()
             if (picking && (pickSource == PickSource.SPORTS || pickSource == PickSource.GAME)) SportsPicker()
             AnimatedVisibility(showTracks, enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut(),
