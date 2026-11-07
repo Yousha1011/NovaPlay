@@ -81,6 +81,14 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = strSet("sportsLeagues")
         set(v) = putSet("sportsLeagues", v)
 
+    /**
+     * Fix Match: channels picked by hand for a game ("game:<id>"), or for every game of a team ("team:<sport>|<name>"),
+     * as channel ids, latest pick first.
+     */
+    var matchFixes: JSONObject
+        get() = obj("fixMatch.json")
+        set(v) = put("fixMatch.json", v)
+
     /** Favourite teams as "sport|teamId|name". */
     var favouriteTeams: Set<String>
         get() = strSet("favTeams")
@@ -385,7 +393,7 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     var backup: ((String) -> Unit)? = null
 
     /** Playlists (with their logins), guides, favourites, Sports picks and keys. */
-    private val backedUp = setOf("sources", "active", "extraEpg", "favs.json", "favTeams.json", "sportsComps.json", "sportsEnabled.json",
+    private val backedUp = setOf("sources", "active", "extraEpg", "favs.json", "favTeams.json", "fixMatch.json", "sportsComps.json", "sportsEnabled.json",
         "sportsLeagues.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh", "phoneTheme")
 
     fun snapshot(): String = JSONObject().also { o -> for (k in backedUp) sp.getString(k, null)?.let { o.put(k, it) } }.toString()

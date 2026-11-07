@@ -147,6 +147,7 @@ internal fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit
         value = (value.orEmpty() + more).distinctBy { it.channel.id }
     }
     var focused by remember { mutableStateOf(false) }
+    var fixing by remember { mutableStateOf<Airing?>(null) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.94f).fillMaxHeight(0.86f).clip(RoundedCornerShape(22.dp)).background(C.panel).padding(28.dp)) {
@@ -166,10 +167,22 @@ internal fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit
                     LaunchedEffect(Unit) { repeat(5) { try { close.requestFocus(); return@LaunchedEffect } catch (ex: Exception) { delay(60) } } }
                 }
                 else -> {
+                    fixing?.let { a ->
+                        Text("Always show ${a.channel.name} first for:", style = T.small, modifier = Modifier.padding(bottom = 8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+                            Pill("This game", onClick = { fixMatch("game:${e.id}", a.channel); fixing = null; io.github.novatv.play.toast("Saved for this game") }, primary = true)
+                            for (side in e.teams) Pill("Every ${side.short} game", onClick = {
+                                fixMatch("team:${e.league.sport.name}|${side.name}", a.channel); fixing = null; io.github.novatv.play.toast("Saved for every ${side.short} game")
+                            })
+                            Pill("Cancel", onClick = { fixing = null })
+                        }
+                    }
+                    if (App.store.showHints) Text("OK  Watch   ·   Hold OK  Fix Match (always use this channel)   ·   A channel that fails gives way to the next",
+                        style = T.tiny, modifier = Modifier.padding(bottom = 8.dp))
                     LazyColumn(Modifier.rememberFocusInList(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(airings!!.size) { i ->
-                            AiringRow(airings!![i], if (i == 0) Modifier.focusRequester(first) else Modifier) {
-                                onDismiss(); playChannel(airings!!.map { it.channel }, i)
+                            AiringRow(airings!![i], if (i == 0) Modifier.focusRequester(first) else Modifier, onLongClick = { fixing = airings!![i] }) {
+                                onDismiss(); playChannel(airings!!.map { it.channel }, i, switchOnFailure = true)
                             }
                         }
                     }
@@ -242,7 +255,7 @@ private fun EventPanel(e: SportEvent?, epgVersion: Int, modifier: Modifier = Mod
             airings!!.isEmpty() -> Text(if (App.repo.epg.hasData) "Not found in your playlist's guide or channel names." else
                 "Add a TV guide to your playlist to find matches on your channels.", style = T.small)
             else -> LazyColumn(Modifier.rememberFocusInList(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(airings!!.size) { i -> AiringRow(airings!![i]) { playChannel(airings!!.map { it.channel }, i) } }
+                items(airings!!.size) { i -> AiringRow(airings!![i]) { playChannel(airings!!.map { it.channel }, i, switchOnFailure = true) } }
             }
         }
     }
@@ -263,8 +276,12 @@ private fun Team(s: Side, modifier: Modifier, score: String? = null) {
 }
 
 @Composable
-private fun AiringRow(a: Airing, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Tile(onClick, modifier.fillMaxWidth().height(64.dp), shape = RoundedCornerShape(10.dp), scale = 1.02f, color = C.panelHi) {
+internal fun AiringRow(a: Airing, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+    // SHOWING IT: the guide names this game on the channel, it's a feed named after it, or you picked it.
+    // MAYBE: a broadcaster's channel, or the competition on at kick-off without the teams named.
+    val picked = a.why == io.github.novatv.play.sports.Matcher.PICKED
+    val sure = picked || a.why == "Match feed" || a.why == "In your TV guide"
+    Tile(onClick, modifier.fillMaxWidth().height(64.dp), onLongClick = onLongClick, shape = RoundedCornerShape(10.dp), scale = 1.02f, color = C.panelHi) {
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Logo(a.channel.logo, a.channel.name, Modifier.size(64.dp, 42.dp))
             Spacer(Modifier.width(12.dp))
@@ -272,9 +289,24 @@ private fun AiringRow(a: Airing, modifier: Modifier = Modifier, onClick: () -> U
                 Text(a.channel.name, style = T.body, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(a.programme?.let { "${clock(it.start)} ${it.title}" } ?: a.why, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (a.programme?.isLive == true) Badge("LIVE")
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.clip(RoundedCornerShape(6.dp)).background(if (sure) Color(0xFF1F9D55) else Color(0x33FFFFFF)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                Text(if (picked) "YOUR PICK" else if (sure) "SHOWING IT" else "MAYBE",
+                    style = T.tiny.copy(color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
+            }
         }
     }
+}
+
+/** Fix Match: [c] comes first for this game, or for every game of a team, from now on (synced with the account). */
+internal fun fixMatch(key: String, c: io.github.novatv.play.data.Channel) {
+    val all = App.store.matchFixes
+    val old = all.optJSONArray(key)
+    val ids = mutableListOf(c.id)
+    if (old != null) for (i in 0 until old.length()) old.optString(i).takeIf { it != c.id }?.let(ids::add)
+    all.put(key, io.github.novatv.play.json.JSONArray(ids.take(5)))
+    App.store.matchFixes = all
+    App.repo.forgetMatches()
 }
 
 /** Sport on the user's channels now and in the next three hours, straight from the TV guide. */

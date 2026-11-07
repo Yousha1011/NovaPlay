@@ -250,6 +250,9 @@ class Repo(val store: Store, val epg: Epg) {
 
     /** Built once per playlist and guide; screens asking at the same time wait for the one build. */
     private val matcherLock = Lock()
+    /** Sports finds channels again (after a Fix Match pick). */
+    fun forgetMatches() { matcher = null; _state.update { it.copy(epgVersion = it.epgVersion + 1) } }
+
     fun matcher(): Matcher = matcherLock.locked {
         val v = _state.value.epgVersion * 31 + state.value.lib.channels.size
         matcher?.let { if (it.first == v) return@locked it.second }

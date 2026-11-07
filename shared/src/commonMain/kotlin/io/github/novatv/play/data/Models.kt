@@ -120,7 +120,8 @@ data class Library(
 /** What the player is asked to play. [channelIndex] lets live TV zap up and down through [channels]. */
 sealed class PlayItem {
     abstract val title: String
-    data class Live(val channels: List<Channel>, val channelIndex: Int) : PlayItem() {
+    /** [switchOnFailure]: the channels all show one game, so one that won't play gives way to the next. */
+    data class Live(val channels: List<Channel>, val channelIndex: Int, val switchOnFailure: Boolean = false) : PlayItem() {
         override val title get() = channels[channelIndex].name
     }
     data class Vod(val key: String, override val title: String, val movie: Movie? = null, val episode: Episode? = null,

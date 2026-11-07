@@ -35,6 +35,13 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
 
     private fun find(ev: SportEvent, broadcasts: List<Broadcast>, limit: Int): List<Airing> {
         val out = LinkedHashMap<String, Airing>()
+        // Channels you picked yourself (Fix Match): for this game, then for either team's games.
+        val fixes = io.github.novatv.play.App.store.matchFixes
+        val byId = channels.associateBy { it.id }
+        for (k in listOf("game:${ev.id}") + ev.teams.map { "team:${ev.league.sport.name}|${it.name}" }) {
+            val ids = fixes.optJSONArray(k) ?: continue
+            for (i in 0 until ids.length()) byId[ids.optString(i)]?.let { c -> out.putNew(c.id, Airing(c, null, PICKED)) }
+        }
         // Feeds named after this very match come first: their times are often wrong, their team names are not.
         if (ev.home != null && ev.away != null) {
             val h = keyword(ev.home)?.let(::fold); val a = keyword(ev.away)?.let(::fold)
@@ -106,7 +113,7 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
         // ones they can follow. Then match feeds (often only a holding picture until kick-off), then the rest.
         val ordered = out.values.sortedBy { a ->
             val own = mine.isNotEmpty() && regionOf(a.channel.name) in mine
-            when { own && a.why != "Match feed" -> 0; own -> 1; a.why == "Match feed" -> 2; else -> 3 }
+            when { a.why == PICKED -> -1; own && a.why != "Match feed" -> 0; own -> 1; a.why == "Match feed" -> 2; else -> 3 }
         }
         return ordered.take(maxOf(limit, ordered.count { it.why == "Match feed" }))
     }
@@ -173,6 +180,8 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
     }
 
     companion object {
+        /** Why an airing is listed when you picked the channel yourself. */
+        const val PICKED = "Your pick"
         /** Lower case without accents: "Çorum" and "corum", "Göztepe" and "goztepe" match. */
         fun fold(s: String): String = io.github.novatv.play.platform.foldAccents(s)
 

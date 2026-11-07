@@ -187,6 +187,8 @@ class PlayerActivity : ComponentActivity() {
     private var hideJob: Job? = null
     private var startJob: Job? = null
     private var retried = false
+    /** Channels skipped in a row because they wouldn't play (game lists that switch on failure). */
+    private var switched = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -198,7 +200,7 @@ class PlayerActivity : ComponentActivity() {
                 loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
                 if (loading) { if (mainWaitingSince == 0L) mainWaitingSince = System.currentTimeMillis() } else mainWaitingSince = 0L
                 if (state == Player.STATE_READY) {
-                    error = null; retried = false; mainFailures = 0; mainQuiet = false; length = player.duration.coerceAtLeast(0)
+                    error = null; retried = false; switched = 0; mainFailures = 0; mainQuiet = false; length = player.duration.coerceAtLeast(0)
                     if (mainPlayingSince == 0L) mainPlayingSince = System.currentTimeMillis()
                 }
                 // A live stream that "ends" has dropped: open it again.
@@ -211,6 +213,13 @@ class PlayerActivity : ComponentActivity() {
                 // In multi-view every screen keeps reconnecting, so one dropped stream never stays stopped.
                 if (item is PlayItem.Live && multi) { multiLog("screen 1 error ${e.errorCodeName}: ${e.cause?.message ?: e.message}"); reconnectMain(); return }
                 if (item is PlayItem.Live && !retried) { retried = true; lifecycleScope.launch { delay(1500); startCurrent() }; return }
+                // A game's channel list: the next channel showing it takes over (once round the list).
+                val l = live
+                if (l != null && l.switchOnFailure && l.channels.size > 1 && switched < l.channels.size - 1) {
+                    switched++
+                    toast("${l.channels[channelIndex].name} isn't playing: trying ${l.channels[(channelIndex + 1) % l.channels.size].name}")
+                    zap(1); return
+                }
                 error = playbackMessage(e)
             }
         })

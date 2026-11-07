@@ -42,12 +42,12 @@ import io.github.novatv.play.platform.nowMs
 import io.github.novatv.play.platform.IO
 
 /** Plays [list] starting at [index], remembering the channel in Recent. */
-fun playChannel(list: List<Channel>, index: Int) {
+fun playChannel(list: List<Channel>, index: Int, switchOnFailure: Boolean = false) {
     if (list.isEmpty()) return
     val c = list[index.coerceIn(0, list.lastIndex)]
     App.store.addRecentChannel(App.repo.channelKey(c))
     App.store.lastChannel = App.repo.channelKey(c)
-    play(PlayItem.Live(list, index.coerceIn(0, list.lastIndex)))
+    play(PlayItem.Live(list, index.coerceIn(0, list.lastIndex), switchOnFailure))
 }
 
 /** Now/next for [c], read off the main thread and refreshed when the guide changes. */
