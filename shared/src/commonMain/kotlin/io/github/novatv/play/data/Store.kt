@@ -118,6 +118,21 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = sp.getString("sportsCountry", "") ?: ""
         set(v) { ps("sportsCountry", v) }
 
+    /** Preferred sports stream quality: AUTO, 4K, FHD, HD, SD */
+    var sportsQuality: String
+        get() = sp.getString("sportsQuality", "AUTO") ?: "AUTO"
+        set(v) { ps("sportsQuality", v) }
+
+    /** EPG time shift in hours (-12 to +12) */
+    var epgTimeShiftHours: Int
+        get() = sp.getInt("epgTimeShiftH", 0)
+        set(v) { sp.putInt("epgTimeShiftH", v) }
+
+    /** Preferred live view mode: GUIDE or LIST */
+    var liveViewMode: String
+        get() = sp.getString("liveViewMode", "GUIDE") ?: "GUIDE"
+        set(v) { ps("liveViewMode", v) }
+
     /** Extra XMLTV guides imported alongside the playlist's own. */
     var extraEpg: List<String>
         get() = strList("extraEpg")

@@ -57,7 +57,7 @@ import io.github.novatv.play.sports.State
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private enum class HubView { MINE, ALL }
+private enum class HubView { MINE, ALL, TABLES, NETWORKS }
 
 /**
  * The Sports hub: My Sports (a big card of the next game in the teams' colours with the video beside it, then Live &
@@ -80,6 +80,8 @@ fun SportsScreen(nav: Nav) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f).rememberFocusInList()) {
                 item { Pill("★ My Sports", onClick = { view = HubView.MINE }, selected = view == HubView.MINE) }
                 item { Pill("All Events" + if (liveCount > 0) " · $liveCount live" else "", onClick = { view = HubView.ALL }, selected = view == HubView.ALL) }
+                item { Pill("🏆 Tables", onClick = { view = HubView.TABLES }, selected = view == HubView.TABLES) }
+                item { Pill("📡 Networks", onClick = { view = HubView.NETWORKS }, selected = view == HubView.NETWORKS) }
                 item { Pill("Follow Teams & Leagues", onClick = { nav.push(Route.Leagues) }) }
                 item { Pill("Refresh", onClick = { App.repo.refreshSports(0) }) }
             }
@@ -89,6 +91,8 @@ fun SportsScreen(nav: Nav) {
         when (view) {
             HubView.ALL -> AllEvents(nav)
             HubView.MINE -> MySports(sports.events, sports.loading) { popup = it }
+            HubView.TABLES -> SportsTablesView()
+            HubView.NETWORKS -> SportsNetworksView()
         }
     }
     popup?.let { e -> ChannelsPopup(e, st.epgVersion) { popup = null } }

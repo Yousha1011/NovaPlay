@@ -68,7 +68,7 @@ import io.github.novatv.play.ui.teamKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private enum class When(val label: String) { LIVE("Live now"), TODAY("Today"), UPCOMING("Upcoming"), MINE("My teams") }
+private enum class When(val label: String) { LIVE("Live now"), TODAY("Today"), UPCOMING("Upcoming"), MINE("My teams"), TABLES("Tables"), NETWORKS("Networks") }
 
 /** Sports, in the iPhone's style: when (live, today...), which sport, then the matches as cards. */
 @Composable
@@ -89,6 +89,7 @@ fun PhoneSports(nav: Nav) {
                 When.TODAY -> e.start in (t - 12 * 3600_000L)..dayEnd && (e.state != State.POST || e.start > t - 6 * 3600_000L)
                 When.UPCOMING -> e.state == State.PRE && e.start > t
                 When.MINE -> e.teams.any { isFavTeam(e, it) } && e.start > t - 24 * 3600_000L
+                When.TABLES, When.NETWORKS -> false
             }
         }.sortedWith(compareBy({ it.state != State.LIVE }, { it.start })).toList()
     }
@@ -100,12 +101,16 @@ fun PhoneSports(nav: Nav) {
         Spacer(Modifier.height(8.dp))
         Chips(listOf("ALL" to "All sports") + Sport.entries.filter { it in present }.map { it.name to it.label }, sport?.name ?: "ALL",
             { sport = if (it == "ALL") null else Sport.valueOf(it) })
-        when {
-            sports.loading && sports.events.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
-            list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, when (whenTab) { When.LIVE -> "Nothing live right now"; When.MINE -> "No matches for your teams"; else -> "No matches" },
-                when (whenTab) { When.MINE -> "Open a match and star a team to follow it."; When.LIVE -> "Try Today or Upcoming."; else -> null })
-            else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                items(list, key = { it.id }) { e -> MatchCard(e) { nav.push(Route.Match(e)) } }
+        when (whenTab) {
+            When.TABLES -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView() }
+            When.NETWORKS -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsNetworksView() }
+            else -> when {
+                sports.loading && sports.events.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
+                list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, when (whenTab) { When.LIVE -> "Nothing live right now"; When.MINE -> "No matches for your teams"; else -> "No matches" },
+                    when (whenTab) { When.MINE -> "Open a match and star a team to follow it."; When.LIVE -> "Try Today or Upcoming."; else -> null })
+                else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(list, key = { it.id }) { e -> MatchCard(e) { nav.push(Route.Match(e)) } }
+                }
             }
         }
     }

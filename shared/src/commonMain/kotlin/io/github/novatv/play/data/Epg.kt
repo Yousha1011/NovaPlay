@@ -220,25 +220,43 @@ class Epg {
         return byName[norm(ch.name)] ?: ch.epgId?.let { byName[norm(it)] }
     }
 
-    fun programmes(key: String, from: Long, to: Long): List<Programme> = query(
-        "SELECT ch, start, stop, title, descr, cat FROM prog WHERE ch=? AND stop>? AND start<? ORDER BY start", listOf(key, from, to))
+    private fun timeShiftMs(): Long = try { io.github.novatv.play.App.store.epgTimeShiftHours * 3600_000L } catch (e: Exception) { 0L }
 
-    fun nowNext(key: String): List<Programme> =
-        query("SELECT ch, start, stop, title, descr, cat FROM prog WHERE ch=? AND stop>? ORDER BY start LIMIT 2", listOf(key, nowMs()))
+    fun programmes(key: String, from: Long, to: Long): List<Programme> {
+        val shift = timeShiftMs()
+        val list = query(
+            "SELECT ch, start, stop, title, descr, cat FROM prog WHERE ch=? AND stop>? AND start<? ORDER BY start",
+            listOf(key, from - shift, to - shift)
+        )
+        return if (shift == 0L) list else list.map { it.copy(start = it.start + shift, stop = it.stop + shift) }
+    }
+
+    fun nowNext(key: String): List<Programme> {
+        val shift = timeShiftMs()
+        val list = query("SELECT ch, start, stop, title, descr, cat FROM prog WHERE ch=? AND stop>? ORDER BY start LIMIT 2", listOf(key, nowMs() - shift))
+        return if (shift == 0L) list else list.map { it.copy(start = it.start + shift, stop = it.stop + shift) }
+    }
 
     /** Programmes between [from] and [to] whose title contains every word in [words]. */
     fun find(words: List<String>, from: Long, to: Long, limit: Int = 60): List<Programme> {
         if (words.isEmpty()) return emptyList()
         val where = words.joinToString(" AND ") { "title LIKE ?" }
         // Bounding start both ways keeps the search on the time index; a programme covering kick-off started at most 6 h before.
-        val args = listOf<Any>(from - 6 * 3600_000L, to, from) + words.map { "%$it%" }
-        return query("SELECT ch, start, stop, title, descr, cat FROM prog WHERE start>? AND start<? AND stop>? AND $where ORDER BY start LIMIT $limit", args)
+        val shift = timeShiftMs()
+        val args = listOf<Any>(from - shift - 6 * 3600_000L, to - shift, from - shift) + words.map { "%$it%" }
+        return shifted(query("SELECT ch, start, stop, title, descr, cat FROM prog WHERE start>? AND start<? AND stop>? AND $where ORDER BY start LIMIT $limit", args), shift)
     }
 
+    private fun shifted(list: List<Programme>, shift: Long) =
+        if (shift == 0L) list else list.map { it.copy(start = it.start + shift, stop = it.stop + shift) }
+
     /** Sports programmes on now or starting soon, by guide category or by title. */
-    fun sportsNow(from: Long, to: Long, limit: Int = 200): List<Programme> = query(
-        "SELECT ch, start, stop, title, descr, cat FROM prog WHERE stop>? AND start<? AND (cat LIKE '%sport%' OR title LIKE '% vs %' OR title LIKE '% v %' OR title LIKE '%live:%') ORDER BY start LIMIT $limit",
-        listOf(from, to))
+    fun sportsNow(from: Long, to: Long, limit: Int = 200): List<Programme> {
+        val shift = timeShiftMs()
+        return shifted(query(
+            "SELECT ch, start, stop, title, descr, cat FROM prog WHERE stop>? AND start<? AND (cat LIKE '%sport%' OR title LIKE '% vs %' OR title LIKE '% v %' OR title LIKE '%live:%') ORDER BY start LIMIT $limit",
+            listOf(from - shift, to - shift)), shift)
+    }
 
     private fun query(sql: String, args: List<Any>): List<Programme> = read { db ->
         db.prepare(sql).use { st ->
