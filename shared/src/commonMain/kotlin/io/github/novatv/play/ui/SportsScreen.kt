@@ -67,8 +67,9 @@ private enum class SportsTab(val label: String) { LIVE("Live now"), TODAY("Today
 fun teamKey(e: SportEvent, s: Side) = "${e.league.sport.name}|${s.id}|${s.name}"
 fun isFavTeam(e: SportEvent, s: Side): Boolean = Follow.teamPicked(e, s)
 
+/** The list of every match by day and sport (the hub's "All Events"). */
 @Composable
-fun SportsScreen(nav: Nav) {
+internal fun AllEvents(nav: Nav) {
     val sports by App.repo.sports.collectAsState()
     val st by App.repo.state.collectAsState()
     var tab by remember { mutableStateOf(SportsTab.LIVE) }
@@ -101,13 +102,8 @@ fun SportsScreen(nav: Nav) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
     val roomy = maxWidth >= WIDE
     val columns = if (maxWidth < NARROW) 1 else 2
-    Row(Modifier.fillMaxSize().padding(start = 28.dp, top = 30.dp, end = 30.dp)) {
+    Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f)) {
-            Header("Sports Hub", if (sports.loading && sports.events.isEmpty()) "Loading matches…"
-                else "${sports.events.count { it.state == State.LIVE }} live · updated ${if (sports.updatedAt > 0) clock(sports.updatedAt) else "–"}") {
-                Pill("Choose sports", onClick = { nav.push(Route.Leagues) }, icon = Icons.Rounded.Tune)
-                Pill("Refresh", onClick = { App.repo.refreshSports(0) }, icon = Icons.Rounded.Refresh)
-            }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.rememberFocusInList().padding(bottom = 14.dp)) {
                 items(SportsTab.entries.toList(), key = { it.name }) { s -> UnderTab(s.label.uppercase(), s == tab) { tab = s } }
             }
@@ -141,7 +137,7 @@ fun SportsScreen(nav: Nav) {
 
 /** Every channel showing [e], over the Sports centre: Up/Down to pick, OK to play, Back to close. */
 @Composable
-private fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit) {
+internal fun ChannelsPopup(e: SportEvent, epgVersion: Int, onDismiss: () -> Unit) {
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
     val close = remember { androidx.compose.ui.focus.FocusRequester() }
     val airings by produceState<List<Airing>?>(null, e.id, epgVersion) {

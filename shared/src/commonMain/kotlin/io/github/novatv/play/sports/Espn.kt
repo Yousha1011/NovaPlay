@@ -94,7 +94,8 @@ object Espn {
             ?: t.optJSONArray("logos")?.optJSONObject(0)?.optString("href")
         val name = t.optString("displayName").ifBlank { t.optString("name") }
         return Side(t.optString("id"), name, t.optString("shortDisplayName").ifBlank { name }, t.optString("abbreviation"),
-            logo, o.optString("score").ifBlank { null }?.takeIf { it != "null" })
+            logo, o.optString("score").ifBlank { null }?.takeIf { it != "null" },
+            t.optString("color").ifBlank { null }?.takeIf { Regex("[0-9a-fA-F]{6}").matches(it) && it.lowercase() !in listOf("ffffff", "000000") })
     }
 
     private fun event(league: League, id: String, title: String, subtitle: String?, date: String, status: JSONObject?,
