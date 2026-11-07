@@ -16,8 +16,10 @@ val secretsDir = layout.buildDirectory.dir("generated/secrets/kotlin").get().asF
 run {
     val p = Properties()
     rootProject.file("local.properties").takeIf { it.exists() }?.reader()?.use { p.load(it) }
-    val server = p.getProperty("novaplay.accountsServer", "https://xtream-sports-proxy-syls.onrender.com").trim()
-    require(Regex("""https?://[A-Za-z0-9.:/_-]*""").matches(server)) { "novaplay.accountsServer must be a plain http(s) address" }
+    // -PnovaplayNoAccounts=true: a test build with accounts off (no login page), for trying screens on an emulator.
+    val server = if (project.hasProperty("novaplayNoAccounts")) ""
+        else p.getProperty("novaplay.accountsServer", "https://xtream-sports-proxy-syls.onrender.com").trim()
+    require(server.isEmpty() || Regex("""https?://[A-Za-z0-9.:/_-]*""").matches(server)) { "novaplay.accountsServer must be a plain http(s) address" }
     val f = File(secretsDir, "io/github/novatv/play/data/AccountsConfig.kt")
     val text = listOf(
         "package io.github.novatv.play.data",

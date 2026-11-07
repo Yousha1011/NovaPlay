@@ -267,7 +267,7 @@ private fun RootBody() {
                         .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
                         when (t) {
                             Tab.HOME -> HomeScreen(nav)
-                            Tab.LIVE -> LiveScreen(nav)
+                            Tab.LIVE -> io.github.novatv.play.ui.LiveGuideScreen(nav)
                             Tab.GUIDE -> GuideScreen(nav)
                             Tab.SPORTS -> SportsScreen(nav)
                             Tab.MOVIES -> VodScreen(nav, series = false)
