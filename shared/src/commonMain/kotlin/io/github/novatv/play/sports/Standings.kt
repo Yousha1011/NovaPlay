@@ -98,6 +98,28 @@ object StandingsRepository {
         }
     }
 
+    /** Returns ordinal placement of a team if standings are in cache (e.g., "3rd", "13th"). */
+    fun cachedPlace(teamName: String, leagueId: String): String? {
+        val table = cache[leagueId]?.second ?: return null
+        for (group in table.groups) {
+            val row = group.rows.firstOrNull { 
+                it.name.contains(teamName, ignoreCase = true) || teamName.contains(it.name, ignoreCase = true)
+            }
+            if (row != null) {
+                val rank = row.pos
+                val suffix = when {
+                    rank % 100 in 11..13 -> "th"
+                    rank % 10 == 1 -> "st"
+                    rank % 10 == 2 -> "nd"
+                    rank % 10 == 3 -> "rd"
+                    else -> "th"
+                }
+                return "$rank$suffix"
+            }
+        }
+        return null
+    }
+
     fun espnUrl(league: League): String? {
         val path = league.path ?: return null
         val divisions = path in setOf("football/nfl", "basketball/nba", "hockey/nhl", "baseball/mlb")
@@ -228,6 +250,11 @@ object StandingsRepository {
         }
 
         val note = e.optJSONObject("note")
+        val zone = note?.let { n ->
+            val hex = n.optString("color").removePrefix("#")
+            val text = n.optString("description").ifBlank { n.optString("text") }
+            if (hex.length == 6 && text.isNotBlank()) hex.toLongOrNull(16)?.let { StandingsZone(text, 0xFF000000 or it) } else null
+        }
         if (note != null) {
             clincher = note.optString("rank").ifBlank { clincher }
             clincherText = note.optString("text").ifBlank { null }
@@ -248,6 +275,7 @@ object StandingsRepository {
             form = form,
             clincher = clincher,
             clincherText = clincherText,
+            zone = zone,
             seed = seed,
             change = change,
             streak = streak,

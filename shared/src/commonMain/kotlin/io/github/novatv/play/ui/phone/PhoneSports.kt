@@ -103,7 +103,7 @@ fun PhoneSports(nav: Nav) {
             { sport = if (it == "ALL") null else Sport.valueOf(it) })
         when (whenTab) {
             When.TABLES -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView() }
-            When.NETWORKS -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsNetworksView() }
+            When.NETWORKS -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsNetworksView(onPlayInWindow = { playChannel(listOf(it), 0) }) }
             else -> when {
                 sports.loading && sports.events.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
                 list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, when (whenTab) { When.LIVE -> "Nothing live right now"; When.MINE -> "No matches for your teams"; else -> "No matches" },

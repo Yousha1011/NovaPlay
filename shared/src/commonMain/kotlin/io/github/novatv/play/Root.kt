@@ -78,6 +78,7 @@ import io.github.novatv.play.ui.GuideScreen
 import io.github.novatv.play.ui.HomeScreen
 import io.github.novatv.play.ui.Icon
 import io.github.novatv.play.ui.LeaguesScreen
+import io.github.novatv.play.ui.SportsPickerScreen
 import io.github.novatv.play.ui.LiveScreen
 import io.github.novatv.play.ui.Pill
 import io.github.novatv.play.ui.S
@@ -286,7 +287,7 @@ private fun RootBody() {
                 is Route.MovieDetail -> DetailScreen(nav, movie = top.movie)
                 is Route.SeriesDetail -> DetailScreen(nav, series = top.series)
                 Route.AddSource -> AddSourceScreen(nav)
-                Route.Leagues -> LeaguesScreen(nav)
+                Route.Leagues -> SportsPickerScreen(nav)
                 is Route.Blocks -> io.github.novatv.play.ui.BlocksScreen(nav, top.kind)
                 else -> {} // iPhone-only screens never open on a TV or PC
             }

@@ -29,6 +29,9 @@ object Time {
     /** "Sun 25 Oct". */
     fun dayMonth(t: Long): String = local(t).let { "${days[it.dayOfWeek]} ${it.dayOfMonth} ${months[it.monthNumber - 1]}" }
 
+    /** "Sun 25". */
+    fun formatDayName(t: Long): String = local(t).let { "${days[it.dayOfWeek]} ${it.dayOfMonth}" }
+
     /** "25 Oct 14:05". */
     fun dateTime(t: Long): String = local(t).let { "${it.dayOfMonth} ${months[it.monthNumber - 1]} ${pad2(it.hour)}:${pad2(it.minute)}" }
 
