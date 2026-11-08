@@ -2,6 +2,7 @@ package io.github.novatv.play.sports
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -49,6 +50,29 @@ fun parseTeamColor(colorLong: Long?): Color {
         lerp(c, Color.Black, 0.40f)
     } else c
 }
+
+/** A team's colour, or a steady one made from its name when ESPN gives none, so every team keeps its own shade. */
+fun teamColor(side: Side?): Color {
+    side?.color?.let { return parseTeamColor(it) }
+    val name = side?.name ?: return Color(0xFF2E3440)
+    val hue = ((name.hashCode() and 0x7fffffff) % 360).toFloat()
+    return Color.hsv(hue, 0.55f, 0.55f)
+}
+
+/** Home and away colours, with the away side moved lighter or darker when both clubs wear much the same colour. */
+fun teamShades(home: Side?, away: Side?): Pair<Color, Color> {
+    val h = teamColor(home)
+    var a = teamColor(away)
+    val close = kotlin.math.abs(h.red - a.red) + kotlin.math.abs(h.green - a.green) + kotlin.math.abs(h.blue - a.blue) < 0.35f
+    if (close) a = if (h.luminance() > 0.18f) lerp(a, Color.Black, 0.45f) else lerp(a, Color.White, 0.30f)
+    return h to a
+}
+
+/** One team's row: its colour fading out to the right, like a shirt stripe. */
+fun Modifier.teamBand(c: Color): Modifier = this
+    .clip(RoundedCornerShape(6.dp))
+    .background(Brush.horizontalGradient(0f to bandColor(c).copy(alpha = 0.95f), 0.75f to bandColor(c).copy(alpha = 0.35f), 1f to Color.Transparent))
+    .padding(horizontal = 6.dp, vertical = 3.dp)
 
 /** Tints a team's color towards dark background so it reads as a rich background band. */
 fun bandColor(c: Color): Color =

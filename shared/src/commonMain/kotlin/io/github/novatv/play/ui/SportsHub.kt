@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -66,7 +67,10 @@ import io.github.novatv.play.sports.SportsCatalog
 import io.github.novatv.play.sports.SportsLook
 import io.github.novatv.play.sports.StandingsRepository
 import io.github.novatv.play.sports.State
+import io.github.novatv.play.sports.Sport
 import io.github.novatv.play.sports.bandColor
+import io.github.novatv.play.sports.teamBand
+import io.github.novatv.play.sports.teamShades
 import io.github.novatv.play.sports.parseTeamColor
 import io.github.novatv.play.sports.sportsFrame
 import kotlinx.coroutines.delay
@@ -300,10 +304,12 @@ private fun HeroCardRebuilt(
     onHoldWatch: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val homeColor = parseTeamColor(event.home?.color)
-    val awayColor = parseTeamColor(event.away?.color)
+    val (homeColor, awayColor) = teamShades(event.home, event.away)
     val homeBand = bandColor(homeColor)
     val awayBand = bandColor(awayColor)
+    // Cricket-style scores ("356 & 7/0 (4 ov)") read badly as "386 - 356 & 7/0": each team shows its own innings.
+    val inningsScores = event.league.sport == Sport.CRICKET || listOfNotNull(event.home?.score, event.away?.score).any { '&' in it || '/' in it }
+    val showScore = event.state != State.PRE && !App.store.hideScores
 
     Box(
         modifier = modifier
@@ -357,13 +363,10 @@ private fun HeroCardRebuilt(
                         LogoChip(event.home.logo, 44.dp)
                         Spacer(Modifier.width(10.dp))
                     }
-                    Text(
-                        event.home.name,
-                        style = T.h2.copy(fontWeight = FontWeight.Black, color = Color.White, fontSize = 20.sp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(event.home.name, style = T.h2.copy(fontWeight = FontWeight.Black, color = Color.White, fontSize = 20.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (inningsScores && showScore) InningsLine(event.home.score, Alignment.Start)
+                    }
 
                     // VS or Score
                     Box(
@@ -372,21 +375,20 @@ private fun HeroCardRebuilt(
                             .padding(horizontal = 14.dp, vertical = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (event.state != State.PRE && !App.store.hideScores) {
-                            Text("${event.home.score ?: "0"} - ${event.away.score ?: "0"}", style = T.body.copy(fontWeight = FontWeight.Black, color = Color.White))
+                        if (inningsScores && showScore) {
+                            Text(event.detail.substringAfterLast(" · ").ifBlank { "LIVE" }, style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White))
+                        } else if (showScore) {
+                            Text("${event.home.score ?: "0"} – ${event.away.score ?: "0"}", style = T.body.copy(fontWeight = FontWeight.Black, color = Color.White))
                         } else {
                             Text("VS", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White))
                         }
                     }
 
                     // Away Team
-                    Text(
-                        event.away.name,
-                        style = T.h2.copy(fontWeight = FontWeight.Black, color = Color.White, fontSize = 20.sp, textAlign = TextAlign.End),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        Text(event.away.name, style = T.h2.copy(fontWeight = FontWeight.Black, color = Color.White, fontSize = 20.sp, textAlign = TextAlign.End), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (inningsScores && showScore) InningsLine(event.away.score, Alignment.End)
+                    }
                     if (event.away.logo != null) {
                         Spacer(Modifier.width(10.dp))
                         LogoChip(event.away.logo, 44.dp)
@@ -402,7 +404,7 @@ private fun HeroCardRebuilt(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 val whenStr = if (event.state == State.LIVE) event.detail else "${dayLabel(event.start)} ${clock(event.start)}"
                 val broadcastStr = event.broadcasts.firstOrNull()?.let { "US: $it" } ?: ""
-                val info = listOfNotNull(event.league.name, whenStr, event.venue, broadcastStr.ifBlank { null }).joinToString(" · ")
+                val info = listOfNotNull(event.summary, event.league.name.takeIf { event.summary == null }, whenStr, event.venue, broadcastStr.ifBlank { null }).joinToString(" · ")
                 Text(
                     info,
                     style = T.tiny.copy(color = Color.White.copy(alpha = 0.85f)),
@@ -467,8 +469,8 @@ private fun MatchCardItem(
     onHoldWatch: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val homeColor = parseTeamColor(event.home?.color)
-    val band = bandColor(homeColor)
+    val (homeShade, awayShade) = teamShades(event.home, event.away)
+    val band = Color(0xFF1B1F27)
 
     Box(
         modifier = Modifier
@@ -508,7 +510,7 @@ private fun MatchCardItem(
 
             // Team 1
             event.home?.let { h ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().teamBand(homeShade), verticalAlignment = Alignment.CenterVertically) {
                     if (h.logo != null) {
                         LogoChip(h.logo, 20.dp)
                         Spacer(Modifier.width(8.dp))
@@ -516,7 +518,7 @@ private fun MatchCardItem(
                     val isFav = favTeamName == h.name || isFavTeam(event, h)
                     Text(h.name + if (isFav) " ★" else "", style = T.small.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     if (event.state != State.PRE && !App.store.hideScores) {
-                        Text(h.score ?: "", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White))
+                        Text(h.score ?: "", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).widthIn(max = 150.dp))
                     }
                 }
             }
@@ -525,7 +527,7 @@ private fun MatchCardItem(
 
             // Team 2
             event.away?.let { a ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().teamBand(awayShade), verticalAlignment = Alignment.CenterVertically) {
                     if (a.logo != null) {
                         LogoChip(a.logo, 20.dp)
                         Spacer(Modifier.width(8.dp))
@@ -533,7 +535,7 @@ private fun MatchCardItem(
                     val isFav = favTeamName == a.name || isFavTeam(event, a)
                     Text(a.name + if (isFav) " ★" else "", style = T.small.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     if (event.state != State.PRE && !App.store.hideScores) {
-                        Text(a.score ?: "", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White))
+                        Text(a.score ?: "", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).widthIn(max = 150.dp))
                     }
                 }
             }
@@ -650,8 +652,7 @@ private fun AllEventsView(
                 // Middle Detailed Scoreboard Card
                 val ev = selectedEvent
                 if (ev != null) {
-                    val homeColor = parseTeamColor(ev.home?.color)
-                    val awayColor = parseTeamColor(ev.away?.color)
+                    val (homeColor, awayColor) = teamShades(ev.home, ev.away)
                     Column(
                         Modifier.fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
@@ -763,8 +764,8 @@ private fun ScoreboardCard(
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val homeColor = parseTeamColor(event.home?.color)
-    val band = bandColor(homeColor)
+    val (homeShade, awayShade) = teamShades(event.home, event.away)
+    val band = Color(0xFF1B1F27)
 
     Box(
         modifier = Modifier
@@ -789,22 +790,22 @@ private fun ScoreboardCard(
             // Teams & Scores column
             Column(Modifier.weight(1f)) {
                 // Team 1
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().teamBand(homeShade), verticalAlignment = Alignment.CenterVertically) {
                     if (event.home?.logo != null) LogoChip(event.home.logo, 20.dp)
                     Spacer(Modifier.width(8.dp))
                     Text(event.home?.name ?: "Home", style = T.small.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     if (event.state != State.PRE && !App.store.hideScores) {
-                        Text(event.home?.score ?: "0", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White))
+                        Text(event.home?.score ?: "0", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).widthIn(max = 150.dp))
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 // Team 2
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().teamBand(awayShade), verticalAlignment = Alignment.CenterVertically) {
                     if (event.away?.logo != null) LogoChip(event.away.logo, 20.dp)
                     Spacer(Modifier.width(8.dp))
                     Text(event.away?.name ?: "Away", style = T.small.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     if (event.state != State.PRE && !App.store.hideScores) {
-                        Text(event.away?.score ?: "0", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White))
+                        Text(event.away?.score ?: "0", style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp).widthIn(max = 150.dp))
                     }
                 }
             }
@@ -841,5 +842,18 @@ private fun LogoChip(url: String?, size: androidx.compose.ui.unit.Dp) {
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxSize())
+    }
+}
+
+/** A cricket side's innings: "356 & 7/0 (4 ov)" -> "356  ·  7/0 (4 ov)", first innings first. */
+@Composable
+private fun InningsLine(score: String?, align: Alignment.Horizontal) {
+    val parts = score?.split("&")?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
+    if (parts.isEmpty()) { Text("Yet to bat", style = T.tiny.copy(color = Color.White.copy(alpha = 0.7f))); return }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        parts.forEachIndexed { i, p ->
+            if (i > 0) Text("  &  ", style = T.small.copy(color = Color.White.copy(alpha = 0.6f)))
+            Text(p, style = if (i == parts.lastIndex) T.h2.copy(fontWeight = FontWeight.Black, color = Color.White, fontSize = 18.sp) else T.body.copy(fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.8f)))
+        }
     }
 }

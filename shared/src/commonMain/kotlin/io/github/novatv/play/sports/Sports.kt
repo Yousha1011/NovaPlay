@@ -77,6 +77,8 @@ data class SportEvent(
     val away: Side?,
     val broadcasts: List<String>,
     val venue: String?,
+    /** ESPN's one-line situation, e.g. "West Indies trail by 23 runs". */
+    val summary: String? = null,
 ) {
     val teams: List<Side> get() = listOfNotNull(home, away)
 }

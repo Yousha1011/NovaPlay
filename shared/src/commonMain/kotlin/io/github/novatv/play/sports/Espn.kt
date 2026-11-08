@@ -95,8 +95,12 @@ object Espn {
         val name = t.optString("displayName").ifBlank { t.optString("name") }
         return Side(t.optString("id"), name, t.optString("shortDisplayName").ifBlank { name }, t.optString("abbreviation"),
             logo, o.optString("score").ifBlank { null }?.takeIf { it != "null" },
-            t.optString("color").ifBlank { null }?.takeIf { Regex("[0-9a-fA-F]{6}").matches(it) && it.lowercase() !in listOf("ffffff", "000000") })
+            color(t.optString("color")))
     }
+
+    /** "#ed3507" or "ed3507" -> "ed3507"; null for none, white or black (they say nothing about the team). */
+    private fun color(raw: String): String? = raw.removePrefix("#").trim().ifBlank { null }
+        ?.takeIf { Regex("[0-9a-fA-F]{6}").matches(it) && it.lowercase() !in listOf("ffffff", "000000") }
 
     private fun event(league: League, id: String, title: String, subtitle: String?, date: String, status: JSONObject?,
                       home: Side?, away: Side?, broadcasts: List<String>, venue: String?): SportEvent {
@@ -132,16 +136,22 @@ object Espn {
                     val sides = (0 until (cs?.length() ?: 0)).mapNotNull { cs!!.optJSONObject(it) }.map {
                         Side(it.optString("id"), it.optString("displayName").ifBlank { it.optString("name") },
                             it.optString("name").ifBlank { it.optString("displayName") }, it.optString("abbreviation"),
-                            it.optString("logo").ifBlank { null }, it.optString("score").ifBlank { null }) to it.optString("homeAway")
+                            it.optString("logo").ifBlank { null }, it.optString("score").ifBlank { null }, color(it.optString("color"))) to it.optString("homeAway")
                     }
                     val home = sides.firstOrNull { it.second == "home" }?.first ?: sides.getOrNull(0)?.first
                     val away = sides.firstOrNull { it.second == "away" }?.first ?: sides.getOrNull(1)?.first
                     val full = e.optJSONObject("fullStatus")
                     val ev = event(league, e.optString("id"), if (home != null && away != null) "${home.name} vs ${away.name}" else e.optString("name"),
                         comp, e.optString("date"), full, home, away, emptyList(), e.optString("location").ifBlank { null })
+                    // Cricket: "2nd Test · Day 3 · Stumps" beats ESPN's bare "Live"; the situation goes in summary.
+                    val stage = listOfNotNull(e.optString("title").ifBlank { null }, full?.optString("session")?.ifBlank { null },
+                        full?.optJSONObject("type")?.optString("description")?.ifBlank { null }?.takeIf { e.optString("status") != "pre" })
+                        .distinct().joinToString(" · ").ifBlank { null }
+                    val situation = full?.optString("summary")?.ifBlank { null }?.takeIf { it != stage }
+                    val shown = if (league.sport == Sport.CRICKET && stage != null) ev.copy(detail = stage, summary = situation) else ev.copy(summary = situation)
                     // The header gives a bare "pre/in/post" when fullStatus is missing.
                     out.add(if (full == null) ev.copy(state = when (e.optString("status")) { "in" -> State.LIVE; "post" -> State.POST; else -> State.PRE },
-                        detail = e.optString("summary")) else ev)
+                        detail = e.optString("summary")) else shown)
                 }
             }
         }
