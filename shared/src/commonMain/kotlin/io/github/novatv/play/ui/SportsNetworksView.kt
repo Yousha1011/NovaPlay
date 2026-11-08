@@ -89,7 +89,7 @@ fun SportsNetworksView(
                     item(key = "h_$sport") {
                         Text(
                             sport,
-                            style = T.eyebrow.copy(color = SportsLook.Dim, fontWeight = FontWeight.ExtraBold),
+                            style = T.eyebrow.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold),
                             modifier = Modifier.padding(top = 10.dp, bottom = 4.dp, start = 4.dp)
                         )
                     }
@@ -163,7 +163,7 @@ fun SportsNetworksView(
                     ) {
                         Text(
                             tile.network.name,
-                            style = T.h2.copy(fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            style = T.h2.copy(fontWeight = FontWeight.Bold, color = Color.White)
                         )
                         Spacer(Modifier.height(4.dp))
                         val lead = tile.lead

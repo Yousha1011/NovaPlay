@@ -222,7 +222,7 @@ fun SportsTablesView(
                     ) {
                         Text(
                             "${row.name.uppercase()}${if (isFollowed) " ★" else ""} · ${row.pos} IN ${selLeague?.name?.uppercase() ?: ""}",
-                            style = T.eyebrow.copy(color = SportsLook.Dim, fontWeight = FontWeight.ExtraBold),
+                            style = T.eyebrow.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold),
                             maxLines = 1
                         )
                         Spacer(Modifier.height(6.dp))

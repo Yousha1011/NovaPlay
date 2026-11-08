@@ -132,7 +132,8 @@ fun HomeScreen(nav: Nav) {
                     SectionTitle("Live sports", Modifier.padding(horizontal = S.gutter), trailing = "${liveSports.size} on now")
                     LazyRow(Modifier.rememberFocusInList(), contentPadding = PaddingValues(horizontal = S.gutter), horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                         items(liveSports, key = { it.id }) { e ->
-                            EventCard(e, onClick = {
+                            // The same card as the Sports page, so a match looks the same wherever it shows.
+                            val play = {
                                 // Broadcaster lookups go to the network: off the main thread, then play the first channel found.
                                 scope.launch {
                                     val a = kotlinx.coroutines.withContext(IO) {
@@ -140,7 +141,9 @@ fun HomeScreen(nav: Nav) {
                                     }
                                     if (a.isNotEmpty()) playChannel(a.map { it.channel }, 0) else nav.tab = Tab.SPORTS
                                 }
-                            })
+                                Unit
+                            }
+                            MatchCardItem(event = e, favTeamName = null, onClick = play, onHoldWatch = play)
                         }
                     }
                 }

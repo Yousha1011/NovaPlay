@@ -104,7 +104,7 @@ fun SportsPickerScreen(nav: Nav) {
                 Pill("‹ Sports", onClick = { nav.pop() })
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Follow Teams & Leagues", style = T.h1.copy(fontSize = 24.sp, fontWeight = FontWeight.Black))
+                    Text("Follow Teams & Leagues", style = T.h1.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold))
                     Text(
                         "Teams: their games, reminders and scoring alerts. Leagues: their schedule on My Sports.",
                         style = T.small.copy(color = SportsLook.Dim)
@@ -137,7 +137,7 @@ fun SportsPickerScreen(nav: Nav) {
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("FOLLOWING · $totalFollows", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.ExtraBold))
+                    Text("FOLLOWING · $totalFollows", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold))
                     Spacer(Modifier.width(12.dp))
                     if (totalFollows == 0) {
                         Text("Nothing yet: pick a team or league below.", style = T.small.copy(color = SportsLook.Faint))
@@ -250,7 +250,7 @@ fun SportsPickerScreen(nav: Nav) {
                                 item(span = { GridItemSpan(maxLineSpan) }) {
                                     Text(
                                         letter.toString(),
-                                        style = T.h2.copy(fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = SportsLook.Dim),
+                                        style = T.h2.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold, color = SportsLook.Dim),
                                         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
                                     )
                                 }
@@ -377,7 +377,7 @@ private fun TeamPickerCard(team: TeamInfo, followed: Boolean, onClick: () -> Uni
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(team.name, style = T.small.copy(fontWeight = FontWeight.Black, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(team.name, style = T.small.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = listOfNotNull(team.location, team.record).joinToString(" · ")
                 if (sub.isNotBlank()) {
                     Text(sub, style = T.tiny.copy(color = Color.White.copy(alpha = 0.65f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -388,7 +388,7 @@ private fun TeamPickerCard(team: TeamInfo, followed: Boolean, onClick: () -> Uni
                     Modifier.size(20.dp).clip(CircleShape).background(SportsLook.Gold),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("★", style = T.tiny.copy(fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Black))
+                    Text("★", style = T.tiny.copy(fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold))
                 }
             }
         }
@@ -400,7 +400,7 @@ private fun TeamPickerCard(team: TeamInfo, followed: Boolean, onClick: () -> Uni
             ) {
                 Text(
                     if (followed) "FOLLOWING · OK TO UNFOLLOW" else "OK TO FOLLOW",
-                    style = T.tiny.copy(fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Black)
+                    style = T.tiny.copy(fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                 )
             }
         }

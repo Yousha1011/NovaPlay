@@ -30,7 +30,7 @@ import okio.use
  */
 object Updates {
     /** This version; raised with the build files' versions at each release. */
-    const val CURRENT = "1.6.1"
+    const val CURRENT = "1.6.2"
     const val REPO = "Yousha1011/NovaPlay"
 
     class Release(val version: String, val notes: String, val page: String, val file: String?, val fileUrl: String?, val size: Long)
