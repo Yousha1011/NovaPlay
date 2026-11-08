@@ -266,6 +266,10 @@ private fun RootBody() {
                     // same group (only their placement changes), so they remember it while another tab is open too.
                     Box(Modifier.topExit(App.device == Device.TV, focusManager, nav.railFocus, nav.topExit).rememberFocus(nav.page(t))
                         .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
+                        // The TV window plays on across Live TV, the TV guide and Sports; any other tab lets it go.
+                        androidx.compose.runtime.LaunchedEffect(nav.tab) {
+                            if (nav.tab != Tab.LIVE && nav.tab != Tab.GUIDE && nav.tab != Tab.SPORTS) App.preview.stop()
+                        }
                         when (t) {
                             Tab.HOME -> HomeScreen(nav)
                             Tab.LIVE -> if (App.store.liveViewMode == "LIST") io.github.novatv.play.ui.LiveScreen(nav) else io.github.novatv.play.ui.LiveGuideScreen(nav)

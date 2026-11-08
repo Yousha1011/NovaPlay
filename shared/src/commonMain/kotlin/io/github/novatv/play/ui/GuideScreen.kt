@@ -84,13 +84,13 @@ fun GuideScreen(nav: Nav) {
     // the playlist changes or the screen goes away.
     val previewing = App.preview.available
     val target = focused?.let { (c, p) -> GuidePreview.of(c, p, t) }
-    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, "guide") }
+    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, TV_PREVIEW) }
     val visible = nav.visibility(io.github.novatv.play.Tab.GUIDE) == io.github.novatv.play.PageVisibility.VISIBLE
     androidx.compose.runtime.LaunchedEffect(target, visible, previewing) {
         if (previewing) follower.update(target, (target as? GuidePreview.Play)?.channel, visible)
     }
-    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null; App.preview.stop("guide") }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("guide") } }
+    androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.GUIDE) App.preview.surface = "guide" }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null }
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 26.dp, end = S.gutter)) {
         if (groups.isEmpty()) {
@@ -148,34 +148,40 @@ fun GuideScreen(nav: Nav) {
     }
 }
 
-/** What's focused in the grid: the programme's title, channel, times, minutes left, progress and description. */
+/**
+ * What's focused in the grid on the left (title, channel, times, minutes left, progress, description), and the TV
+ * window on the right: the channel playing, shared with Live TV and Sports, or the highlighted one when nothing is.
+ */
 @Composable
 private fun GuidePanel(f: Pair<Channel, Programme?>?, t: Long, preview: GuidePreview?) {
-    Row(Modifier.fillMaxWidth().height(if (preview != null) 160.dp else 132.dp).padding(bottom = 14.dp).clip(RoundedCornerShape(12.dp)).background(C.panel)) {
-        Box(Modifier.width(3.dp).fillMaxHeight().background(C.accent))
-        // The muted preview, or why there is none: a programme that isn't on now can't be shown from the live stream.
-        if (preview != null && f != null) {
-            val note = when (preview) {
-                is GuidePreview.Play -> null
-                is GuidePreview.Upcoming -> "No preview · starts ${if (preview.programme.start - t < 86_400_000L) "" else "${dayLabel(preview.programme.start)} "}${clock(preview.programme.start)}"
-                is GuidePreview.Ended -> "No preview · this programme has ended"
+    Row(Modifier.fillMaxWidth().height(if (App.preview.available) 190.dp else 132.dp).padding(bottom = 14.dp)) {
+        Row(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(C.panel)) {
+            Box(Modifier.width(3.dp).fillMaxHeight().background(C.accent))
+            Column(Modifier.weight(1f).padding(horizontal = 18.dp, vertical = 12.dp)) {
+                if (f == null) { Text("Move through the grid to see a programme's details.", style = T.small); return@Column }
+                val (c, p) = f
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(p?.title ?: c.name, style = T.h2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (p?.isLive == true) { Spacer(Modifier.width(12.dp)); LiveMark() }
+                }
+                Text("${if (c.number > 0) "${c.number}  " else ""}${c.name}", style = T.small.copy(color = C.accent), maxLines = 1)
+                if (p != null) {
+                    val extra = if (p.isLive) "   ·   ${((p.stop - t) / 60_000).coerceAtLeast(0)} min left" else if (p.start > t) "   ·   ${dayLabel(p.start)}" else ""
+                    Text("${clock(p.start)} – ${clock(p.stop)}$extra", style = T.small, maxLines = 1)
+                    if (p.isLive) { Spacer(Modifier.height(6.dp)); Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f), Modifier.width(420.dp)) }
+                    p.desc?.takeIf { it.isNotBlank() }?.let { Spacer(Modifier.height(4.dp)); Text(it, style = T.tiny.copy(color = C.dim), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                } else Text("No guide information for this channel.", style = T.small)
             }
-            PreviewBox(f.first, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "guide", note, androidx.compose.ui.unit.DpSize(96.dp, 58.dp))
         }
-        Column(Modifier.weight(1f).padding(horizontal = 18.dp, vertical = 12.dp)) {
-            if (f == null) { Text("Move through the grid to see a programme's details.", style = T.small); return@Column }
-            val (c, p) = f
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(p?.title ?: c.name, style = T.h2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (p?.isLive == true) { Spacer(Modifier.width(12.dp)); LiveMark() }
+        if (App.preview.available) {
+            Spacer(Modifier.width(14.dp))
+            val playing = sharedChannel()
+            val shown = playing ?: f?.first
+            if (shown != null) PreviewBox(shown, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "guide",
+                logoSize = androidx.compose.ui.unit.DpSize(110.dp, 66.dp))
+            else Box(Modifier.fillMaxHeight().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(C.panel), contentAlignment = Alignment.Center) {
+                Text("Highlight a channel to watch it here", style = T.tiny.copy(color = C.dim))
             }
-            Text("${if (c.number > 0) "${c.number}  " else ""}${c.name}", style = T.small.copy(color = C.accent), maxLines = 1)
-            if (p != null) {
-                val extra = if (p.isLive) "   ·   ${((p.stop - t) / 60_000).coerceAtLeast(0)} min left" else if (p.start > t) "   ·   ${dayLabel(p.start)}" else ""
-                Text("${clock(p.start)} – ${clock(p.stop)}$extra", style = T.small, maxLines = 1)
-                if (p.isLive) { Spacer(Modifier.height(6.dp)); Bar(((t - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f), Modifier.width(420.dp)) }
-                p.desc?.takeIf { it.isNotBlank() }?.let { Spacer(Modifier.height(4.dp)); Text(it, style = T.tiny.copy(color = C.dim), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            } else Text("No guide information for this channel.", style = T.small)
         }
     }
 }

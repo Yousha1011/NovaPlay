@@ -89,11 +89,11 @@ fun LiveGuideScreen(nav: Nav) {
 
     // The preview follows the highlighted channel, as before, and stops when Live TV is hidden or left.
     val shown = focused?.first ?: group.channels.firstOrNull()
-    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, "live") }
+    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, TV_PREVIEW) }
     val visible = nav.visibility(io.github.novatv.play.Tab.LIVE) == io.github.novatv.play.PageVisibility.VISIBLE
     androidx.compose.runtime.LaunchedEffect(focused?.first, visible) { follower.update(focused?.first, focused?.first, visible) }
-    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null; App.preview.stop("live") }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("live") } }
+    androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.LIVE) App.preview.surface = "live" }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null }
 
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 22.dp, end = 28.dp)) {
         if (shown != null) TopPanel(shown, focused?.second ?: nowNext(shown).firstOrNull(), t)
@@ -195,7 +195,7 @@ private fun TopPanel(c: Channel, p: Programme?, t: Long) {
             } else Text("No guide information for this channel.", style = T.body.copy(color = C.dim))
         }
         Spacer(Modifier.width(18.dp))
-        PreviewBox(c, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "live")
+        PreviewBox(sharedChannel() ?: c, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "live")
     }
 }
 

@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -41,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -60,6 +62,8 @@ import io.github.novatv.play.data.PagePreview
 import io.github.novatv.play.platform.IO
 import io.github.novatv.play.platform.Time
 import io.github.novatv.play.sports.Catalog
+import io.github.novatv.play.sports.Teams
+import io.github.novatv.play.sports.TeamPage
 import io.github.novatv.play.sports.Follow
 import io.github.novatv.play.sports.Side
 import io.github.novatv.play.sports.SportEvent
@@ -93,15 +97,13 @@ fun SportsScreen(nav: Nav) {
     val st by App.repo.state.collectAsState()
     var view by remember { mutableStateOf(HubView.MINE) }
     var popup by remember { mutableStateOf<SportEvent?>(null) }
-    var previewChannel by remember { mutableStateOf<Channel?>(null) }
-
-    val follower = remember { PagePreview(App.preview, "sports") }
-    LaunchedEffect(previewChannel) {
-        follower.update(previewChannel, previewChannel, previewChannel != null)
-    }
-    DisposableEffect(Unit) {
-        onDispose { App.preview.stop("sports") }
-    }
+    // The match open on its own page (head to head, channels, table), or null for the tabs.
+    var match by remember { mutableStateOf<SportEvent?>(null) }
+    var tableLeague by remember { mutableStateOf<String?>(null) }
+    // The TV window shares Live TV's and the guide's preview: what plays keeps playing as you move between them.
+    val previewChannel = sharedChannel()
+    LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.SPORTS) App.preview.surface = "sports" }
+    val watch: (Channel) -> Unit = { App.preview.select(it, TV_PREVIEW) }
 
     LaunchedEffect(st.epgVersion, st.lib.channels.size) {
         withContext(IO) { App.repo.matcher() }
@@ -142,6 +144,14 @@ fun SportsScreen(nav: Nav) {
         }
     }
 
+    match?.let { m ->
+        Box(Modifier.fillMaxSize().padding(start = 28.dp, top = 20.dp, end = 28.dp, bottom = 14.dp)) {
+            MatchPage(m, videoSlot, onClose = { match = null }, onWatch = watch,
+                onFullTable = { tableLeague = m.league.id; view = HubView.TABLES; match = null })
+        }
+        return
+    }
+
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 20.dp, end = 28.dp, bottom = 14.dp)) {
         // ---- Top Header Row ----
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
@@ -154,7 +164,6 @@ fun SportsScreen(nav: Nav) {
                     Pill(label, onClick = { view = HubView.ALL }, selected = view == HubView.ALL)
                 }
                 item { Pill("🏆 Tables", onClick = { view = HubView.TABLES }, selected = view == HubView.TABLES) }
-                item { Pill("📡 League Networks", onClick = { view = HubView.NETWORKS }, selected = view == HubView.NETWORKS) }
             }
             // Far right: Follow Teams & Leagues button
             Pill("✎ Follow Teams & Leagues", onClick = { nav.push(Route.Leagues) })
@@ -166,21 +175,18 @@ fun SportsScreen(nav: Nav) {
                 HubView.MINE -> MySportsView(
                     events = sports.events,
                     loading = sports.loading,
-                    onOpen = { popup = it },
-                    onWatchInWindow = { previewChannel = it },
+                    onOpen = { match = it },
+                    onWatchInWindow = watch,
                     videoSlot = videoSlot
                 )
                 HubView.ALL -> AllEventsView(
                     events = sports.events,
-                    onOpen = { popup = it },
-                    onWatchInWindow = { previewChannel = it },
+                    onOpen = { match = it },
+                    onWatchInWindow = watch,
                     videoSlot = videoSlot
                 )
-                HubView.TABLES -> SportsTablesView(videoSlot = videoSlot)
-                HubView.NETWORKS -> SportsNetworksView(
-                    onPlayInWindow = { previewChannel = it },
-                    videoSlot = videoSlot
-                )
+                HubView.TABLES -> androidx.compose.runtime.key(tableLeague) { SportsTablesView(initialLeagueId = tableLeague, videoSlot = videoSlot) }
+                HubView.NETWORKS -> {}
             }
         }
     }
@@ -204,7 +210,8 @@ private fun MySportsView(
     val shown = remember(events) { events.filter { Follow.shows(it) } }
     val mine = remember(shown, t) { shown.filter { e -> e.teams.any { isFavTeam(e, it) } } }
     val upcoming = remember(shown, mine, t) {
-        (mine.ifEmpty { shown }).filter { it.state == State.LIVE || (it.state == State.PRE && it.start < t + 7 * 86_400_000L) }
+        val soon = { e: SportEvent -> e.state == State.LIVE || (e.state == State.PRE && e.start < t + 7 * 86_400_000L) }
+        mine.filter(soon).ifEmpty { shown.filter(soon) }
             .sortedWith(compareBy({ it.state != State.LIVE }, { it.start }))
     }
     val heroes = remember(upcoming, shown) { upcoming.take(8).ifEmpty { shown.filter { it.state == State.LIVE }.take(8) } }
@@ -218,11 +225,27 @@ private fun MySportsView(
         return
     }
 
-    val teamRows = remember(mine) {
-        mine.flatMap { e -> e.teams.filter { isFavTeam(e, it) }.map { it.name to e } }
-            .groupBy({ it.first }, { it.second })
-            .map { (name, list) -> name to list.filter { it.state != State.POST }.sortedBy { it.start } }
-            .filter { it.second.isNotEmpty() }
+    // A row for each followed team, from its own schedule (weeks ahead, every competition), its live match taken
+    // from the scoreboards so the score is current.
+    val store = App.store
+    val followedTeams = store.favouriteTeams
+    val teamInfos by produceState(emptyList<TeamPage>(), followedTeams, events.size > 0) {
+        value = withContext(IO) { followedTeams.mapNotNull { k -> try { Teams.followed(k, events) } catch (x: Exception) { null } } }
+    }
+    val teamRows = remember(teamInfos, events) {
+        teamInfos.map { ti ->
+            val live = events.filter { e -> e.state != State.POST && e.teams.any { it.id == ti.id && it.name == ti.name } }
+            val list = (live + ti.next).distinctBy { it.id }.distinctBy { it.title to it.start / 3_600_000L }.sortedWith(compareBy({ it.state != State.LIVE }, { it.start }))
+            ti to list
+        }.filter { it.second.isNotEmpty() }
+    }
+    // Then a row for each followed league, competition or sport, followed leagues first, soonest first.
+    val compRows = remember(shown) {
+        shown.filter { it.state != State.POST }
+            .groupBy { it.subtitle ?: it.league.name }
+            .map { (name, list) -> name to list.sortedWith(compareBy({ it.state != State.LIVE }, { it.start })) }
+            .sortedWith(compareBy({ (_, l) -> l.first().league.id !in store.sportsLeagues && Follow.compKey(l.first()) !in store.sportsComps }, { it.second.first().start }))
+            .take(14)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -236,11 +259,23 @@ private fun MySportsView(
                 val h = heroes[heroIdx.coerceIn(0, heroes.lastIndex)]
                 item(key = "hero_row") {
                     Row(Modifier.fillMaxWidth().height(168.dp)) {
+                        androidx.compose.animation.AnimatedContent(
+                            targetState = h,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            transitionSpec = {
+                                (androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(450)) { it / 4 } +
+                                    androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(450))) togetherWith
+                                    (androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(450)) { -it / 4 } +
+                                        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(300)))
+                            },
+                            contentKey = { it.id },
+                            label = "hero"
+                        ) { h ->
                         HeroCardRebuilt(
                             event = h,
                             index = heroIdx,
                             count = heroes.size,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            modifier = Modifier.fillMaxSize(),
                             onStep = { d -> heroIdx = (heroIdx + d + heroes.size) % heroes.size },
                             onClick = { onOpen(h) },
                             onHoldWatch = {
@@ -248,6 +283,7 @@ private fun MySportsView(
                                 if (match != null) onWatchInWindow(match)
                             }
                         )
+                        }
                         Spacer(Modifier.width(16.dp))
                         Box(Modifier.fillMaxHeight().aspectRatio(16f / 9f)) {
                             videoSlot()
@@ -268,20 +304,17 @@ private fun MySportsView(
             }
 
             // Followed Team Rows (e.g. Arsenal · 3rd in Champions League · 9 games ahead)
-            teamRows.forEach { (name, list) ->
-                item(key = "team_$name") {
-                    val firstEv = list.firstOrNull()
-                    val leagueName = firstEv?.league?.name ?: "League"
-                    val standingPlace = StandingsRepository.cachedPlace(name, firstEv?.league?.id ?: "")
-                    val subTitle = if (standingPlace != null) "$standingPlace in $leagueName · ${list.size} games ahead" else "${list.size} games ahead"
-                    GameRowHeader(
-                        title = name,
-                        subtitle = subTitle,
-                        events = list,
-                        onOpen = onOpen,
-                        onHoldWatch = onWatchInWindow,
-                        favTeamName = name
-                    )
+            teamRows.forEach { (ti, list) ->
+                item(key = "team_${ti.league.id}_${ti.id}") {
+                    val place = listOfNotNull(ti.standing, "${list.size} ${if (list.size == 1) "game" else "games"} ahead").joinToString(" · ")
+                    GameRowHeader(title = ti.name, subtitle = place, events = list, onOpen = onOpen, onHoldWatch = onWatchInWindow,
+                        favTeamName = ti.name, logo = ti.logo)
+                }
+            }
+            compRows.forEach { (name, list) ->
+                item(key = "comp_$name") {
+                    GameRowHeader(title = name, subtitle = "${list.size} ${if (list.size == 1) "game" else "games"} ahead", events = list, onOpen = onOpen,
+                        onHoldWatch = onWatchInWindow)
                 }
             }
         }
@@ -307,9 +340,12 @@ private fun HeroCardRebuilt(
     onHoldWatch: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val (homeColor, awayColor) = teamShades(event.home, event.away)
-    val homeBand = bandColor(homeColor)
-    val awayBand = bandColor(awayColor)
+    // Each side in the main colour of its own logo (ESPN's team colour until the logo has loaded).
+    val (espnHome, espnAway) = teamShades(event.home, event.away)
+    val homeTone = rememberLogoTone(event.home?.logo) ?: espnHome
+    val awayTone = rememberLogoTone(event.away?.logo) ?: espnAway
+    val homeBand = bandColor(homeTone)
+    val awayBand = bandColor(awayTone)
     val showScore = event.state != State.PRE && !App.store.hideScores
 
     Box(
@@ -317,12 +353,15 @@ private fun HeroCardRebuilt(
             .sportsFrame(focused, accent = SportsLook.Gold, radius = 16.dp)
             .background(
                 Brush.horizontalGradient(
-                    0f to homeBand.copy(alpha = 0.95f),
-                    0.50f to homeBand.copy(alpha = 0.60f),
-                    0.50f to awayBand.copy(alpha = 0.60f),
-                    1f to awayBand.copy(alpha = 0.95f)
+                    0f to homeBand,
+                    0.30f to lerp(homeBand, Color.Black, 0.25f),
+                    0.50f to lerp(lerp(homeBand, awayBand, 0.5f), Color.Black, 0.45f),
+                    0.70f to lerp(awayBand, Color.Black, 0.25f),
+                    1f to awayBand
                 )
             )
+            // A soft light from the top and shade at the bottom, so the colours read as a surface, not flat paint.
+            .background(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.10f), 0.45f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.35f)))
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { k ->
                 if (k.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -422,11 +461,13 @@ private fun GameRowHeader(
     events: List<SportEvent>,
     onOpen: (SportEvent) -> Unit,
     onHoldWatch: (Channel) -> Unit,
-    favTeamName: String? = null
+    favTeamName: String? = null,
+    logo: String? = null
 ) {
     if (events.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (logo != null) { LogoChip(logo, 30.dp); Spacer(Modifier.width(10.dp)) }
             Text(title, style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp), modifier = Modifier.weight(1f))
             Text(subtitle, style = T.tiny.copy(color = SportsLook.Dim))
         }
@@ -828,7 +869,7 @@ private fun ScoreboardCard(
 
 /** A team logo on a soft light disc, so a red crest still reads on a red team band. */
 @Composable
-private fun LogoChip(url: String?, size: androidx.compose.ui.unit.Dp) {
+internal fun LogoChip(url: String?, size: androidx.compose.ui.unit.Dp) {
     Box(
         Modifier.size(size).clip(CircleShape).background(Color.White.copy(alpha = 0.88f)).padding(size * 0.12f),
         contentAlignment = Alignment.Center
@@ -851,8 +892,8 @@ private fun HeroTeam(side: Side, modifier: Modifier) {
 @Composable
 private fun ScoreBlock(score: String?, align: Alignment.Horizontal, modifier: Modifier) {
     val parts = score?.split("&")?.map { it.trim() }?.filter { it.isNotBlank() }.orEmpty()
-    val textAlign = if (align == Alignment.End) TextAlign.End else TextAlign.Start
-    Column(modifier.padding(horizontal = 10.dp), horizontalAlignment = align) {
+    val textAlign = TextAlign.Center
+    Column(modifier.padding(horizontal = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         if (parts.isEmpty()) {
             Text("–", style = T.h1.copy(fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.6f)))
         } else {

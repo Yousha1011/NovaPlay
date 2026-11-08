@@ -59,7 +59,9 @@ object Catalog {
 }
 
 /** One side of a match; [color] is the team's colour as ESPN gives it ("c8102e"), for cards drawn in team colours. */
-data class Side(val id: String, val name: String, val short: String, val abbr: String, val logo: String?, val score: String?, val color: String? = null)
+data class Side(val id: String, val name: String, val short: String, val abbr: String, val logo: String?, val score: String?, val color: String? = null,
+                /** After the match: whether this side won (null before the end, or for a draw where the feed says so). */
+                val winner: Boolean? = null)
 
 enum class State { PRE, LIVE, POST }
 

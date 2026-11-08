@@ -85,11 +85,11 @@ fun LiveScreen(nav: Nav) {
     val first = remember { FocusRequester() }
     // The preview follows the highlighted row, and stops when Live TV is hidden (other tabs stay built), the playlist
     // changes, or the screen goes away.
-    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, "live") }
+    val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, TV_PREVIEW) }
     val visible = nav.visibility(io.github.novatv.play.Tab.LIVE) == io.github.novatv.play.PageVisibility.VISIBLE
     androidx.compose.runtime.LaunchedEffect(focusedChannel, visible) { follower.update(focusedChannel, focusedChannel, visible) }
-    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null; App.preview.stop("live") }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { App.preview.stop("live") } }
+    androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.LIVE) App.preview.surface = "live" }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null }
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
         Header("Live TV", "${group.name} · ${group.channels.size} channels")
@@ -153,7 +153,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
         val nn = nowNext(c)
         val p = nn.firstOrNull()
         val t = now()
-        PreviewBox(c, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+        PreviewBox(sharedChannel() ?: c, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.panel)) {
             Box(Modifier.width(3.dp).height(if (p != null) 190.dp else 70.dp).background(C.accent))
@@ -183,8 +183,8 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
 @Composable
 internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", unavailable: String? = null, logoSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(150.dp, 90.dp)) {
     val ps by App.preview.state.collectAsState()
-    // Only the screen that started the preview shows its picture: the player's one video view can't be in two places.
-    val mine = unavailable == null && App.preview.owner == owner && when (val s = ps) {
+    // Only the page in front shows the picture ([owner] is the page): the player's one video view can't be in two places.
+    val mine = unavailable == null && App.preview.surface == owner && when (val s = ps) {
         is io.github.novatv.play.data.PreviewController.State.Waiting -> s.channel.id == c.id
         is io.github.novatv.play.data.PreviewController.State.Loading -> s.channel.id == c.id
         is io.github.novatv.play.data.PreviewController.State.Playing -> s.channel.id == c.id
@@ -208,6 +208,9 @@ internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", 
             .padding(horizontal = 8.dp, vertical = 3.dp)) { Text(note, style = T.tiny.copy(color = C.dim), maxLines = 1) }
     }
 }
+
+/** The preview owner shared by Live TV, the TV guide and Sports, so a channel keeps playing as you move between them. */
+const val TV_PREVIEW = "tv"
 
 /** One dense channel row: number, logo, name, the programme on now and its progress. */
 @Composable
@@ -238,4 +241,11 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocu
             }
         }
     }
+}
+
+/** The channel in the shared TV window, observed so the caller redraws when it changes. */
+@Composable
+internal fun sharedChannel(): Channel? {
+    App.preview.state.collectAsState().value
+    return App.preview.channel
 }

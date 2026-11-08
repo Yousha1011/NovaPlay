@@ -93,9 +93,25 @@ object Espn {
         val logo = t.optString("logo").ifBlank { null } ?: t.optJSONObject("flag")?.optString("href")?.ifBlank { null }
             ?: t.optJSONArray("logos")?.optJSONObject(0)?.optString("href")
         val name = t.optString("displayName").ifBlank { t.optString("name") }
+        // Scoreboards give the score as text; team schedules as an object with its display value.
+        val score = o.optJSONObject("score")?.optString("displayValue")?.ifBlank { null }
+            ?: o.optString("score").ifBlank { null }?.takeIf { it != "null" && !it.startsWith("{") }
         return Side(t.optString("id"), name, t.optString("shortDisplayName").ifBlank { name }, t.optString("abbreviation"),
-            logo, o.optString("score").ifBlank { null }?.takeIf { it != "null" },
-            color(t.optString("color")))
+            logo, score, color(t.optString("color")), if (o.has("winner")) o.optBoolean("winner") else null)
+    }
+
+    /** A team's schedule page ("teams/{id}/schedule"): its matches, played and to come, each with both sides. */
+    fun schedule(league: League, raw: String): List<SportEvent> {
+        val o = JSONObject(raw)
+        val events = o.optJSONArray("events") ?: return emptyList()
+        return (0 until events.length()).mapNotNull { i ->
+            val e = events.optJSONObject(i) ?: return@mapNotNull null
+            val c = e.optJSONArray("competitions")?.optJSONObject(0) ?: return@mapNotNull null
+            // The competition it belongs to (Champions League, FA Cup...) as the subtitle, as the header feed does.
+            val comp = e.optJSONObject("league")?.optString("name")?.ifBlank { null }
+                ?: e.optJSONObject("seasonType")?.optString("name")?.ifBlank { null }
+            comp(league, e, c, comp?.takeIf { it != league.name })
+        }
     }
 
     /** "#ed3507" or "ed3507" -> "ed3507"; null for none, white or black (they say nothing about the team). */

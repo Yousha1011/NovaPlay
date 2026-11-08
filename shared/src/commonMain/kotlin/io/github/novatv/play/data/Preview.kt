@@ -71,6 +71,13 @@ class PreviewController(
      */
     var owner by mutableStateOf("")
         private set
+    /**
+     * The page whose window shows the picture ("live", "guide", "sports", "match"). Pages stay built when another tab
+     * is open, but the one video view can only be in one place: the page in front claims it.
+     */
+    var surface by mutableStateOf("")
+    /** The channel previewing (or about to), whichever page started it. */
+    val channel: Channel? get() = _state.value.channel()
     /** Bumped on every change, so a late event from an earlier stream is ignored. */
     private var generation = 0
 
@@ -158,20 +165,21 @@ fun PreviewController.followGuide(target: GuidePreview?, visible: Boolean) {
  * moves to another channel or programme.
  */
 class PagePreview(private val controller: PreviewController, private val owner: String) {
-    /** The highlight showing when the page last stopped being visible; null once the user has moved on. */
+    /** The highlight showing when the page came into view; null once the user has moved on. */
     private var held: Any? = null
-    private var hidden = false
+    /** Next update is the page coming into view: keep what is already playing (from this tab or another). */
+    private var arriving = true
 
-    /** [key] identifies the highlight (a channel, a guide cell); [channel] is what to preview for it, or null for none. */
+    /**
+     * [key] identifies the highlight (a channel, a guide cell); [channel] is what to preview for it, or null for none.
+     * One preview is shared by Live TV, the TV guide and Sports, so switching between them, opening the menu or a
+     * highlight with nothing to show (a programme that isn't on now) leaves the channel playing.
+     */
     fun update(key: Any?, channel: Channel?, visible: Boolean) {
-        if (!visible) {
-            if (!hidden) { hidden = true; held = key }
-            controller.stop(owner)
-            return
-        }
-        hidden = false
+        if (!visible) { arriving = true; return }
+        if (arriving) { arriving = false; if (controller.channel != null) { held = key; return } }
         if (key != null && key == held) return
         held = null
-        if (channel != null) controller.select(channel, owner) else controller.stop(owner)
+        if (channel != null) controller.select(channel, owner)
     }
 }

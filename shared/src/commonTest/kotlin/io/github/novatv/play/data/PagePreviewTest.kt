@@ -16,8 +16,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * Previews run only on a visible page: the menu, a screen opened over the page, another tab or the full-screen player
- * stops them, and coming back waits for the user to move before starting again.
+ * One TV window is shared by Live TV, the TV guide and Sports: the menu, a screen opened over the page or another of
+ * those tabs leaves the channel playing, and arriving on a page keeps it until the user moves to another channel.
  */
 class PagePreviewTest {
     private class FakeEngine : PreviewEngine {
@@ -38,8 +38,8 @@ class PagePreviewTest {
     private class Screens(scope: TestScope, val e: FakeEngine = FakeEngine()) {
         val nav = Nav()
         val controller = PreviewController(scope, e, { c -> "http://host/live/${c.id}.ts" }, debounceMs = 700)
-        val live = PagePreview(controller, "live")
-        val guide = PagePreview(controller, "guide")
+        val live = PagePreview(controller, "tv")
+        val guide = PagePreview(controller, "tv")
         var liveChannel: Channel? = null
         var guideCell: GuidePreview? = null
         /** What each screen's effect does after any change, as Live TV and the Guide do. */
@@ -65,92 +65,60 @@ class PagePreviewTest {
         assertEquals(PageVisibility.VISIBLE, nav.visibility(Tab.LIVE))
     }
 
-    @Test fun openingTheMenuStopsALiveTvPreview() = runTest {
+    @Test fun openingTheMenuKeepsTheChannelPlaying() = runTest {
         val s = Screens(this).apply { nav.tab = Tab.LIVE }
         s.liveChannel = ch("1"); s.settle(); advanceUntilIdle()
+        s.nav.menuOpen = true; s.settle(); advanceUntilIdle()
         assertEquals(1, s.e.active)
-        s.nav.menuOpen = true; s.settle()
-        assertEquals(State.Idle, s.controller.state.value)
-        assertEquals(0, s.e.active, "no player is left decoding under the menu")
-    }
-
-    @Test fun openingTheMenuStopsAGuidePreview() = runTest {
-        val s = Screens(this).apply { nav.tab = Tab.GUIDE }
-        s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()
-        assertEquals(1, s.e.active)
-        s.nav.menuOpen = true; s.settle()
-        assertEquals(State.Idle, s.controller.state.value)
-        assertEquals(0, s.e.active)
-    }
-
-    @Test fun closingTheMenuDoesNotRestartThePreviewUntilTheUserMoves() = runTest {
-        val s = Screens(this).apply { nav.tab = Tab.LIVE }
-        s.liveChannel = ch("1"); s.settle(); advanceUntilIdle()
-        s.nav.menuOpen = true; s.settle()
+        assertEquals("1", s.controller.channel?.id)
         s.nav.menuOpen = false; s.settle(); advanceUntilIdle()
-        assertEquals(State.Idle, s.controller.state.value)
-        assertEquals(1, s.e.played.size)
-        // Moving to another channel starts it; moving back to the first one starts that too.
-        s.liveChannel = ch("2"); s.settle(); advanceUntilIdle()
-        assertEquals("http://host/live/2.ts", s.e.played.last())
-        s.liveChannel = ch("1"); s.settle(); advanceUntilIdle()
-        assertEquals("http://host/live/1.ts", s.e.played.last())
+        assertEquals(1, s.e.played.size, "closing the menu doesn't restart it")
     }
 
-    @Test fun restoringFocusToTheSameGuideCellDoesNotRestartThePreview() = runTest {
-        val s = Screens(this).apply { nav.tab = Tab.GUIDE }
+    @Test fun switchingTabsKeepsTheChannelUntilTheUserMoves() = runTest {
+        val s = Screens(this).apply { nav.tab = Tab.LIVE }
+        s.liveChannel = ch("1"); s.settle(); advanceUntilIdle()
+        // Over to the guide, whose highlight lands on another channel: the first one keeps playing.
+        s.nav.tab = Tab.GUIDE
         s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()
-        // Out through the menu and another tab; back in, focus lands on the same cell (an equal value, rebuilt).
-        s.nav.menuOpen = true; s.settle()
-        s.nav.tab = Tab.LIVE; s.settle()
-        s.nav.tab = Tab.GUIDE; s.settle()
-        s.nav.menuOpen = false; s.settle()
-        s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()
-        assertEquals(State.Idle, s.controller.state.value)
+        assertEquals("1", s.controller.channel?.id)
         assertEquals(1, s.e.played.size)
-        // The next move starts it.
+        // Moving in the guide switches the window to what is highlighted.
         s.guideCell = GuidePreview.of(ch("8"), onNow(ch("8")), now); s.settle(); advanceUntilIdle()
         assertEquals("http://host/live/8.ts", s.e.played.last())
+        // Back on Live TV, still channel 8.
+        s.nav.tab = Tab.LIVE; s.settle(); advanceUntilIdle()
+        assertEquals("8", s.controller.channel?.id)
     }
 
-    @Test fun theFullScreenPlayerStopsThePreviewFirstAndReturningWaitsForAMove() = runTest {
+    @Test fun aProgrammeThatIsNotOnNowLeavesTheChannelPlaying() = runTest {
         val s = Screens(this).apply { nav.tab = Tab.GUIDE }
         s.guideCell = GuidePreview.of(ch("7"), onNow(ch("7")), now); s.settle(); advanceUntilIdle()
-        // play() stops the preview before the player opens; then the app's window is covered.
-        s.controller.stop()
-        assertEquals(0, s.e.active)
-        s.nav.covered = true; s.settle()
-        s.nav.covered = false; s.settle(); advanceUntilIdle()
-        assertEquals(State.Idle, s.controller.state.value)
-        assertEquals(1, s.e.played.size)
+        s.guideCell = GuidePreview.Upcoming(Programme("8", now + 7_200_000, now + 9_000_000, "Later", null, null)); s.settle(); advanceUntilIdle()
+        assertEquals("7", s.controller.channel?.id)
+        assertEquals(1, s.e.active)
     }
 
-    @Test fun screensOpenedOverAPageAndOtherTabsStopItsPreview() = runTest {
+    @Test fun screensOpenedOverAPageKeepTheChannelPlaying() = runTest {
         val s = Screens(this).apply { nav.tab = Tab.LIVE }
         s.liveChannel = ch("1"); s.settle(); advanceUntilIdle()
-        s.nav.push(Route.AddSource); s.settle()
-        assertEquals(0, s.e.active)
-        s.nav.pop(); s.settle()
-        s.liveChannel = ch("2"); s.settle(); advanceUntilIdle()
+        s.nav.push(Route.AddSource); s.settle(); advanceUntilIdle()
         assertEquals(1, s.e.active)
-        s.nav.tab = Tab.HOME; s.settle()
-        assertEquals(0, s.e.active)
+        s.nav.pop(); s.settle(); advanceUntilIdle()
+        assertEquals(1, s.e.played.size)
     }
 
     @Test fun switchingBetweenTheGuideAndLiveTvNeverLeavesTwoPreviews() = runTest {
         val s = Screens(this)
         s.liveChannel = ch("1"); s.guideCell = GuidePreview.of(ch("1"), onNow(ch("1")), now)
         for (t in listOf(Tab.LIVE, Tab.GUIDE, Tab.LIVE, Tab.GUIDE)) {
-            // Through the menu, as on the remote: it opens, the tab changes under it, then focus goes into the page.
             s.nav.menuOpen = true; s.settle()
             s.nav.tab = t; s.settle()
             s.nav.menuOpen = false; s.settle()
-            // The highlight moves on the new page.
             if (t == Tab.LIVE) s.liveChannel = ch("${s.e.played.size + 10}") else s.guideCell = GuidePreview.Play(ch("${s.e.played.size + 10}"))
             s.settle(); advanceUntilIdle()
             assertTrue(s.e.active <= 1, "one preview player at most")
-            assertEquals(if (t == Tab.LIVE) "live" else "guide", s.controller.owner, "the preview belongs to the page in view")
-            assertIs<State.Loading>(s.controller.state.value)
+            assertEquals("tv", s.controller.owner, "one window shared by the TV tabs")
         }
     }
 }
