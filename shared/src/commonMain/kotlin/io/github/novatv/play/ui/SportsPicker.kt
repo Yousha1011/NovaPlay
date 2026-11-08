@@ -234,9 +234,9 @@ fun SportsPickerScreen(nav: Nav) {
                         }
                     } else {
                         val grouped = remember(displayTeams) {
-                            displayTeams.groupBy {
-                                (it.location ?: it.name).trim().firstOrNull()?.uppercaseChar()?.takeIf { c -> c.isLetter() } ?: '#'
-                            }.toSortedMap()
+                            displayTeams.groupBy { team ->
+                                (team.location ?: team.name).trim().firstOrNull()?.uppercaseChar()?.takeIf { c -> c.isLetter() } ?: '#'
+                            }.entries.sortedBy { it.key }.associate { it.key to it.value }
                         }
 
                         LazyVerticalGrid(
