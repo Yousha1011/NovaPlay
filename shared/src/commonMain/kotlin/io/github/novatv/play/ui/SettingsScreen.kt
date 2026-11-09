@@ -267,6 +267,9 @@ private fun LazyListScope.livePane(nav: Nav, changed: () -> Unit) {
         section("Previews")
         item { Toggle("Live TV and guide preview", "The highlighted channel plays muted beside the list after a short pause. OK opens it full screen.",
             s.livePreview) { s.livePreview = it; if (!it) App.preview.stop(); changed() } }
+        // Read when OK next opens full screen, so changing it leaves what is playing now alone.
+        item { Toggle("Seamless Fullscreen Playback", "Keep the same stream playing when switching between the TV preview and fullscreen.",
+            s.seamlessFullscreen) { s.seamlessFullscreen = it; changed() } }
     }
     section("Clock")
     item { Toggle("24-hour clock", "Times as 20:05 instead of 8:05 PM, everywhere in the app", s.clock24) { s.clock24 = it; changed() } }

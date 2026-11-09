@@ -80,7 +80,8 @@ fun play(item: PlayItem) {
         is io.github.novatv.play.data.PreviewController.State.Waiting -> ps.channel
         else -> null
     }
-    if (engine != null && target != null && shown?.id == target.id && (engine.canHandOver() || engine.canTakeOver())) {
+    if (engine != null && target != null && shown?.id == target.id && App.store.seamlessFullscreen &&
+        (engine.canHandOver() || engine.canTakeOver())) {
         App.preview.handOver()
         App.startHandover()
     }

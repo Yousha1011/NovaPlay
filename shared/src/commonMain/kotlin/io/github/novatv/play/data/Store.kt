@@ -224,6 +224,13 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     var livePreview: Boolean
         get() = sp.getBoolean("livePreview", true)
         set(v) { sp.putBoolean("livePreview", v) }
+    /**
+     * Settings › Live TV › Previews (Android TV): hands the preview's player to full screen and back instead of opening the stream again. Off,
+     * full screen always builds its own player and the preview starts afresh, as before the shared player.
+     */
+    var seamlessFullscreen: Boolean
+        get() = sp.getBoolean("seamlessFullscreen", true)
+        set(v) { sp.putBoolean("seamlessFullscreen", v) }
 
     var bufferMs: Int
         get() = sp.getInt("bufferMs", 6000)
