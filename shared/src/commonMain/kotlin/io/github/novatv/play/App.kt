@@ -42,6 +42,8 @@ object App {
     @Volatile var handingOver = false
     @Volatile private var handoverUntil = 0L
     fun startHandover() { handoverUntil = io.github.novatv.play.platform.nowMs() + 5_000; handingOver = true }
+    /** Why the last [play] of a live channel didn't hand the preview's player over (for the TV app's log), or null. */
+    @Volatile var handoverRefusal: String? = null
     val handoverActive: Boolean get() = handingOver && io.github.novatv.play.platform.nowMs() < handoverUntil
 
     private var started = false
@@ -78,6 +80,15 @@ fun play(item: PlayItem) {
         is io.github.novatv.play.data.PreviewController.State.Playing -> ps.channel
         is io.github.novatv.play.data.PreviewController.State.Loading -> ps.channel
         is io.github.novatv.play.data.PreviewController.State.Waiting -> ps.channel
+        else -> null
+    }
+    App.handoverRefusal = when {
+        engine == null || target == null -> null
+        !App.store.seamlessFullscreen -> "seamless fullscreen off"
+        ps is io.github.novatv.play.data.PreviewController.State.Failed -> "preview had failed on ${ps.channel.name}"
+        shown == null -> "preview not playing (${ps::class.simpleName})"
+        shown.id != target.id -> "preview playing another channel (${shown.name})"
+        !(engine.canHandOver() || engine.canTakeOver()) -> "player not available"
         else -> null
     }
     if (engine != null && target != null && shown?.id == target.id && App.store.seamlessFullscreen &&

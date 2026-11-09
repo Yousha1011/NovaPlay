@@ -78,6 +78,7 @@ class LivePlayerHolder(private val ctx: Context) {
      * cancelled, so no timer can take the player from full screen.
      */
     fun toFull() {
+        HandoverLog.i("holder: to full screen")
         cancelPendingRelease()
         mode = Mode.FULL
         load?.preview = false
@@ -135,6 +136,7 @@ class LivePlayerHolder(private val ctx: Context) {
 
     /** Lets the player go now, decoder, threads and all. */
     fun releaseNow() {
+        if (player != null) HandoverLog.i("holder: player released (mode $mode)")
         cancelPendingRelease()
         player?.release()
         player = null

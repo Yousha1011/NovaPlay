@@ -212,6 +212,12 @@ class PlayerActivity : ComponentActivity() {
         }
         // The preview gave up its channel for this screen but no player came: clear it, so it doesn't wait for one.
         if (handed == null && App.handoverActive) App.preview.stop()
+        HandoverLog.i(when {
+            item !is PlayItem.Live -> "full screen: own player (not live)"
+            handed != null -> "full screen: took the preview's player (${if (handed.mediaItemCount > 0) "playing" else "still loading"})"
+            App.handoverActive -> "full screen: hand over offered but refused, own player"
+            else -> "full screen: own player (${App.handoverRefusal ?: "nothing to take"})"
+        })
         App.handingOver = false
         adopted = handed != null
         if (adopted) handedChannelId = (item as? PlayItem.Live)?.let { it.channels.getOrNull(it.channelIndex)?.id }
@@ -805,7 +811,7 @@ class PlayerActivity : ComponentActivity() {
         extra.forEach { it.player.pause() }
         // Home or another app over the preview's player: this screen closes, and its end (onDestroy) lets the player
         // go, so the main screen never finds it still held by a hidden full screen. A rotation is not leaving.
-        if (adopted && !isFinishing && !isChangingConfigurations) finish()
+        if (adopted && !isFinishing && !isChangingConfigurations) { HandoverLog.i("full screen: left in the background, closing"); finish() }
     }
 
     override fun onStart() {
@@ -819,8 +825,9 @@ class PlayerActivity : ComponentActivity() {
         // Only a Back from full screen hands the player back; any other end (the Home button, the system closing it,
         // an error) lets it go as before.
         if (::player.isInitialized) {
-            if (adopted && handingBack && canHandBack() && handBack()) adopted = false
-            else if (adopted) releaseAdopted() else player.release()
+            if (adopted && handingBack && canHandBack() && handBack()) { adopted = false; HandoverLog.i("full screen: handed back to the preview (${channel?.name})") }
+            else if (adopted) { HandoverLog.i("full screen: closed without hand back${if (handingBack) " (not fit: multi=$multi hd=$mainHd error=${error != null})" else ""}"); releaseAdopted() }
+            else player.release()
         }
         extra.forEach { it.release() }
         extra.clear()
@@ -857,7 +864,7 @@ class PlayerActivity : ComponentActivity() {
                 App.preview.stop()
             }
             // The preview has it now: not this screen's to release.
-            holder != null && holder.player === player -> {}
+            holder != null && holder.player === player -> HandoverLog.i("full screen: player belongs to the preview, left alone")
             // No longer the held player (already let go): releasing again is harmless.
             else -> player.release()
         }

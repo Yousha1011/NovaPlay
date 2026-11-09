@@ -110,7 +110,7 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
     override fun play(url: String, onEvent: (PreviewEvent) -> Unit) {
         cancelRetry(); retried = false
         // Full screen owns the one player: the window waits rather than take it (it shows this until the user moves on).
-        if (holder.mode == LivePlayerHolder.Mode.FULL) { onEvent(PreviewEvent.Error("Playing full screen")); return }
+        if (holder.mode == LivePlayerHolder.Mode.FULL) { HandoverLog.i("preview: full screen owns the player, waiting"); onEvent(PreviewEvent.Error("Playing full screen")); return }
         val p = holder.acquire()
         if (listening !== p) { p.addListener(listener); listening = p }
         // The last channel's stream closes before this one opens, so the provider never sees two at once.
@@ -153,7 +153,8 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
 
     override fun takeBack(onEvent: (PreviewEvent) -> Unit): Boolean {
         val p = holder.player ?: return false
-        if (holder.mode != LivePlayerHolder.Mode.FULL) return false
+        if (holder.mode != LivePlayerHolder.Mode.FULL) { HandoverLog.i("preview: hand back refused (no full-screen player)"); return false }
+        HandoverLog.i("preview: took the player back")
         holder.toPreview()
         if (listening !== p) { p.addListener(listener); listening = p }
         this.onEvent = onEvent
