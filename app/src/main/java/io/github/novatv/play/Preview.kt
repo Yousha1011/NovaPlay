@@ -54,15 +54,61 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
     private var frames = 0
     /** The player [listener] is on: one listener per player, added when the player is built. */
     private var listening: ExoPlayer? = null
+    /**
+     * The one quiet retry after a network drop: pending, and whether it was used for this channel (reset when the stream
+     * plays again, so a later drop gets its own). See [onPlayerError].
+     */
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var retry: Runnable? = null
+    private var retried = false
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_READY) retried = false
             if (state == Player.STATE_READY && !ready) { ready = true; onEvent?.invoke(PreviewEvent.Ready) }
         }
-        override fun onPlayerError(e: PlaybackException) { onEvent?.invoke(PreviewEvent.Error(playbackMessage(e))) }
+        override fun onPlayerError(e: PlaybackException) {
+            // The network dropped (Wi-Fi blip, router, provider hiccup): one quiet retry on the same player a few seconds
+            // later, as full screen does. Anything else, or a second failure, shows the error as before.
+            val p = holder.player
+            if (!retried && p != null && networkError(e)) { retried = true; scheduleRetry(p); return }
+            onEvent?.invoke(PreviewEvent.Error(playbackMessage(e)))
+        }
         override fun onRenderedFirstFrame() { frames++ }
     }
 
+    /** A failure to reach or keep reaching the server, not a refusal or a format the device can't play. */
+    private fun networkError(e: PlaybackException) = e.errorCode in setOf(
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW,
+    )
+
+    /**
+     * Prepares [p] again after [RETRY_MS], on the same stream, if nothing has moved on: still this channel in the window
+     * (not changed, not taken by full screen, not stopped) and the app on screen. The player sits idle in its error
+     * meanwhile, so there is never a second connection.
+     */
+    private fun scheduleRetry(p: ExoPlayer) {
+        cancelRetry()
+        val item = p.currentMediaItem
+        val events = onEvent
+        val r = Runnable {
+            retry = null
+            val ok = holder.player === p && holder.mode == LivePlayerHolder.Mode.PREVIEW && p.currentMediaItem === item &&
+                onEvent === events && events != null && !App.away
+            if (!ok) return@Runnable
+            android.util.Log.i(TAG, "network error: retrying the preview once")
+            p.prepare()
+        }
+        retry = r
+        main.postDelayed(r, RETRY_MS)
+    }
+
+    private fun cancelRetry() { retry?.let { main.removeCallbacks(it) }; retry = null }
+
     override fun play(url: String, onEvent: (PreviewEvent) -> Unit) {
+        cancelRetry(); retried = false
         // Full screen owns the one player: the window waits rather than take it (it shows this until the user moves on).
         if (holder.mode == LivePlayerHolder.Mode.FULL) { onEvent(PreviewEvent.Error("Playing full screen")); return }
         val p = holder.acquire()
@@ -93,6 +139,7 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
         // Still loading (or failed): the player goes as an empty one, and full screen opens the channel in it.
         val p = if (holder.healthy()) holder.player ?: return null
             else holder.acquire().also { it.stop(); it.clearMediaItems() }
+        cancelRetry()
         p.removeListener(listener)
         listening = null
         onEvent = null
@@ -111,10 +158,12 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
         if (listening !== p) { p.addListener(listener); listening = p }
         this.onEvent = onEvent
         ready = p.playbackState == Player.STATE_READY
+        cancelRetry(); retried = false
         return true
     }
 
     override fun release() {
+        cancelRetry()
         onEvent = null
         // Full screen has the player: the preview has nothing of its own to stop, and must not touch that player
         // (the main screen stops its preview when full screen covers it, after the hand over is done).
@@ -176,6 +225,8 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
     companion object {
         private const val TAG = "NovaPreview"
         private const val CHECK_MS = 500L
+        /** Wait before the one network retry. */
+        private const val RETRY_MS = 3_000L
         /** Playing time with a video track and no frame drawn before the window acts. */
         private const val NO_PICTURE_MS = 4_000L
 
