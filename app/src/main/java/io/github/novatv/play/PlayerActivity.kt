@@ -280,7 +280,8 @@ class PlayerActivity : ComponentActivity() {
                 .setBufferDurationsMs(maxOf(15_000, buffer * 3), maxOf(50_000, buffer * 8), buffer.coerceAtMost(15_000), buffer)
                 .setTargetBufferBytes((if (low) 24 else 128) * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false)
                 .build()
-        val data = OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA)
+        // Streams over the network client; recordings (file://) read from storage, which the network client can't.
+        val data = androidx.media3.datasource.DefaultDataSource.Factory(this, OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA))
         return ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER))
             .setLoadControl(load)
