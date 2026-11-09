@@ -118,6 +118,17 @@ import kotlinx.coroutines.withContext
 class PlayerActivity : ComponentActivity() {
     private lateinit var player: ExoPlayer
     private var item: PlayItem? = null
+    /**
+     * [player] is the preview's own player, taken over with its stream already open (Android TV, a live channel that was
+     * playing in the preview window), rather than one built here. Released on leaving, as Stage 2 has no hand back yet.
+     */
+    private var adopted = false
+    /** The channel the preview handed over, to clear the preview's record of it on leaving. */
+    private var handedChannelId: String? = null
+    /** Back was pressed on the adopted player: on leaving it goes back to the preview window instead of being released. */
+    private var handingBack = false
+    /** The main listener, kept so it can be taken off the player before the preview gets it back. */
+    private lateinit var mainListener: Player.Listener
 
     // UI state read by the Compose overlay.
     private var title by mutableStateOf("")
@@ -193,9 +204,19 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        item = App.pending ?: run { finish(); return }
-        player = buildPlayer(light = false)
-        player.addListener(object : Player.Listener {
+        item = App.pending ?: run { App.handingOver = false; finish(); return }
+        // The channel already playing in the preview window: take that player, stream and all, if it is still fit to.
+        // Anything else (or if taking it fails) builds this screen's own player, as always.
+        val handed = (item as? PlayItem.Live)?.takeIf { App.handoverActive }?.let {
+            try { (App.host.previewEngine as? ExoPreviewEngine)?.handOff() } catch (e: Exception) { null }
+        }
+        // The preview gave up its channel for this screen but no player came: clear it, so it doesn't wait for one.
+        if (handed == null && App.handoverActive) App.preview.stop()
+        App.handingOver = false
+        adopted = handed != null
+        if (adopted) handedChannelId = (item as? PlayItem.Live)?.let { it.channels.getOrNull(it.channelIndex)?.id }
+        player = handed ?: buildPlayer(light = false)
+        mainListener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
                 if (loading) { if (mainWaitingSince == 0L) mainWaitingSince = System.currentTimeMillis() } else mainWaitingSince = 0L
@@ -222,11 +243,13 @@ class PlayerActivity : ComponentActivity() {
                 }
                 error = playbackMessage(e)
             }
-        })
+        }
+        player.addListener(mainListener)
         (item as? PlayItem.Live)?.let { channelIndex = it.channelIndex }
         if (canPip() && android.os.Build.VERSION.SDK_INT >= 31) setPictureInPictureParams(pipParams())
         setContent { NovaTheme { Screen() } }
-        startCurrent()
+        // A player still loading in the preview came empty: this screen opens the channel in it.
+        if (adopted && player.mediaItemCount > 0) startAdopted() else startCurrent()
         // Position ticker and periodic progress saving.
         lifecycleScope.launch {
             var n = 0
@@ -583,6 +606,24 @@ class PlayerActivity : ComponentActivity() {
     private val live get() = item as? PlayItem.Live
     private val channel: Channel? get() = live?.let { it.channels.getOrNull(channelIndex) }
 
+    /**
+     * The handed-over player already plays this channel: no new stream address and no new connection, only the screen's
+     * own state (title, what's on, loading) set from it.
+     */
+    private fun startAdopted() {
+        val l = live ?: return startCurrent()
+        val ch = l.channels.getOrNull(channelIndex) ?: return startCurrent()
+        title = ch.name
+        error = null
+        loading = player.playbackState != Player.STATE_READY
+        if (!loading) mainPlayingSince = System.currentTimeMillis()
+        playing = player.isPlaying
+        tracks = player.currentTracks
+        epg = emptyList()
+        lifecycleScope.launch { epg = withContext(IO) { App.repo.nowNext(ch) } }
+        flashInfo()
+    }
+
     /** Resolves the current item's URL (Stalker needs a request) and starts it. */
     private fun startCurrent() {
         startJob?.cancel()
@@ -729,7 +770,7 @@ class PlayerActivity : ComponentActivity() {
             return super.dispatchKeyEvent(e)
         }
         if (e.action != KeyEvent.ACTION_DOWN) return when (e.keyCode) {
-            KeyEvent.KEYCODE_BACK -> { if (!e.isCanceled) finish(); true }
+            KeyEvent.KEYCODE_BACK -> { if (!e.isCanceled) { handingBack = canHandBack(); finish() }; true }
             else -> e.keyCode != KeyEvent.KEYCODE_HOME && super.dispatchKeyEvent(e)
         }
         val isLive = item is PlayItem.Live
@@ -757,7 +798,8 @@ class PlayerActivity : ComponentActivity() {
         saveProgress()
         // The corner window was closed: stop for good.
         if (inPip) { finish(); return }
-        if (::player.isInitialized) player.pause()
+        // Back to the preview with this player: it keeps playing (the preview mutes it). Anything else pauses as before.
+        if (::player.isInitialized && !(isFinishing && handingBack && adopted)) player.pause()
         extra.forEach { it.player.pause() }
     }
 
@@ -769,9 +811,41 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::player.isInitialized) player.release()
+        // Only a Back from full screen hands the player back; any other end (the Home button, the system closing it,
+        // an error) lets it go as before.
+        if (::player.isInitialized) {
+            if (adopted && handingBack && canHandBack() && handBack()) adopted = false
+            else if (adopted) releaseAdopted() else player.release()
+        }
         extra.forEach { it.release() }
         extra.clear()
+    }
+
+    /**
+     * Leaving with the preview's player: it goes now (Stage 2 has no hand back), and the preview's record of that
+     * channel is cleared, so the window behind starts afresh instead of waiting on a player that is gone.
+     */
+    /** Back to the preview with this very player: one live screen, playing, no error, with the app still in front. */
+    private fun canHandBack(): Boolean = adopted && !multi && !mainHd && live != null && channel != null &&
+        player.playerError == null && error == null && player.mediaItemCount > 0 &&
+        (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING)
+
+    /** Gives the player back to the preview window, still playing; false (nothing changed) if the preview won't take it. */
+    private fun handBack(): Boolean {
+        val ch = channel ?: return false
+        player.removeListener(mainListener)
+        val ok = try { App.preview.adopt(ch, io.github.novatv.play.ui.TV_PREVIEW) } catch (e: Exception) { false }
+        if (!ok) player.addListener(mainListener)
+        // The player outlives this screen: its view lets go of it (listener and surface), so the closed screen can go.
+        else playerView?.player = null
+        return ok
+    }
+
+    private fun releaseAdopted() {
+        val holder = (App.host.previewEngine as? ExoPreviewEngine)?.holder
+        if (holder != null && holder.player === player) holder.releaseNow() else player.release()
+        if (App.preview.channel?.id == handedChannelId) App.preview.stop()
+        adopted = false
     }
 
     /** Subtitle size, background and height from Settings › Movies & Series (text subtitles; image ones keep their look). */

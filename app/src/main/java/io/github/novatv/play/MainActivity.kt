@@ -31,7 +31,9 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         App.away = true
-        if (App.host.previewEngine != null) App.preview.stop()
+        // Not while the preview's player is passing to full screen: stopping it now would cut the stream it is taking.
+        // (Once full screen has it, the preview's stop leaves that player alone: see ExoPreviewEngine.release.)
+        if (App.host.previewEngine != null && !App.handoverActive) App.preview.stop()
     }
 }
 

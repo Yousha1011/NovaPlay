@@ -6,23 +6,15 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import io.github.novatv.play.data.Http
 import io.github.novatv.play.data.PreviewEngine
 import io.github.novatv.play.data.PreviewEvent
 
@@ -50,38 +42,85 @@ fun playbackMessage(e: PlaybackException): String = when (e.errorCode) {
  */
 @SuppressLint("UnsafeOptInUsageError")
 class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
-    private var player by mutableStateOf<ExoPlayer?>(null)
+    /** The one live player, kept between channels and (later) shared with full screen. */
+    val holder = LivePlayerHolder(ctx)
+
+    /** Where this channel's events go; replaced for each channel, so a late event from the last one goes nowhere. */
+    private var onEvent: ((PreviewEvent) -> Unit)? = null
+    private var ready = false
+    /** The player [listener] is on: one listener per player, added when the player is built. */
+    private var listening: ExoPlayer? = null
+    private val listener = object : Player.Listener {
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_READY && !ready) { ready = true; onEvent?.invoke(PreviewEvent.Ready) }
+        }
+        override fun onPlayerError(e: PlaybackException) { onEvent?.invoke(PreviewEvent.Error(playbackMessage(e))) }
+    }
 
     override fun play(url: String, onEvent: (PreviewEvent) -> Unit) {
-        release()
-        val load = DefaultLoadControl.Builder().setBufferDurationsMs(4_000, 10_000, 1_000, 2_000).build()
-        val p = ExoPlayer.Builder(ctx, DefaultRenderersFactory(ctx).setEnableDecoderFallback(true))
-            .setLoadControl(load)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(TvHttp.client).setUserAgent(Http.UA)))
-            .build()
-        p.volume = 0f
-        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setMaxVideoSize(1280, 720).build()
-        var ready = false
-        p.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY && !ready) { ready = true; onEvent(PreviewEvent.Ready) }
-            }
-            override fun onPlayerError(e: PlaybackException) { onEvent(PreviewEvent.Error(playbackMessage(e))) }
-        })
+        val p = holder.acquire()
+        if (listening !== p) { p.addListener(listener); listening = p }
+        // The last channel's stream closes before this one opens, so the provider never sees two at once.
+        p.stop()
+        p.clearMediaItems()
+        this.onEvent = onEvent
+        ready = false
+        holder.toPreview()
         p.setMediaItem(mediaItem(url))
         p.prepare()
         p.playWhenReady = true
-        player = p
+    }
+
+    /**
+     * Stops the preview: the stream and its decoder go at once; the player itself goes a moment later unless the next
+     * channel starts first (a channel change stops, then plays).
+     */
+    override fun canHandOver(): Boolean = holder.healthy()
+
+    /**
+     * Full screen takes the player: the preview stops listening to it (full screen has its own listener and its own
+     * retries), and the small window stops drawing it. Returns the player, or null if it isn't fit to hand over.
+     */
+    fun handOff(): ExoPlayer? {
+        if (holder.mode != LivePlayerHolder.Mode.PREVIEW) return null
+        // Still loading (or failed): the player goes as an empty one, and full screen opens the channel in it.
+        val p = if (holder.healthy()) holder.player ?: return null
+            else holder.acquire().also { it.stop(); it.clearMediaItems() }
+        p.removeListener(listener)
+        listening = null
+        onEvent = null
+        holder.toFull()
+        return p
+    }
+
+    override fun canTakeOver(): Boolean = holder.mode == LivePlayerHolder.Mode.PREVIEW
+
+    override fun starting() = holder.keep()
+
+    override fun takeBack(onEvent: (PreviewEvent) -> Unit): Boolean {
+        val p = holder.player ?: return false
+        if (holder.mode != LivePlayerHolder.Mode.FULL) return false
+        holder.toPreview()
+        if (listening !== p) { p.addListener(listener); listening = p }
+        this.onEvent = onEvent
+        ready = p.playbackState == Player.STATE_READY
+        return true
     }
 
     override fun release() {
-        player?.release()
-        player = null
+        onEvent = null
+        // Full screen has the player: the preview has nothing of its own to stop, and must not touch that player
+        // (the main screen stops its preview when full screen covers it, after the hand over is done).
+        if (holder.mode == LivePlayerHolder.Mode.FULL) return
+        // Leaving the app (Home, another app, the screen off, full screen covering it) or previews turned off: nothing
+        // will play here soon, so the player goes now. Otherwise (a channel change) it waits a moment for the next one.
+        if (App.away || !App.store.livePreview) holder.releaseNow() else holder.stop()
     }
 
     @Composable
     override fun Video(modifier: Modifier) {
-        val p = player
+        // While full screen has the player, the hidden window behind it must not take the picture back.
+        val p = holder.player.takeIf { holder.mode == LivePlayerHolder.Mode.PREVIEW }
         AndroidView(factory = { c ->
             PlayerView(c).apply {
                 useController = false

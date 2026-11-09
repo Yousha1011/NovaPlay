@@ -31,6 +31,23 @@ interface PreviewEngine {
     fun release()
     /** Where the picture is drawn. */
     @Composable fun Video(modifier: Modifier)
+    /**
+     * Whether the channel previewing now can be handed, player and stream as they are, to the full-screen player
+     * (Android TV only; other platforms have no such player to hand over).
+     */
+    fun canHandOver(): Boolean = false
+    /**
+     * Full screen gave the player back, still playing: the window takes it on again and reports its events to
+     * [onEvent]. False if there is nothing to take back (other platforms, or the player went).
+     */
+    fun takeBack(onEvent: (PreviewEvent) -> Unit): Boolean = false
+    /**
+     * Whether full screen can take this window's player even while its channel is still loading (or not yet asked
+     * for): full screen then opens the stream in that player itself instead of building another.
+     */
+    fun canTakeOver(): Boolean = false
+    /** A stream address is being looked up for the next play: keep the idle player for it until [play] or [release]. */
+    fun starting() {}
 }
 
 /**
@@ -102,9 +119,10 @@ class PreviewController(
         job = scope.launch {
             delay(debounceMs)
             _state.value = State.Loading(c)
+            e.starting()
             val url = try { resolve(c) } catch (x: CancellationException) { throw x } catch (x: Exception) { null }
             if (gen != generation) return@launch
-            if (url == null) { _state.value = State.Failed(c, "Could not get the stream address"); return@launch }
+            if (url == null) { e.release(); _state.value = State.Failed(c, "Could not get the stream address"); return@launch }
             e.play(url) { ev ->
                 if (gen == generation) _state.value = when (ev) {
                     PreviewEvent.Ready -> State.Playing(c)
@@ -112,6 +130,36 @@ class PreviewController(
                 }
             }
         }
+    }
+
+    /**
+     * Full screen handed back the player playing [c] (perhaps another channel than the one it took): the window shows
+     * it as it plays, with no new stream. Returns false, changing nothing, if the engine has nothing to take back.
+     */
+    fun adopt(c: Channel, by: String): Boolean {
+        val e = engine ?: return false
+        job?.cancel(); job = null
+        val gen = ++generation
+        val ok = e.takeBack { ev ->
+            if (gen == generation) _state.value = when (ev) {
+                PreviewEvent.Ready -> State.Playing(c)
+                is PreviewEvent.Error -> State.Failed(c, ev.message)
+            }
+        }
+        if (!ok) return false
+        owner = by
+        _state.value = State.Playing(c)
+        return true
+    }
+
+    /**
+     * Full screen is taking the player for the channel shown: any stream address lookup still running stops (it would
+     * otherwise start the channel in a player full screen now has), and late events are ignored. The state is left as
+     * it is; full screen hands the player back with [adopt] or clears it with [stop].
+     */
+    fun handOver() {
+        job?.cancel(); job = null
+        generation++
     }
 
     /** Stops any preview and frees its player: leaving the screen, switching playlist, the full-screen player, background. */

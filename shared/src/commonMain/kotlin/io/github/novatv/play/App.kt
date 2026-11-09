@@ -34,6 +34,16 @@ object App {
     /** What the player plays next (lists of channels are too big to pass around). */
     @Volatile var pending: PlayItem? = null
 
+    /**
+     * The preview's player is on its way to the full-screen player, stream and all ([play] set it). The main screen must
+     * not stop the preview while this holds; the full-screen player clears it as it opens, and it lapses on its own
+     * after a few seconds in case the full-screen player never opens.
+     */
+    @Volatile var handingOver = false
+    @Volatile private var handoverUntil = 0L
+    fun startHandover() { handoverUntil = io.github.novatv.play.platform.nowMs() + 5_000; handingOver = true }
+    val handoverActive: Boolean get() = handingOver && io.github.novatv.play.platform.nowMs() < handoverUntil
+
     private var started = false
 
     fun start(host: Host) {
@@ -57,8 +67,24 @@ object App {
 
 /** Opens the player full screen. */
 fun play(item: PlayItem) {
-    // The preview's player is let go before the full-screen one starts, so the two never compete for a decoder.
-    if (App.host.previewEngine != null) App.preview.stop()
+    // A live channel already playing in the preview window goes full screen in that same player, without opening the
+    // stream again; one still loading there goes full screen in that player too, which then opens it. Otherwise the preview's player is let go before the full-screen one starts, so the two never
+    // compete for a decoder.
+    val engine = App.host.previewEngine
+    val target = (item as? PlayItem.Live)?.let { it.channels.getOrNull(it.channelIndex) }
+    val ps = App.preview.state.value
+    App.handingOver = false
+    val shown = when (ps) {
+        is io.github.novatv.play.data.PreviewController.State.Playing -> ps.channel
+        is io.github.novatv.play.data.PreviewController.State.Loading -> ps.channel
+        is io.github.novatv.play.data.PreviewController.State.Waiting -> ps.channel
+        else -> null
+    }
+    if (engine != null && target != null && shown?.id == target.id && (engine.canHandOver() || engine.canTakeOver())) {
+        App.preview.handOver()
+        App.startHandover()
+    }
+    else if (engine != null) App.preview.stop()
     App.pending = item
     if (item is PlayItem.Vod) {
         item.movie?.let { App.store.addWatched(App.repo.movieKey(it)) }
