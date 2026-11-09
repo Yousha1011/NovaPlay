@@ -122,6 +122,17 @@ class LivePlayerHolder(private val ctx: Context) {
         pendingRelease = null
     }
 
+    /**
+     * Android is short of memory: an idle player (the preview's, stopped, waiting for the next channel) goes now instead
+     * of after its delay. One playing, or one full screen has, is left alone. True if one was let go.
+     */
+    fun releaseIfIdle(): Boolean {
+        val p = player ?: return false
+        if (mode != Mode.PREVIEW || p.mediaItemCount > 0) return false
+        releaseNow()
+        return true
+    }
+
     /** Lets the player go now, decoder, threads and all. */
     fun releaseNow() {
         cancelPendingRelease()

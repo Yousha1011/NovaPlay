@@ -51,6 +51,14 @@ class NovaApp : Application() {
         recorder.rearm()
     }
 
+    /** Android asks apps to give memory back: the preview's idle player goes (nothing playing is touched). */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level < TRIM_MEMORY_RUNNING_LOW) return
+        val released = (App.host.previewEngine as? ExoPreviewEngine)?.holder?.releaseIfIdle() ?: false
+        if (released) android.util.Log.i("NovaPreview", "memory trim (level $level): idle preview player released")
+    }
+
     /** Earlier versions kept favourites and Sports picks as Android string sets: moved once to the shared format. */
     private fun migratePrefs() {
         val p = Prefs()
