@@ -82,6 +82,8 @@ class PreviewController(
     private val _state = MutableStateFlow<State>(if (available) State.Idle else State.Unsupported)
     val state: StateFlow<State> = _state
     private var job: Job? = null
+    /** Waits for full screen to take a handed-over player; see [handOver]. */
+    private var watch: Job? = null
     /**
      * The screen whose highlight started the preview ("live", "guide"); "" for none. Observed, so a screen's panel
      * redraws when the same channel's preview passes from one screen to the other.
@@ -117,6 +119,7 @@ class PreviewController(
         if (owner == by && cur.channel()?.id == c.id && cur !is State.Failed) return
         owner = by
         job?.cancel()
+        watch?.cancel(); watch = null
         e.release()
         val gen = ++generation
         _state.value = State.Waiting(c)
@@ -143,6 +146,7 @@ class PreviewController(
     fun adopt(c: Channel, by: String): Boolean {
         val e = engine ?: return false
         job?.cancel(); job = null
+        watch?.cancel(); watch = null
         val gen = ++generation
         val ok = e.takeBack { ev ->
             if (gen == generation) _state.value = when (ev) {
@@ -162,14 +166,27 @@ class PreviewController(
      * otherwise start the channel in a player full screen now has), and late events are ignored. The state is left as
      * it is; full screen hands the player back with [adopt] or clears it with [stop].
      */
-    fun handOver() {
+    fun handOver(withinMs: Long = HANDOVER_MS, taken: () -> Boolean = { true }) {
         job?.cancel(); job = null
         generation++
+        // Full screen never took it (it didn't open): the window would wait on a lookup that was cancelled, so the
+        // channel starts again here instead.
+        val c = channel
+        val by = owner
+        watch?.cancel()
+        watch = scope.launch {
+            delay(withinMs)
+            watch = null
+            if (taken() || channel?.id != c?.id) return@launch
+            stop()
+            if (c != null) select(c, by)
+        }
     }
 
     /** Stops any preview and frees its player: leaving the screen, switching playlist, the full-screen player, background. */
     fun stop() {
         job?.cancel(); job = null
+        watch?.cancel(); watch = null
         owner = ""
         generation++
         engine?.release()
@@ -180,6 +197,11 @@ class PreviewController(
     fun stop(by: String) { if (owner == by) stop() }
 
     @Composable fun Video(modifier: Modifier) { engine?.Video(modifier) }
+
+    companion object {
+        /** How long full screen has to take a handed-over player before the window starts the channel again. */
+        const val HANDOVER_MS = 5_500L
+    }
 }
 
 /** What the Guide previews for a highlighted cell. */

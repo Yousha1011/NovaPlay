@@ -123,4 +123,44 @@ class PreviewControllerTest {
         off.select(ch("1")); advanceUntilIdle()
         assertEquals(1, e.played.size)
     }
+
+    @Test fun aHandOverThatFullScreenNeverTakesStartsTheChannelAgain() = runTest {
+        val e = FakeEngine()
+        val p = controller(e)
+        p.select(ch("1")); advanceUntilIdle()
+        assertEquals(1, e.played.size)
+        p.handOver(5_500) { false }
+        advanceTimeBy(5_499); runCurrent()
+        assertEquals(1, e.played.size, "nothing happens while full screen still has time to open")
+        advanceTimeBy(2); runCurrent()
+        assertIs<State.Waiting>(p.state.value, "the same channel is selected again")
+        assertEquals(ch("1"), p.channel)
+        advanceUntilIdle()
+        assertEquals(2, e.played.size, "and plays again instead of waiting on a lookup that was cancelled")
+    }
+
+    @Test fun aHandOverThatFullScreenTakesIsLeftAlone() = runTest {
+        val e = FakeEngine()
+        val p = controller(e)
+        p.select(ch("1")); advanceUntilIdle()
+        e.listener!!(PreviewEvent.Ready)
+        val releases = e.releases
+        p.handOver(5_500) { true }
+        advanceUntilIdle()
+        assertEquals(1, e.played.size)
+        assertEquals(releases, e.releases, "the player full screen has is not touched")
+        assertEquals(State.Playing(ch("1")), p.state.value)
+    }
+
+    @Test fun stoppingOrChoosingAnotherChannelEndsTheHandOverWait() = runTest {
+        val e = FakeEngine()
+        val p = controller(e)
+        p.select(ch("1")); advanceUntilIdle()
+        p.handOver(5_500) { false }
+        p.select(ch("2")); advanceUntilIdle()
+        assertEquals(listOf("http://host/live/1.ts", "http://host/live/2.ts"), e.played, "channel 1 is not started again")
+        p.handOver(5_500) { false }
+        p.stop(); advanceUntilIdle()
+        assertIs<State.Idle>(p.state.value, "a stopped preview stays stopped")
+    }
 }

@@ -82,8 +82,9 @@ fun play(item: PlayItem) {
     }
     if (engine != null && target != null && shown?.id == target.id && App.store.seamlessFullscreen &&
         (engine.canHandOver() || engine.canTakeOver())) {
-        App.preview.handOver()
         App.startHandover()
+        // Full screen clears the flag as it opens; still set when the time is up, it never opened.
+        App.preview.handOver { !App.handingOver }
     }
     else if (engine != null) App.preview.stop()
     App.pending = item
