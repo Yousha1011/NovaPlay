@@ -6,6 +6,8 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -48,6 +50,8 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
     /** Where this channel's events go; replaced for each channel, so a late event from the last one goes nowhere. */
     private var onEvent: ((PreviewEvent) -> Unit)? = null
     private var ready = false
+    /** Frames drawn after a (re)attached surface: counted so a window can tell whether its picture arrived. */
+    private var frames = 0
     /** The player [listener] is on: one listener per player, added when the player is built. */
     private var listening: ExoPlayer? = null
     private val listener = object : Player.Listener {
@@ -55,6 +59,7 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
             if (state == Player.STATE_READY && !ready) { ready = true; onEvent?.invoke(PreviewEvent.Ready) }
         }
         override fun onPlayerError(e: PlaybackException) { onEvent?.invoke(PreviewEvent.Error(playbackMessage(e))) }
+        override fun onRenderedFirstFrame() { frames++ }
     }
 
     override fun play(url: String, onEvent: (PreviewEvent) -> Unit) {
@@ -123,17 +128,57 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
     override fun Video(modifier: Modifier) {
         // While full screen has the player, the hidden window behind it must not take the picture back.
         val p = holder.player.takeIf { holder.mode == LivePlayerHolder.Mode.PREVIEW }
+        var view by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<PlayerView?>(null) }
         AndroidView(factory = { c ->
             PlayerView(c).apply {
                 useController = false
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                 layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            }.also { view = it }
+        }, update = { it.player = p }, onRelease = { it.player = null; view = null }, modifier = modifier)
+        // Each time this window takes the player (a tab switch, Back from full screen), check the picture arrives.
+        val v = view
+        androidx.compose.runtime.LaunchedEffect(p, v) { if (p != null && v != null) watchPicture(p, v) }
+    }
+
+    /**
+     * Some Fire TV decoders don't draw again after the video surface moves: sound plays, the window stays black or
+     * frozen. A stream with a video track that has played for [NO_PICTURE_MS] without drawing a frame since the window
+     * took it gets, once, its surface attached again and then, once, its stream prepared again; then the check gives up.
+     * Black programmes still draw (black) frames and audio-only streams have no video track, so neither counts; time
+     * spent buffering doesn't count either. It ends when the window lets go, the channel changes, full screen takes the
+     * player or the app leaves the screen (the effect is cancelled, or the checks below fail).
+     */
+    private suspend fun watchPicture(p: ExoPlayer, v: PlayerView) {
+        val item = p.currentMediaItem
+        var seen = frames
+        var played = 0L
+        var step = 0
+        while (true) {
+            kotlinx.coroutines.delay(CHECK_MS)
+            if (App.away || holder.mode != LivePlayerHolder.Mode.PREVIEW || holder.player !== p || p.currentMediaItem !== item) return
+            if (frames != seen) return
+            val video = p.currentTracks.groups.any { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO && it.isSelected }
+            if (!video || !p.isPlaying) continue
+            played += CHECK_MS
+            if (played < NO_PICTURE_MS) continue
+            played = 0
+            seen = frames
+            when (step++) {
+                0 -> { android.util.Log.i(TAG, "no picture after attach: attaching the surface again"); v.player = null; v.player = p }
+                1 -> { android.util.Log.i(TAG, "still no picture: preparing the stream again"); p.stop(); p.prepare() }
+                else -> { android.util.Log.i(TAG, "still no picture: giving up"); return }
             }
-        }, update = { it.player = p }, onRelease = { it.player = null }, modifier = modifier)
+        }
     }
 
     companion object {
+        private const val TAG = "NovaPreview"
+        private const val CHECK_MS = 500L
+        /** Playing time with a video track and no frame drawn before the window acts. */
+        private const val NO_PICTURE_MS = 4_000L
+
         /** TV app only, and not on devices Android marks as low on memory. */
         fun supported(ctx: Context): Boolean =
             !PHONE && !ctx.getSystemService(android.app.ActivityManager::class.java).isLowRamDevice
