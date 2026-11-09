@@ -569,6 +569,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         saveProgress()
+        // No hand over happens on this path: this screen keeps the player it has.
+        App.handingOver = false
         item = App.pending ?: return
         (item as? PlayItem.Live)?.let { channelIndex = it.channelIndex }
         retried = false
@@ -801,6 +803,9 @@ class PlayerActivity : ComponentActivity() {
         // Back to the preview with this player: it keeps playing (the preview mutes it). Anything else pauses as before.
         if (::player.isInitialized && !(isFinishing && handingBack && adopted)) player.pause()
         extra.forEach { it.player.pause() }
+        // Home or another app over the preview's player: this screen closes, and its end (onDestroy) lets the player
+        // go, so the main screen never finds it still held by a hidden full screen. A rotation is not leaving.
+        if (adopted && !isFinishing && !isChangingConfigurations) finish()
     }
 
     override fun onStart() {
@@ -843,8 +848,19 @@ class PlayerActivity : ComponentActivity() {
 
     private fun releaseAdopted() {
         val holder = (App.host.previewEngine as? ExoPreviewEngine)?.holder
-        if (holder != null && holder.player === player) holder.releaseNow() else player.release()
-        if (App.preview.channel?.id == handedChannelId) App.preview.stop()
+        player.removeListener(mainListener)
+        playerView?.player = null
+        when {
+            // Still this screen's: let it go, and clear the preview's record (it may be waiting on this player).
+            holder != null && holder.player === player && holder.mode == LivePlayerHolder.Mode.FULL -> {
+                holder.releaseNow()
+                App.preview.stop()
+            }
+            // The preview has it now: not this screen's to release.
+            holder != null && holder.player === player -> {}
+            // No longer the held player (already let go): releasing again is harmless.
+            else -> player.release()
+        }
         adopted = false
     }
 

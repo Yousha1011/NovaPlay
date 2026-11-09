@@ -58,6 +58,8 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
     }
 
     override fun play(url: String, onEvent: (PreviewEvent) -> Unit) {
+        // Full screen owns the one player: the window waits rather than take it (it shows this until the user moves on).
+        if (holder.mode == LivePlayerHolder.Mode.FULL) { onEvent(PreviewEvent.Error("Playing full screen")); return }
         val p = holder.acquire()
         if (listening !== p) { p.addListener(listener); listening = p }
         // The last channel's stream closes before this one opens, so the provider never sees two at once.
