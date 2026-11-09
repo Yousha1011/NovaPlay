@@ -59,23 +59,16 @@ fun ReturnSync.Follow(visible: Boolean, groups: List<Group>, current: Group?, fo
     LaunchedEffect(back?.seq, visible, groups.isEmpty()) {
         if (back == null || !visible || groups.isEmpty() || back.seq == handled) return@LaunchedEffect
         handled = back.seq
-        val id = back.channel.id
-        // Moved on since (another channel, or stopped): nothing to line up with.
-        if (App.preview.channel?.id != id) return@LaunchedEffect
-        if (focusedId == id) return@LaunchedEffect
-        var g = current
-        var i = g?.channels?.indexOfFirst { it.id == id } ?: -1
-        if (i < 0) {
-            // Not in the group showing: All channels, if it is there (a channel the playlist no longer has is left).
-            g = groups.firstOrNull { it.id == "all" } ?: return@LaunchedEffect
-            i = g.channels.indexOfFirst { it.id == id }
-            if (i < 0) return@LaunchedEffect
+        val place = returnPlace(groups, current, back.channel.id, App.preview.channel?.id, focusedId) ?: return@LaunchedEffect
+        val g = place.group
+        val i = place.index
+        if (place.switched) {
             select(g.id)
             groupTarget = g.id
             withFrameNanos { }
         }
-        highlight((g ?: return@LaunchedEffect).channels[i])
-        targetId = id
+        highlight(g.channels[i])
+        targetId = back.channel.id
         list.scrollToItem(i)
     }
     LaunchedEffect(targetId, listFocused) {
@@ -90,4 +83,20 @@ fun ReturnSync.Follow(visible: Boolean, groups: List<Group>, current: Group?, fo
         }
         try { requester.requestFocus() } catch (e: Exception) { }
     }
+}
+
+/** Where a page's list goes for a channel handed back: [group] at [index]; [switched] when that isn't the group showing. */
+data class ReturnPlace(val group: Group, val index: Int, val switched: Boolean)
+
+/**
+ * Where to line a page up for channel [id] handed back, or null to leave the page as it is: the preview has moved on
+ * since ([playingId] isn't [id]), the page already highlights it ([focusedId]), or the playlist no longer has it. The
+ * group showing ([current]) if it holds the channel, otherwise All channels.
+ */
+fun returnPlace(groups: List<Group>, current: Group?, id: String, playingId: String?, focusedId: String?): ReturnPlace? {
+    if (playingId != id || focusedId == id) return null
+    current?.channels?.indexOfFirst { it.id == id }?.takeIf { it >= 0 }?.let { return ReturnPlace(current, it, switched = false) }
+    val all = groups.firstOrNull { it.id == "all" } ?: return null
+    val i = all.channels.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: return null
+    return ReturnPlace(all, i, switched = all.id != current?.id)
 }

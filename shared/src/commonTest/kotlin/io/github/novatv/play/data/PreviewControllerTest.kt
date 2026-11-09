@@ -22,6 +22,9 @@ class PreviewControllerTest {
         override fun play(url: String, onEvent: (PreviewEvent) -> Unit) { played += url; listener = onEvent }
         override fun release() { releases++; listener = null }
         @Composable override fun Video(modifier: Modifier) {}
+        /** Whether a player full screen hands back is taken (the real engine: only one it handed over). */
+        var takes = false
+        override fun takeBack(onEvent: (PreviewEvent) -> Unit): Boolean { if (takes) listener = onEvent; return takes }
     }
 
     private fun ch(id: String) = Channel(id, "Channel $id", null, "c", null, null, 1)
@@ -162,5 +165,44 @@ class PreviewControllerTest {
         p.handOver(5_500) { false }
         p.stop(); advanceUntilIdle()
         assertIs<State.Idle>(p.state.value, "a stopped preview stays stopped")
+    }
+
+    @Test fun adoptShowsTheReturnedChannelPlayingWithoutOpeningIt() = runTest {
+        val e = FakeEngine().apply { takes = true }
+        val p = controller(e)
+        p.select(ch("1"), "tv"); advanceUntilIdle()
+        p.handOver(5_500) { true }
+        assertTrue(p.adopt(ch("4"), "tv"))
+        assertEquals(State.Playing(ch("4")), p.state.value, "full screen may hand back another channel than it took")
+        assertEquals("tv", p.owner)
+        assertEquals(listOf("http://host/live/1.ts"), e.played, "no stream is opened for the returned channel")
+        assertEquals(PreviewController.Returned(ch("4"), 1), p.returned)
+        advanceUntilIdle()
+        assertEquals(State.Playing(ch("4")), p.state.value, "the hand over wait doesn't restart anything after a hand back")
+    }
+
+    @Test fun eachHandBackIsNumberedSoPagesSeeItOnce() = runTest {
+        val e = FakeEngine().apply { takes = true }
+        val p = controller(e)
+        p.adopt(ch("1"), "tv"); p.adopt(ch("1"), "tv")
+        assertEquals(2, p.returned?.seq)
+    }
+
+    @Test fun adoptChangesNothingWhenTheEngineHasNothingToTakeBack() = runTest {
+        val e = FakeEngine()
+        val p = controller(e)
+        p.select(ch("1"), "live"); advanceUntilIdle()
+        val before = p.state.value
+        assertTrue(!p.adopt(ch("2"), "tv"))
+        assertEquals(before, p.state.value)
+        assertEquals(null, p.returned)
+    }
+
+    @Test fun eventsAfterAHandBackReportOnTheReturnedChannel() = runTest {
+        val e = FakeEngine().apply { takes = true }
+        val p = controller(e)
+        p.adopt(ch("3"), "tv")
+        e.listener!!(PreviewEvent.Error("Playback failed"))
+        assertEquals(State.Failed(ch("3"), "Playback failed"), p.state.value)
     }
 }
