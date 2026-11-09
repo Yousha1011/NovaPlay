@@ -13,7 +13,7 @@
 |---|---|---|---|
 | Android TV / Fire TV | Yes | Yes, on LDPlayer. **Physical Fire TV: pending** | All of it |
 | Android phone / tablet (APK) | Yes | Launch only (no playlist, so no playback) | Almost nothing (no preview player). The recording playback fix applies, but there is no way to reach recordings |
-| Windows | Yes (compiles) | **No** | None in practice: the shared screens include the new code, but it stays switched off without a preview player |
+| Windows | Yes (compiles) | Launch and navigation only (Windows Test 1). **Playback and multiview: pending** | None in practice: the shared screens include the new code, but it stays switched off without a preview player |
 | iOS | **Not built** (needs a Mac) | **No** | None: phone screens, no preview player, no recording |
 
 ## Build and test results (at `7b49b79`)
@@ -65,7 +65,8 @@ Key:
 | Saved recordings play (`40b6be2`) | PASS: play, seek, play to the end | Applies (same player), but **recordings can't be reached** (see the outstanding issues). NOT TESTED | N/A: no recording | N/A: no recording |
 | Multiview with the shared player | PASS (switch on and off, 2–3 screens) | Unchanged from before; NOT TESTED | Unchanged (`MultiView.kt`); NOT TESTED | Unchanged (VLC); NOT TESTED |
 | Long session: 200 channel changes, 50 round trips (no code change) | PASS | N/A | N/A | N/A |
-| App still launches after the changes | PASS | PASS (installed separately on LDPlayer, launched, no crash; removed afterwards) | NOT TESTED | NOT TESTED |
+| App still launches after the changes | PASS | PASS (installed separately on LDPlayer, launched, no crash; removed afterwards) | PASS (Windows Test 1: launch, mouse to all 8 sections, no errors) | NOT TESTED |
+| Arrow keys move focus on Windows (fix found by Windows Test 1; the gap predated Stages 1–4) | N/A (D-pad) | N/A | PASS: checked by hand in Live TV, TV guide, Sports and Settings, plus 4 key-press tests | N/A |
 
 ## Features that already existed on each platform
 
@@ -95,7 +96,7 @@ Key:
    - the decoder switch from the 720p preview to 4K full screen, and audio passthrough;
    - multiview decoder limits;
    - memory after 30 minutes, and `onTrimMemory` under real memory pressure.
-2. **Windows: playback and multiview at runtime.** Run the desktop app with a playlist. Check:
+2. **Windows: playback and multiview at runtime.** Launch and keyboard/mouse navigation passed in Windows Test 1, after adding arrow-key focus movement (it was missing before Stages 1–4 too). Still to check, with a playlist:
    - Live TV, the TV guide and Sports;
    - full screen in and out;
    - multiview add, remove and reconnect;

@@ -33,6 +33,7 @@ import io.github.novatv.play.ui.BackKeys
 import io.github.novatv.play.ui.C
 import io.github.novatv.play.ui.NovaTheme
 import io.github.novatv.play.ui.T
+import io.github.novatv.play.ui.arrowKeysMoveFocus
 import io.github.novatv.play.ui.Text
 import kotlinx.coroutines.delay
 
@@ -112,7 +113,8 @@ fun main() {
                 if (window.isMinimized) window.isMinimized = false
                 frame.toFront(); frame.requestFocus()
             }
-            Box(Modifier.fillMaxSize().background(C.bg)) {
+            val fm = androidx.compose.ui.platform.LocalFocusManager.current
+            Box(Modifier.fillMaxSize().background(C.bg).arrowKeysMoveFocus(fm) { Desktop.playing == null }) {
                 NovaTheme {
                     Root()
                     Desktop.playing?.let { item ->
