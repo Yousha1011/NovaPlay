@@ -107,7 +107,8 @@ fun LiveGuideScreen(nav: Nav) {
             val groupW = if (maxWidth < NARROW) 170.dp else 230.dp
             val chW = if (maxWidth < NARROW) 190.dp else 300.dp
             val gridW = maxWidth - groupW - chW - 16.dp
-            Row(Modifier.fillMaxSize()) {
+            // Groups and channels together: a return that switched group moves focus off the old group's tile too.
+            Row(sync.list(Modifier.fillMaxSize())) {
                 // Groups: search, then favourites, recent, everything and the playlist's own, each with its count.
                 LazyColumn(Modifier.width(groupW).fillMaxHeight().rememberFocusInList(), contentPadding = PaddingValues(bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -120,7 +121,7 @@ fun LiveGuideScreen(nav: Nav) {
                     }
                     itemsIndexed(groups, key = { _, g -> g.id }) { _, g ->
                         val active = g.id == group.id
-                        Tile({ sel = g.id }, Modifier.fillMaxWidth().height(44.dp).onFocusChanged { if (it.isFocused) sel = g.id }
+                        Tile({ sel = g.id }, sync.group(Modifier, g.id).fillMaxWidth().height(44.dp).onFocusChanged { if (it.isFocused) sel = g.id }
                             .let { if (active) it.border(2.dp, C.text.copy(alpha = 0.85f), RoundedCornerShape(10.dp)) else it },
                             shape = RoundedCornerShape(10.dp), scale = 1.0f, color = if (active) C.panelHi else C.panel) {
                             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -147,7 +148,7 @@ fun LiveGuideScreen(nav: Nav) {
                     if (group.channels.isEmpty()) {
                         Message(if (group.id == "fav") "No favourites yet" else "Nothing here", if (group.id == "fav") "Hold OK on any channel to add it." else null)
                     } else Box(Modifier.fillMaxSize()) {
-                        LazyColumn(sync.list(Modifier.fillMaxSize().rememberFocusInList()), state = listState, contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LazyColumn(Modifier.fillMaxSize().rememberFocusInList(), state = listState, contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
                                 GuideLine(c, group.channels, i, start, chW, gridW, st.epgVersion, focused?.first?.id == c.id, sync.row(Modifier, c.id),
                                     onFocus = { p -> focused = c to p },

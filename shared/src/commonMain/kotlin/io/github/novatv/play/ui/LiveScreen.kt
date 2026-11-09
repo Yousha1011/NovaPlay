@@ -103,12 +103,13 @@ fun LiveScreen(nav: Nav) {
         val catWidth = if (narrow) 160.dp else 220.dp
         // The info panel needs room: shown only when the list keeps at least ~520 units.
         val panel = maxWidth - catWidth >= 900.dp
-        Row(Modifier.fillMaxSize()) {
+        // Groups and channels together: a return that switched group moves focus off the old group's tile too.
+        Row(sync.list(Modifier.fillMaxSize())) {
             LazyColumn(Modifier.width(catWidth).fillMaxHeight().rememberFocusInList(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 itemsIndexed(groups, key = { _, g -> g.id }) { i, g ->
                     val active = g.id == group.id
                     // Moving onto a category shows its channels straight away, like a TV's channel list.
-                    Tile({ sel = g.id }, Modifier.fillMaxWidth().height(40.dp).onFocusChanged { if (it.isFocused) sel = g.id }
+                    Tile({ sel = g.id }, sync.group(Modifier, g.id).fillMaxWidth().height(40.dp).onFocusChanged { if (it.isFocused) sel = g.id }
                         .let { if (i == 0) it.focusRequester(first) else it },
                         shape = RoundedCornerShape(8.dp), scale = 1.0f, color = if (active) C.accent.copy(alpha = 0.14f) else Color.Transparent) {
                         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -129,7 +130,7 @@ fun LiveScreen(nav: Nav) {
                         Text("CHANNEL", style = T.tiny.copy(letterSpacing = 1.4.sp), modifier = Modifier.weight(1f))
                         Text("ON NOW · ${clock(now())}", style = T.tiny.copy(letterSpacing = 1.4.sp))
                     }
-                    LazyColumn(sync.list(Modifier.fillMaxSize().rememberFocusInList()), state = listState, contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    LazyColumn(Modifier.fillMaxSize().rememberFocusInList(), state = listState, contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
                             ChannelLine(c, onClick = { playChannel(group.channels, i) }, onLongClick = {
                                 val on = App.store.toggleFavourite(App.repo.channelKey(c))

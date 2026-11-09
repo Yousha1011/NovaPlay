@@ -26,13 +26,19 @@ class ReturnSync {
     internal val requester = FocusRequester()
     /** The row focus should move to, until it gets there. */
     internal var targetId by mutableStateOf<String?>(null)
-    /** Whether focus is somewhere in the page's channel list. */
+    /** Whether focus is somewhere in the page's list area (on Live TV, its groups and channels). */
     internal var listFocused by mutableStateOf(false)
+    /** The group switched to for the return ("all"), whose tile focus passes through so the group column remembers it. */
+    internal val groupRequester = FocusRequester()
+    internal var groupTarget by mutableStateOf<String?>(null)
     /** The last hand back this page dealt with (-1: none yet). */
     internal var handled by mutableIntStateOf(-1)
 
-    /** On the channel list: tracks whether focus is in it. */
+    /** On the list area (the channel list, or groups and channels together): tracks whether focus is in it. */
     fun list(m: Modifier): Modifier = m.onFocusChanged { listFocused = it.hasFocus }
+
+    /** On a group's tile (pages with a group column): the group switched to takes focus once, on the way to the row. */
+    fun group(m: Modifier, id: String): Modifier = if (groupTarget != id) m else m.focusRequester(groupRequester)
 
     /** On a channel's focusable tile: the target row takes focus when asked, and stops being the target once it has. */
     fun row(m: Modifier, id: String): Modifier =
@@ -65,6 +71,7 @@ fun ReturnSync.Follow(visible: Boolean, groups: List<Group>, current: Group?, fo
             i = g.channels.indexOfFirst { it.id == id }
             if (i < 0) return@LaunchedEffect
             select(g.id)
+            groupTarget = g.id
             withFrameNanos { }
         }
         highlight((g ?: return@LaunchedEffect).channels[i])
@@ -74,6 +81,13 @@ fun ReturnSync.Follow(visible: Boolean, groups: List<Group>, current: Group?, fo
     LaunchedEffect(targetId, listFocused) {
         if (targetId == null || !listFocused) return@LaunchedEffect
         withFrameNanos { }
+        // Through the new group's tile first (if the page has a group column), so Left from the row comes back to it
+        // rather than to the group focus was last on.
+        if (groupTarget != null) {
+            try { groupRequester.requestFocus() } catch (e: Exception) { }
+            groupTarget = null
+            withFrameNanos { }
+        }
         try { requester.requestFocus() } catch (e: Exception) { }
     }
 }
