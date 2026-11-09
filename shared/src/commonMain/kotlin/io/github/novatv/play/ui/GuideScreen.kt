@@ -91,6 +91,10 @@ fun GuideScreen(nav: Nav) {
     }
     androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.GUIDE) App.preview.surface = "guide" }
     androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null }
+    // Back from full screen on another channel: the grid, highlight and panel follow the channel now playing.
+    val sync = rememberReturnSync()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    sync.Follow(visible, groups, group, focused?.first?.id, listState, select = { sel = it }, highlight = { focused = it to null })
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 26.dp, end = S.gutter)) {
         if (groups.isEmpty()) {
@@ -125,9 +129,9 @@ fun GuideScreen(nav: Nav) {
                 Box {
                     // The grid remembers its row, and each row its cell, so coming back from the menu, another tab or a
                     // screen opened over it lands on the cell last used instead of the Now button.
-                    LazyColumn(Modifier.rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp)) {
+                    LazyColumn(sync.list(Modifier.rememberFocusInList()), state = listState, contentPadding = PaddingValues(bottom = 60.dp)) {
                         itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
-                            GuideRow(c, group.channels, i, start, chW, gridW, st.epgVersion,
+                            GuideRow(c, group.channels, i, start, chW, gridW, st.epgVersion, sync.row(Modifier, c.id),
                                 // Left pages back only as far as the current half hour; from there it reaches the channel column.
                                 onEarlier = { pageEarlier(HALF_HOUR) }, onLater = { pageLater(HALF_HOUR) },
                                 onPage = { forward -> if (forward) pageLater(WINDOW) else pageEarlier(WINDOW) },
@@ -187,14 +191,14 @@ private fun GuidePanel(f: Pair<Channel, Programme?>?, t: Long, preview: GuidePre
 }
 
 @Composable
-private fun GuideRow(c: Channel, list: List<Channel>, index: Int, start: Long, chW: Dp, gridW: Dp, epgVersion: Int,
+private fun GuideRow(c: Channel, list: List<Channel>, index: Int, start: Long, chW: Dp, gridW: Dp, epgVersion: Int, tile: Modifier,
                      onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit, onFocus: (Programme?) -> Unit) {
     val end = start + WINDOW
     val progs by produceState(emptyList<Programme>(), c.id, start, epgVersion) {
         value = withContext(IO) { App.repo.epg.key(c)?.let { App.repo.epg.programmes(it, start, end) } ?: emptyList() }
     }
     Row(Modifier.height(54.dp).rememberFocusInList(), verticalAlignment = Alignment.CenterVertically) {
-        Tile({ playChannel(list, index) }, Modifier.width(chW).fillMaxHeight().padding(2.dp).onFocusChanged { if (it.isFocused) onFocus(null) },
+        Tile({ playChannel(list, index) }, tile.width(chW).fillMaxHeight().padding(2.dp).onFocusChanged { if (it.isFocused) onFocus(null) },
             shape = RoundedCornerShape(6.dp), scale = 1.0f, color = Color.Transparent) {
             Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (c.number > 0 && App.store.showChannelNumbers) Text("${c.number}", style = T.small.copy(color = C.faint), maxLines = 1, modifier = Modifier.width(44.dp))

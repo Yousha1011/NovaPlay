@@ -94,6 +94,10 @@ fun LiveGuideScreen(nav: Nav) {
     androidx.compose.runtime.LaunchedEffect(focused?.first, visible) { follower.update(focused?.first, focused?.first, visible) }
     androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.LIVE) App.preview.surface = "live" }
     androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null }
+    // Back from full screen on another channel: the list, highlight and header follow the channel now playing.
+    val sync = rememberReturnSync()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    sync.Follow(visible, groups, group, focused?.first?.id, listState, select = { sel = it }, highlight = { focused = it to null })
 
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 22.dp, end = 28.dp)) {
         if (shown != null) TopPanel(shown, focused?.second ?: nowNext(shown).firstOrNull(), t)
@@ -143,9 +147,9 @@ fun LiveGuideScreen(nav: Nav) {
                     if (group.channels.isEmpty()) {
                         Message(if (group.id == "fav") "No favourites yet" else "Nothing here", if (group.id == "fav") "Hold OK on any channel to add it." else null)
                     } else Box(Modifier.fillMaxSize()) {
-                        LazyColumn(Modifier.fillMaxSize().rememberFocusInList(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LazyColumn(sync.list(Modifier.fillMaxSize().rememberFocusInList()), state = listState, contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
-                                GuideLine(c, group.channels, i, start, chW, gridW, st.epgVersion, focused?.first?.id == c.id,
+                                GuideLine(c, group.channels, i, start, chW, gridW, st.epgVersion, focused?.first?.id == c.id, sync.row(Modifier, c.id),
                                     onFocus = { p -> focused = c to p },
                                     onFavourite = {
                                         val on = App.store.toggleFavourite(App.repo.channelKey(c)); favVersion++
@@ -201,7 +205,7 @@ private fun TopPanel(c: Channel, p: Programme?, t: Long) {
 
 /** One channel: number, logo and name in a rounded box, then its programmes on the timeline as rounded boxes. */
 @Composable
-private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, chW: Dp, gridW: Dp, epgVersion: Int, current: Boolean,
+private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, chW: Dp, gridW: Dp, epgVersion: Int, current: Boolean, tile: Modifier,
                       onFocus: (Programme?) -> Unit, onFavourite: () -> Unit,
                       onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit) {
     val end = start + SPAN
@@ -210,7 +214,7 @@ private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, 
     }
     val fav = App.store.isFavourite(App.repo.channelKey(c))
     Row(Modifier.height(56.dp).rememberFocusInList(), verticalAlignment = Alignment.CenterVertically) {
-        Tile({ playChannel(list, index) }, Modifier.width(chW).fillMaxHeight().onFocusChanged { if (it.isFocused) onFocus(null) }
+        Tile({ playChannel(list, index) }, tile.width(chW).fillMaxHeight().onFocusChanged { if (it.isFocused) onFocus(null) }
             .let { if (current) it.border(2.dp, C.live.copy(alpha = 0.8f), RoundedCornerShape(12.dp)) else it },
             onLongClick = onFavourite, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = C.panel) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {

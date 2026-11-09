@@ -90,6 +90,10 @@ fun LiveScreen(nav: Nav) {
     androidx.compose.runtime.LaunchedEffect(focusedChannel, visible) { follower.update(focusedChannel, focusedChannel, visible) }
     androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.LIVE) App.preview.surface = "live" }
     androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null }
+    // Back from full screen on another channel: the list and highlight follow the channel now playing.
+    val sync = rememberReturnSync()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    sync.Follow(visible, groups, group, focusedChannel?.id, listState, select = { sel = it }, highlight = { focusedChannel = it })
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
         Header("Live TV", "${group.name} · ${group.channels.size} channels")
@@ -125,13 +129,13 @@ fun LiveScreen(nav: Nav) {
                         Text("CHANNEL", style = T.tiny.copy(letterSpacing = 1.4.sp), modifier = Modifier.weight(1f))
                         Text("ON NOW · ${clock(now())}", style = T.tiny.copy(letterSpacing = 1.4.sp))
                     }
-                    LazyColumn(Modifier.fillMaxSize().rememberFocusInList(), contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    LazyColumn(sync.list(Modifier.fillMaxSize().rememberFocusInList()), state = listState, contentPadding = PaddingValues(bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         itemsIndexed(group.channels, key = { _, c -> c.id }) { i, c ->
                             ChannelLine(c, onClick = { playChannel(group.channels, i) }, onLongClick = {
                                 val on = App.store.toggleFavourite(App.repo.channelKey(c))
                                 favVersion++
                                 toast(if (on) "Added to favourites" else "Removed from favourites")
-                            }, onFocus = { focusedChannel = c })
+                            }, onFocus = { focusedChannel = c }, modifier = sync.row(Modifier, c.id))
                         }
                     }
                 }
@@ -214,12 +218,12 @@ const val TV_PREVIEW = "tv"
 
 /** One dense channel row: number, logo, name, the programme on now and its progress. */
 @Composable
-fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocus: () -> Unit = {}) {
+fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocus: () -> Unit = {}, modifier: Modifier = Modifier) {
     val nn = nowNext(c)
     val p = nn.firstOrNull()
     val t = now()
     val fav = App.store.isFavourite(App.repo.channelKey(c))
-    Tile(onClick, Modifier.fillMaxWidth().height(52.dp).onFocusChanged { if (it.isFocused) onFocus() }, onLongClick = onLongClick, scale = 1.0f,
+    Tile(onClick, modifier.fillMaxWidth().height(52.dp).onFocusChanged { if (it.isFocused) onFocus() }, onLongClick = onLongClick, scale = 1.0f,
         shape = RoundedCornerShape(8.dp), color = Color.Transparent) {
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             // Numbers and logos can be turned off in Settings.

@@ -95,6 +95,10 @@ class PreviewController(
     var surface by mutableStateOf("")
     /** The channel previewing (or about to), whichever page started it. */
     val channel: Channel? get() = _state.value.channel()
+    /** A channel full screen handed back, numbered so each hand back is seen once (the pages line their lists up with it). */
+    data class Returned(val channel: Channel, val seq: Int)
+    var returned by mutableStateOf<Returned?>(null)
+        private set
     /** Bumped on every change, so a late event from an earlier stream is ignored. */
     private var generation = 0
 
@@ -149,6 +153,7 @@ class PreviewController(
         if (!ok) return false
         owner = by
         _state.value = State.Playing(c)
+        returned = Returned(c, (returned?.seq ?: 0) + 1)
         return true
     }
 
