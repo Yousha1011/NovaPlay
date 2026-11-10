@@ -20,6 +20,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -101,13 +109,27 @@ private fun Modifier.combinedClickableCompat(src: MutableInteractionSource, onCl
 
 @Composable
 actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit, url: Boolean) {
-    var text by remember { mutableStateOf(value) }
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(value)) }
+    val text = field.text
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
+    val fm = androidx.compose.ui.platform.LocalFocusManager.current
     BasicTextField(
-        value = text,
-        onValueChange = { text = it; onChange(it) },
-        modifier = modifier.height(54.dp),
+        value = field,
+        onValueChange = { val changed = it.text != field.text; field = it; if (changed) onChange(it.text) },
+        // Keyboard: the field keeps Left and Right for its cursor, except at either end of the text, where they move on
+        // like the arrows do everywhere else; Up and Down always move on (it's one line).
+        modifier = modifier.height(54.dp).onPreviewKeyEvent { e ->
+            if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown || e.isShiftPressed || e.isCtrlPressed || e.isAltPressed) return@onPreviewKeyEvent false
+            val sel = field.selection
+            when (e.key) {
+                Key.DirectionUp -> fm.moveFocus(FocusDirection.Up)
+                Key.DirectionDown -> fm.moveFocus(FocusDirection.Down)
+                Key.DirectionLeft -> sel.collapsed && sel.start == 0 && fm.moveFocus(FocusDirection.Left)
+                Key.DirectionRight -> sel.collapsed && sel.end == field.text.length && fm.moveFocus(FocusDirection.Right)
+                else -> false
+            }
+        },
         singleLine = true,
         textStyle = T.body,
         cursorBrush = SolidColor(Color.White),

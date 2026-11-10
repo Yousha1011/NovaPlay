@@ -131,6 +131,7 @@ fun main() {
                     Desktop.playing?.let { item ->
                         PlayerScreen(item, window, onClose = {
                             Desktop.playing = null
+                            App.playerClosed++
                             if (window.placement == WindowPlacement.Fullscreen) window.placement = WindowPlacement.Floating
                         })
                     }

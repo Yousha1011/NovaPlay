@@ -39,6 +39,11 @@ object App {
      * not stop the preview while this holds; the full-screen player clears it as it opens, and it lapses on its own
      * after a few seconds in case the full-screen player never opens.
      */
+    /**
+     * Raised when a player drawn over the app (Windows) closes: nothing has focus then, so the open page takes it back,
+     * on the item last used. Android's player is its own screen and focus comes back on its own, so it never raises it.
+     */
+    var playerClosed by androidx.compose.runtime.mutableIntStateOf(0)
     @Volatile var handingOver = false
     @Volatile private var handoverUntil = 0L
     fun startHandover() { handoverUntil = io.github.novatv.play.platform.nowMs() + 5_000; handingOver = true }

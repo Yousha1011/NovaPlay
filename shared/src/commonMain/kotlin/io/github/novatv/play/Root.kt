@@ -224,6 +224,12 @@ private fun RootBody() {
     androidx.compose.runtime.LaunchedEffect(App.away) { nav.covered = App.away }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
+    // A player drawn over the app closed (Windows): back to the open page, on the item last used, so keys work again.
+    androidx.compose.runtime.LaunchedEffect(App.playerClosed) {
+        if (App.playerClosed == 0) return@LaunchedEffect
+        delay(30)
+        try { nav.page(nav.tab).requestFocus() } catch (e: Exception) { try { nav.railFocus.requestFocus() } catch (e: Exception) { } }
+    }
     BackHandler(enabled = nav.back(railFocused) != Back.EXIT && io.github.novatv.play.ui.Pin.request == null &&
         io.github.novatv.play.data.Updates.offer == null) {
         when (nav.back(railFocused)) {

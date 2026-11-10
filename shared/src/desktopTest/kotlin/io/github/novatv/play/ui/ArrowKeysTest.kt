@@ -77,6 +77,33 @@ class ArrowKeysTest {
         onNodeWithTag("a").assertIsFocused()
     }
 
+    @Test fun arrowsLeaveTheSearchBoxAtItsEnds() = runComposeUiTest {
+        val field = FocusRequester()
+        setContent {
+            Column(Modifier.arrowKeysMoveFocus(LocalFocusManager.current)) {
+                Box(item("above"))
+                Row {
+                    Box(item("left"))
+                    InputField("ab", "Search", {}, Modifier.testTag("field").focusRequester(field).size(200.dp, 54.dp))
+                    Box(item("right"))
+                }
+                Box(item("below"))
+            }
+        }
+        fun press(k: Key) = onRoot().performKeyInput { pressKey(k) }
+        runOnIdle { field.requestFocus() }
+        press(Key.DirectionDown); onNodeWithTag("below").assertIsFocused()
+        runOnIdle { field.requestFocus() }
+        press(Key.DirectionUp); onNodeWithTag("above").assertIsFocused()
+        // In the text, Left and Right move the cursor first; at the ends they move on.
+        runOnIdle { field.requestFocus() }
+        press(Key.MoveEnd); press(Key.DirectionLeft); onNodeWithTag("field").assertIsFocused()
+        press(Key.DirectionLeft); onNodeWithTag("field").assertIsFocused()
+        press(Key.DirectionLeft); onNodeWithTag("left").assertIsFocused()
+        runOnIdle { field.requestFocus() }
+        press(Key.MoveEnd); press(Key.DirectionRight); onNodeWithTag("right").assertIsFocused()
+    }
+
     @Test fun enterSelectsTheFocusedTile() = runComposeUiTest {
         val start = FocusRequester(); var clicks = 0
         setContent {
