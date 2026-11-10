@@ -225,6 +225,7 @@ private fun RootBody() {
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
     // A player drawn over the app closed (Windows): back to the open page, on the item last used, so keys work again.
+    androidx.compose.runtime.SideEffect { App.openTab = nav.tab.name; App.menuFocused = nav.menuOpen }
     androidx.compose.runtime.LaunchedEffect(App.playerClosed) {
         if (App.playerClosed == 0) return@LaunchedEffect
         delay(30)

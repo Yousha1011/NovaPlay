@@ -30,6 +30,9 @@ object App {
 
     /** The app's window is out of sight: the full-screen player is over it, or the app is in the background. */
     var away by androidx.compose.runtime.mutableStateOf(false)
+    /** The open tab and whether the menu has focus, for the Windows dev build's test driver (read only; nothing acts on it). */
+    @Volatile var openTab: String = "HOME"
+    @Volatile var menuFocused: Boolean = false
 
     /** What the player plays next (lists of channels are too big to pass around). */
     @Volatile var pending: PlayItem? = null

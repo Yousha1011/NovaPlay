@@ -101,6 +101,7 @@ fun main() {
             icon = painterResource("icon.png"),
             state = window,
             onPreviewKeyEvent = { e ->
+                if (AutoTest.scenario != null && e.type == KeyEventType.KeyDown) AutoTest.received++
                 when {
                     e.type != KeyEventType.KeyDown -> false
                     // F11 for full screen, as in a browser.
@@ -111,6 +112,8 @@ fun main() {
             },
         ) {
             val frame = this@Window.window
+            // Development only: a test scenario when the dev build is started with NOVAPLAY_AUTOTEST (see AutoTest).
+            if (AutoTest.scenario != null) LaunchedEffect(frame) { AutoTest.start(frame) }
             // Back to NovaPlay's window: playlist servers that sleep when idle are woken (see Repo.wakeServers).
             androidx.compose.runtime.DisposableEffect(frame) {
                 val l = object : java.awt.event.WindowAdapter() {

@@ -160,6 +160,9 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
+        AutoTest.vlcCreated.incrementAndGet()
+        // Development only: what the test driver reads (see AutoTest); read only.
+        if (AutoTest.scenario != null) AutoTest.full = { AutoTest.FullState((item as? PlayItem.Live)?.channels?.getOrNull(index)?.name ?: item.title, playing, buffering, error) }
         player.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
         player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
             override fun playing(mediaPlayer: MediaPlayer) { playing = true; buffering = false; error = null }
@@ -181,6 +184,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             (item as? PlayItem.Vod)?.let { saveProgress(it, player.status().time(), player.status().length()) }
             player.controls().stop()
             player.release()
+            AutoTest.vlcReleased.incrementAndGet(); AutoTest.full = null
         }
     }
 

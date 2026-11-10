@@ -70,6 +70,7 @@ import io.github.novatv.play.ui.Spinner
 import io.github.novatv.play.ui.T
 import io.github.novatv.play.ui.Text
 import io.github.novatv.play.ui.Tile
+import io.github.novatv.play.ui.arrowKeysMoveFocus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,12 +90,17 @@ private class Vlcp(val frames: Frames = Frames()) {
         it.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
     }
     @Volatile var dropped = false
+    init { AutoTest.vlcCreated.incrementAndGet() }
+    /** The mute last asked of VLC (VLC's own read-back isn't reliable on Windows). */
+    @Volatile var muted = false
+        private set
+    fun mute(on: Boolean) { muted = on; player.audio().isMute = on }
     private val stats = uk.co.caprica.vlcj.media.MediaStatistics()
 
     /** Bytes read from the stream so far (stops growing when the server closes it). */
     fun bytesRead(): Int = runCatching { if (player.media().info().statistics(stats)) stats.inputBytesRead() else -1 }.getOrDefault(-1)
 
-    fun release() { runCatching { player.controls().stop() }; runCatching { player.release() } }
+    fun release() { runCatching { player.controls().stop() }; runCatching { player.release() }; AutoTest.vlcReleased.incrementAndGet() }
 }
 
 /**
@@ -192,7 +198,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         val old = s.current
         s.standby = null
         s.current = sb
-        sb.player.audio().isMute = screens.indexOf(s) != active
+        sb.mute(screens.indexOf(s) != active)
         sb.player.controls().play()
         s.openedAt = now; s.playingSince = now; s.lastBytes = 0; s.bytesAt = now
         multiLog("channel ${s.channel}: handed over")
@@ -200,7 +206,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
     }
     fun sound(a: Int) {
         active = a.coerceIn(0, screens.lastIndex)
-        screens.forEachIndexed { i, s -> s.player.audio().isMute = i != active }
+        screens.forEachIndexed { i, s -> s.current.mute(i != active) }
     }
     var limitWarned by remember { mutableStateOf(false) }
     /** A screen keeps failing: when the playlist's stream limit may be why, say so (once). */
@@ -229,7 +235,14 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
     DisposableEffect(Unit) {
         screens.forEach { open(it) }
         sound(0)
-        onDispose { screens.forEach { it.release() }; screens.clear() }
+        // Development only: what the test driver reads (see AutoTest); read only.
+        if (AutoTest.scenario != null) AutoTest.multi = {
+            AutoTest.MultiState(active, picking, screens.map { s ->
+                AutoTest.ScreenState(chans.getOrNull(s.channel)?.name ?: "?", s.current.muted,
+                    s.buffering, s.error, s.playingSince > 0, s.hd)
+            })
+        }
+        onDispose { AutoTest.multi = null; screens.forEach { it.release() }; screens.clear() }
     }
     // The watchdog: a dropped stream reconnects after a short wait (longer after each failure in a row); a picture that
     // stops changing for too long, or never starts, is opened again.
@@ -346,7 +359,7 @@ private fun ScreenPicker(chans: List<io.github.novatv.play.data.Channel>, curren
     val back = { when { game != null -> game = null; source != null -> source = null; else -> onCancel() } }
     when (source) {
         null -> Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures(onTap = { onCancel() }) }
-            .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onCancel(); true } else false },
+            .pickerKeys(onCancel),
             contentAlignment = Alignment.Center) {
             Column(Modifier.clip(RoundedCornerShape(18.dp)).background(Color(0xF00A0E17)).pointerInput(Unit) { detectTapGestures { } }.padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
@@ -355,7 +368,7 @@ private fun ScreenPicker(chans: List<io.github.novatv.play.data.Channel>, curren
                 Text("Pick a channel, or a game and the channel showing it", style = T.small)
                 Spacer(Modifier.height(22.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Pill("Live TV", onClick = { source = "live" }, icon = Icons.Rounded.LiveTv, primary = true)
+                    Pill("Live TV", onClick = { source = "live" }, modifier = Modifier.takesFocus(), icon = Icons.Rounded.LiveTv, primary = true)
                     Pill("Sports", onClick = { source = "sports" }, icon = Icons.Rounded.SportsSoccer)
                     Pill("Cancel", onClick = onCancel)
                 }
@@ -373,11 +386,11 @@ private fun GamePicker(game: io.github.novatv.play.sports.SportEvent?, choose: (
     val sports by App.repo.sports.collectAsState()
     LaunchedEffect(Unit) { App.repo.sportsRepo.refresh() }
     Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures(onTap = { onBack() }) }
-        .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onBack(); true } else false }) {
+        .pickerKeys(onBack)) {
         Column(Modifier.width(560.dp).fillMaxHeight().background(Color(0xF00A0E17)).pointerInput(Unit) { detectTapGestures { } }) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(game?.title ?: "Pick a game", style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Pill("Back", onClick = onBack)
+                Pill("Back", onClick = onBack, modifier = Modifier.takesFocus())
             }
             if (game == null) {
                 val now = System.currentTimeMillis()
@@ -433,7 +446,7 @@ private fun ChannelPicker(chans: List<io.github.novatv.play.data.Channel>, curre
                           onPick: (io.github.novatv.play.data.Channel) -> Unit, onCancel: () -> Unit) {
     val state = rememberLazyListState(initialFirstVisibleItemIndex = (current - 4).coerceAtLeast(0))
     Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures(onTap = { onCancel() }) }
-        .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onCancel(); true } else false }) {
+        .pickerKeys(onCancel)) {
         Column(Modifier.width(460.dp).fillMaxHeight().background(Color(0xF00A0E17)).pointerInput(Unit) { detectTapGestures { } }) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = T.h2, modifier = Modifier.weight(1f))
@@ -441,7 +454,7 @@ private fun ChannelPicker(chans: List<io.github.novatv.play.data.Channel>, curre
             }
             LazyColumn(state = state, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(chans, key = { _, c -> c.id }) { i, c ->
-                    Tile({ onPick(c) }, Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(10.dp), scale = 1.02f,
+                    Tile({ onPick(c) }, Modifier.fillMaxWidth().height(56.dp).let { if (i == current) it.takesFocus() else it }, shape = RoundedCornerShape(10.dp), scale = 1.02f,
                         color = if (i == current) C.accent.copy(alpha = 0.25f) else Color.Transparent) {
                         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("${c.number}", style = T.small, modifier = Modifier.width(52.dp))
@@ -454,4 +467,23 @@ private fun ChannelPicker(chans: List<io.github.novatv.play.data.Channel>, curre
             }
         }
     }
+}
+
+/**
+ * Keyboard in multi-view's pickers: Esc goes back, and the arrows move between their buttons and channels (the app's
+ * own arrow keys are off while the player is open, since the player and the screen grid use them).
+ */
+@Composable
+private fun Modifier.pickerKeys(onBack: () -> Unit): Modifier {
+    val fm = androidx.compose.ui.platform.LocalFocusManager.current
+    return onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onBack(); true } else false }
+        .arrowKeysMoveFocus(fm)
+}
+
+/** Takes keyboard focus when it appears, so a picker opened from the keyboard can be used without a click. */
+@Composable
+private fun Modifier.takesFocus(): Modifier {
+    val f = remember { FocusRequester() }
+    LaunchedEffect(Unit) { repeat(5) { try { f.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(60) } } }
+    return focusRequester(f)
 }
