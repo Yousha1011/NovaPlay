@@ -200,7 +200,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                     is PlayItem.Vod -> it.movie?.let { m -> p.movieUrl(m) } ?: p.episodeUrl(it.series!!, it.episode!!)
                 }
             } catch (e: Exception) { null }
-        }
+        }?.let(AutoTest::stream)
         if (url == null) { error = "This stream could not be opened"; buffering = false; return@LaunchedEffect }
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
         player.media().play(url, *opts)

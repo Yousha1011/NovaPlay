@@ -173,7 +173,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         scope.launch {
             val stream = withContext(IO) { streamFor(chans[s.channel]) }
             s.hd = stream.id != chans[s.channel].id
-            val url = withContext(IO) { try { App.repo.provider?.liveUrl(stream) } catch (e: Exception) { null } }
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(stream)?.let(AutoTest::stream) } catch (e: Exception) { null } }
             if (s !in screens) return@launch
             if (url == null) { s.current.dropped = true; return@launch }
             val v = s.current
@@ -187,7 +187,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         s.listen(sb)
         s.standby = sb
         scope.launch {
-            val url = withContext(IO) { try { App.repo.provider?.liveUrl(streamFor(chans[s.channel])) } catch (e: Exception) { null } }
+            val url = withContext(IO) { try { App.repo.provider?.liveUrl(streamFor(chans[s.channel]))?.let(AutoTest::stream) } catch (e: Exception) { null } }
             if (url == null || s.standby !== sb) return@launch
             withContext(IO) { sb.player.media().play(url, *opts, ":start-paused") }
         }

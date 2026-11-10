@@ -35,6 +35,11 @@ object AutoTest {
     val vlcReleased = java.util.concurrent.atomic.AtomicInteger()
     fun vlcLive() = vlcCreated.get() - vlcReleased.get()
 
+    /** Scenarios that cut the network route every stream through [relay]; others leave stream addresses alone. */
+    val relay: StreamRelay? by lazy { if (scenario?.startsWith("net") == true) StreamRelay(io.github.novatv.play.data.Http.UA) { log(it) } else null }
+    /** A player's stream address: through the relay while a network scenario runs, otherwise unchanged. */
+    @JvmStatic fun stream(url: String): String = relay?.wrap(url) ?: url
+
     suspend fun multiNow(): MultiState? = onUi { multi?.invoke() }
     suspend fun fullNow(): FullState? = onUi { full?.invoke() }
 
@@ -58,6 +63,7 @@ object AutoTest {
                 when (s) {
                     "spike" -> spike()
                     "probes" -> probes()
+                    "netdrop" -> netDrop()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -183,5 +189,58 @@ object AutoTest {
         delay(2000)
         log("end: vlc made ${vlcCreated.get()}, freed ${vlcReleased.get()}")
         check("every VLC player freed", vlcLive() == 0)
+    }
+
+    /** Opens a Live TV channel full screen, then multi-view with two screens (the picker closed). */
+    private suspend fun intoMultiView(): Boolean {
+        if (!waitForLibrary()) return false
+        delay(3000)
+        if (!goTab("LIVE")) return false
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
+        if (!waitFor(20_000) { full?.invoke()?.playing == true }) { log("full screen never played"); return false }
+        press(KeyEvent.VK_M, after = 0)
+        if (!waitFor(6000) { multi != null }) return false
+        if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 1500)
+        return waitFor(30_000) { multi?.invoke()?.let { m -> m.picking == null && m.screens.all { it.playing } } == true }
+    }
+
+    private fun screens(m: MultiState?) = m?.screens?.joinToString(" | ") { "${it.channel.take(18)}: " +
+        (it.error ?: if (it.buffering) "buffering" else if (it.playing) "playing" else "starting") } ?: "no multi-view"
+
+    /** Step 8: the connection drops for 30 s with multi-view open, then comes back. */
+    private suspend fun netDrop() {
+        val r = relay ?: run { check("relay running", false); return }
+        check("into multi-view, both screens playing", intoMultiView())
+        log("streams through the relay: ${r.streams()} (served ${r.served})")
+        check("streams go through the relay", r.served > 0)
+        delay(5000)
+        log("before: ${screens(multiNow())}")
+        log("CUT: dropping every stream for 30 s")
+        r.cutAll()
+        val cutAt = System.currentTimeMillis()
+        var sawTrouble = false
+        while (System.currentTimeMillis() - cutAt < 30_000) {
+            delay(3000); val m = multiNow()
+            if (m?.screens?.any { it.error != null || it.buffering || !it.playing } == true) sawTrouble = true
+            log("cut +${(System.currentTimeMillis() - cutAt) / 1000}s: ${screens(m)}  (refused ${r.refused})")
+        }
+        check("the screens noticed the drop", sawTrouble)
+        r.restore()
+        val backAt = System.currentTimeMillis()
+        log("RESTORED")
+        val back = waitFor(120_000) { multi?.invoke()?.screens?.all { it.playing && it.error == null && !it.buffering } == true }
+        log("after ${(System.currentTimeMillis() - backAt) / 1000}s: ${screens(multiNow())}")
+        check("both screens came back by themselves", back)
+        delay(10_000)
+        log("10 s later: ${screens(multiNow())}  vlc live=${vlcLive()}")
+        check("still playing 10 s later", multiNow()?.screens?.all { it.playing && it.error == null } == true)
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("multi-view closed", waitFor(6000) { multi == null })
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("player closed", waitFor(6000) { Desktop.playing == null })
+        delay(3000)
+        log("end: vlc made ${vlcCreated.get()}, freed ${vlcReleased.get()}")
+        check("every VLC player freed", vlcLive() == 0)
+        r.close()
     }
 }
