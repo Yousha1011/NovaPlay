@@ -29,6 +29,10 @@ object AutoTest {
     data class MultiState(val active: Int, val picking: Int?, val screens: List<ScreenState>)
     data class FullState(val channel: String, val playing: Boolean, val buffering: Boolean, val error: String?)
     @Volatile var multi: (() -> MultiState)? = null
+    /** Multi-view's own buttons (add a screen, change a screen's channel, remove one), for the driver to press. */
+    class MultiActions(val add: () -> Unit, val changeNext: (Int) -> Unit, val remove: (Int) -> Unit)
+    @Volatile var multiDo: MultiActions? = null
+    suspend fun multiAction(name: String, f: (MultiActions) -> Unit) { log("button: $name"); onUi { multiDo?.let(f) ?: log("no multi-view") } }
     @Volatile var full: (() -> FullState)? = null
     /** VLC players made and released, by the full-screen player and multi-view. */
     val vlcCreated = java.util.concurrent.atomic.AtomicInteger()
@@ -64,6 +68,9 @@ object AutoTest {
                     "spike" -> spike()
                     "probes" -> probes()
                     "netdrop" -> netDrop()
+                    "multiview" -> multiViewFull()
+                    "cycles" -> cycles()
+                    "limits" -> limits()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -242,5 +249,126 @@ object AutoTest {
         log("end: vlc made ${vlcCreated.get()}, freed ${vlcReleased.get()}")
         check("every VLC player freed", vlcLive() == 0)
         r.close()
+    }
+
+    private fun soundOk(st: MultiState?) = st != null && st.screens.count { !it.muted } == 1 && !st.screens[st.active].muted
+    private suspend fun allPlaying(n: Int, ms: Long = 40_000) =
+        waitFor(ms) { multi?.invoke()?.let { m -> m.screens.size == n && m.screens.all { it.playing && it.error == null } } == true }
+    private fun heap() = (Runtime.getRuntime().let { it.totalMemory() - it.freeMemory() } / (1024 * 1024))
+
+    /** Test 3 steps 1-7: four screens, sound, channels per screen, removing, back to full screen and Live TV. */
+    private suspend fun multiViewFull() {
+        check("1. multi-view from full screen, 2 screens playing", intoMultiView())
+        multiAction("Add a screen") { it.add() }
+        check("2. third screen added and playing", allPlaying(3))
+        multiAction("Add a screen") { it.add() }
+        check("2. fourth screen added and playing", allPlaying(4))
+        multiAction("Add a screen (at the limit)") { it.add() }
+        delay(1500)
+        check("2. no fifth screen (limit 4)", multiNow()?.screens?.size == 4)
+        log("4 screens: ${screens(multiNow())}  vlc live=${vlcLive()}")
+        val at4 = vlcLive()
+        for (k in 1..4) {
+            press(KeyEvent.VK_RIGHT, after = 800)
+            val m = multiNow()
+            check("3. sound only from screen ${m?.active}", soundOk(m))
+        }
+        val before = multiNow()!!.screens.map { it.channel }
+        multiAction("Change channel, screen 1") { it.changeNext(0) }
+        multiAction("Change channel, screen 3") { it.changeNext(2) }
+        val restarted = waitFor(4000) { multi?.invoke()?.screens?.let { it[0].channel != before[0] && it[2].channel != before[2] } == true }
+        check("4. screens 1 and 3 switched channel", restarted)
+        delay(1500)
+        check("4. both changed screens playing again", allPlaying(4))
+        val after = multiNow()!!.screens.map { it.channel }
+        log("channels before $before")
+        log("channels after  $after")
+        check("4. screens 1 and 3 changed, 2 and 4 kept theirs", after[0] != before[0] && after[2] != before[2] && after[1] == before[1] && after[3] == before[3])
+        multiAction("Remove screen 4") { it.remove(3) }
+        multiAction("Remove screen 2") { it.remove(1) }
+        check("5. two screens left, playing", allPlaying(2))
+        delay(3000)
+        log("after removing: ${screens(multiNow())}  vlc live=${vlcLive()} (was $at4 with 4)")
+        // Each screen has its player and, for a moment after a stream drops, a standby: 1 full screen + up to 2 per screen.
+        check("5. removed screens' players freed (at most 1 + 2 per screen left)", vlcLive() <= 1 + 2 * 2)
+        check("5. sound still from one screen", soundOk(multiNow()))
+        val chosen = multiNow()!!.let { it.screens[it.active].channel }
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("6. multi-view closed", waitFor(6000) { multi == null })
+        check("6. full screen playing", waitFor(20_000) { full?.invoke()?.playing == true })
+        check("6. full screen carries on with the selected screen ($chosen)", fullNow()?.channel == chosen)
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("7. player closed", waitFor(6000) { Desktop.playing == null })
+        delay(1500)
+        check("7. back on Live TV", App.openTab == "LIVE" && !App.menuFocused)
+        press(KeyEvent.VK_DOWN, after = 800); press(KeyEvent.VK_ENTER, after = 0)
+        check("7. arrows and Enter work: next channel plays", waitFor(20_000) { full?.invoke()?.playing == true })
+        log("7. now playing ${fullNow()?.channel}")
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("7. player closed", waitFor(6000) { Desktop.playing == null })
+        delay(3000)
+        log("end: vlc made ${vlcCreated.get()}, freed ${vlcReleased.get()}")
+        check("every VLC player freed", vlcLive() == 0)
+    }
+
+    /** Test 3 step 10: into multi-view and out again, ten times, then a quiet minute. */
+    private suspend fun cycles() {
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
+        check("full screen playing", waitFor(20_000) { full?.invoke()?.playing == true })
+        delay(5000); System.gc(); delay(1000)
+        log("baseline: vlc live=${vlcLive()} heap=${heap()} MB threads=${Thread.activeCount()}")
+        val live = mutableListOf<Int>()
+        for (c in 1..10) {
+            press(KeyEvent.VK_M, after = 0)
+            if (!waitFor(6000) { multi != null }) { check("cycle $c: multi-view opened", false); break }
+            if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 1000)
+            val ok = allPlaying(2, 30_000)
+            log("cycle $c: in multi-view, both playing=$ok vlc live=${vlcLive()}")
+            delay(5000)
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            if (!waitFor(6000) { multi == null }) { check("cycle $c: multi-view closed", false); break }
+            waitFor(20_000) { full?.invoke()?.playing == true }
+            delay(2000)
+            live += vlcLive()
+            log("cycle $c: out, vlc live=${vlcLive()} heap=${heap()} MB threads=${Thread.activeCount()}")
+        }
+        check("ten cycles completed", live.size == 10)
+        check("one VLC player left after every cycle", live.all { it == 1 })
+        log("quiet minute")
+        delay(60_000); System.gc(); delay(1000)
+        log("after a quiet minute: vlc live=${vlcLive()} heap=${heap()} MB threads=${Thread.activeCount()}")
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("player closed", waitFor(6000) { Desktop.playing == null })
+        delay(3000)
+        log("end: vlc made ${vlcCreated.get()}, freed ${vlcReleased.get()} threads=${Thread.activeCount()}")
+        check("every VLC player freed", vlcLive() == 0)
+    }
+
+    /** Counts multi-view's "stream ended / cut off" events over [ms] (the multi-view log). */
+    private suspend fun drops(ms: Long): Int {
+        val f = File(System.getProperty("java.io.tmpdir"), "novaplay-multiview.log")
+        val start = runCatching { f.readLines().size }.getOrDefault(0)
+        delay(ms)
+        return runCatching { f.readLines().drop(start).count { "stream ended" in it || "cut off" in it } }.getOrDefault(-1)
+    }
+
+    /** Does the playlist close streams when more play at once? Drops per minute with 2, 3 and 4 screens. */
+    private suspend fun limits() {
+        if (System.getenv("NOVAPLAY_LOG") == null) log("note: NOVAPLAY_LOG not set, drops can't be counted")
+        check("into multi-view, 2 screens", intoMultiView())
+        val per = mutableMapOf<Int, Int>()
+        per[2] = drops(60_000); log("2 screens: ${per[2]} drops in 60 s")
+        multiAction("Add a screen") { it.add() }; allPlaying(3)
+        per[3] = drops(60_000); log("3 screens: ${per[3]} drops in 60 s")
+        multiAction("Add a screen") { it.add() }; allPlaying(4)
+        per[4] = drops(60_000); log("4 screens: ${per[4]} drops in 60 s")
+        log("drops per minute by screens: $per (the full-screen player stays open behind: one more stream each)")
+        check("all four still playing at the end", allPlaying(4, 20_000))
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        delay(3000)
+        check("every VLC player freed", vlcLive() == 0)
     }
 }

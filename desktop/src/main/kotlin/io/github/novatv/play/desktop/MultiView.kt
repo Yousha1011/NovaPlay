@@ -236,13 +236,18 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         screens.forEach { open(it) }
         sound(0)
         // Development only: what the test driver reads (see AutoTest); read only.
+        if (AutoTest.scenario != null) AutoTest.multiDo = AutoTest.MultiActions(
+            add = { add((screens[active].channel + screens.size).mod(chans.size)) },
+            changeNext = { i -> change(i, screens[i].channel + 1) },
+            remove = { i -> remove(i) },
+        )
         if (AutoTest.scenario != null) AutoTest.multi = {
             AutoTest.MultiState(active, picking, screens.map { s ->
                 AutoTest.ScreenState(chans.getOrNull(s.channel)?.name ?: "?", s.current.muted,
                     s.buffering, s.error, s.playingSince > 0, s.hd)
             })
         }
-        onDispose { AutoTest.multi = null; screens.forEach { it.release() }; screens.clear() }
+        onDispose { AutoTest.multi = null; AutoTest.multiDo = null; screens.forEach { it.release() }; screens.clear() }
     }
     // The watchdog: a dropped stream reconnects after a short wait (longer after each failure in a row); a picture that
     // stops changing for too long, or never starts, is opened again.

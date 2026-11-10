@@ -15,7 +15,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
     // VLC's engine: plays the live TS, HLS and film streams IPTV panels send.
     implementation("uk.co.caprica:vlcj:4.8.3")
+    testImplementation(kotlin("test"))
 }
+
+tasks.test { useJUnitPlatform() }
 
 compose.desktop {
     application {
