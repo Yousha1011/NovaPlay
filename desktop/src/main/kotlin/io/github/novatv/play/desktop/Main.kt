@@ -80,7 +80,18 @@ private fun firstInstance(): Boolean {
 fun main() {
     if (!firstInstance()) return
     val previous = Thread.getDefaultUncaughtExceptionHandler()
-    Thread.setDefaultUncaughtExceptionHandler { t, e -> io.github.novatv.play.data.CrashLog.record(e, "Windows, ${t.name}"); previous?.uncaughtException(t, e) }
+    Thread.setDefaultUncaughtExceptionHandler { t, e ->
+        io.github.novatv.play.data.CrashLog.record(e, "Windows, ${t.name}")
+        // The short record above (shown in Settings › About) keeps 12 lines per cause; the whole trace goes beside it
+        // and to the console, so a crash deep in Compose still shows which screen it came from.
+        runCatching {
+            val full = "NovaPlay ${io.github.novatv.play.data.Updates.CURRENT} · Windows, ${t.name} · ${java.time.LocalDateTime.now().withNano(0)}\n${e.stackTraceToString()}"
+            java.io.File(System.getenv("APPDATA") ?: System.getProperty("user.home"), "NovaPlay/cache/last-crash-full.txt")
+                .apply { parentFile?.mkdirs() }.writeText(full)
+            System.err.println(full)
+        }
+        previous?.uncaughtException(t, e)
+    }
     App.start(Desktop)
     application {
         val window = rememberWindowState(size = DpSize(1440.dp, 860.dp))
