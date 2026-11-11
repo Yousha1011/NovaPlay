@@ -34,6 +34,7 @@ import io.github.novatv.play.ui.C
 import io.github.novatv.play.ui.NovaTheme
 import io.github.novatv.play.ui.T
 import io.github.novatv.play.ui.arrowKeysMoveFocus
+import androidx.compose.ui.focus.onFocusChanged
 import io.github.novatv.play.ui.Text
 import kotlinx.coroutines.delay
 
@@ -95,6 +96,7 @@ fun main() {
     App.start(Desktop)
     application {
         val window = rememberWindowState(size = DpSize(1440.dp, 860.dp))
+        var contentFocused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
         Window(
             onCloseRequest = { Vlc.release(); exitApplication() },
             title = "NovaPlay",
@@ -107,6 +109,10 @@ fun main() {
                     // F11 for full screen, as in a browser.
                     e.key == Key.F11 -> { window.placement = if (window.placement == WindowPlacement.Fullscreen) WindowPlacement.Floating else WindowPlacement.Fullscreen; true }
                     e.key == Key.Escape && Desktop.playing == null -> BackKeys.back()
+                    // At launch nothing has focus, so the arrows have nothing to move from: the first one puts focus on
+                    // the menu, as Esc does.
+                    !contentFocused && Desktop.playing == null &&
+                        e.key in listOf(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight) -> BackKeys.back()
                     else -> false
                 }
             },
@@ -128,7 +134,8 @@ fun main() {
                 frame.toFront(); frame.requestFocus()
             }
             val fm = androidx.compose.ui.platform.LocalFocusManager.current
-            Box(Modifier.fillMaxSize().background(C.bg).arrowKeysMoveFocus(fm) { Desktop.playing == null }) {
+            Box(Modifier.fillMaxSize().background(C.bg).arrowKeysMoveFocus(fm) { Desktop.playing == null }
+                .onFocusChanged { contentFocused = it.hasFocus; if (AutoTest.scenario != null) AutoTest.focusInside = it.hasFocus }) {
                 NovaTheme {
                     Root()
                     Desktop.playing?.let { item ->

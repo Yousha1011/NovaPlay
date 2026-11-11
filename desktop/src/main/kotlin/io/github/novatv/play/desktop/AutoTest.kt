@@ -49,6 +49,8 @@ object AutoTest {
 
     /** Key presses Compose has seen in the window (counted in Main's key handler while a scenario runs). */
     @Volatile var received = 0
+    /** Something inside the window's content has keyboard focus (Main's content box, while a scenario runs). */
+    @Volatile var focusInside = false
 
     fun log(msg: String) {
         val line = "${java.time.LocalTime.now().withNano(0)} $msg"
@@ -71,6 +73,7 @@ object AutoTest {
                     "multiview" -> multiViewFull()
                     "cycles" -> cycles()
                     "limits" -> limits()
+                    "launch" -> launch()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -140,6 +143,33 @@ object AutoTest {
     }
 
     // ---- scenarios ----------------------------------------------------------------------------------------------
+
+    /** Right after launch, with no Esc or click first: do the arrow keys move focus straight away? */
+    private suspend fun launch() {
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        log("at launch: focus inside=$focusInside tab=${App.openTab} menu=${App.menuFocused}")
+        val start = App.openTab
+        press(KeyEvent.VK_DOWN, after = 900)
+        check("first arrow key puts focus somewhere", focusInside)
+        log("after Down: focus inside=$focusInside tab=${App.openTab} menu=${App.menuFocused}")
+        press(KeyEvent.VK_DOWN, after = 900)
+        check("arrows move through the menu from launch ($start -> ${App.openTab})", App.menuFocused && App.openTab != start)
+        press(KeyEvent.VK_UP, after = 900)
+        check("Up comes back", App.menuFocused)
+        check("reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
+        check("Enter plays a channel", waitFor(20_000) { full?.invoke()?.playing == true })
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("player closed", waitFor(6000) { Desktop.playing == null })
+        delay(1500)
+        check("focus back on the page after the player", focusInside && !App.menuFocused && App.openTab == "LIVE")
+        check("reached Search", goTab("SEARCH"))
+        log("search: focus inside=$focusInside")
+        press(KeyEvent.VK_LEFT, after = 900)
+        check("Left from Search reaches the menu", App.menuFocused)
+        delay(1500)
+        check("every VLC player freed", vlcLive() == 0)
+    }
 
     /** Step 1: do keys sent from inside the app reach Compose, even with the window in the background? */
     private suspend fun spike() {
