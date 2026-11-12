@@ -97,8 +97,11 @@ private class Vlcp(val frames: Frames = Frames()) {
     fun mute(on: Boolean) { muted = on; player.audio().isMute = on }
     private val stats = uk.co.caprica.vlcj.media.MediaStatistics()
 
-    /** Bytes read from the stream so far (stops growing when the server closes it). */
-    fun bytesRead(): Int = runCatching { if (player.media().info().statistics(stats)) stats.inputBytesRead() else -1 }.getOrDefault(-1)
+    /**
+     * Bytes of the stream played so far (stops growing when the server closes it). The demuxer's count: with HLS the
+     * input count only covers the playlist file, so it never grows.
+     */
+    fun bytesRead(): Int = runCatching { if (player.media().info().statistics(stats)) stats.demuxBytesRead() else -1 }.getOrDefault(-1)
 
     fun release() { runCatching { player.controls().stop() }; runCatching { player.release() }; AutoTest.vlcReleased.incrementAndGet() }
 }
@@ -244,7 +247,11 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         if (AutoTest.scenario != null) AutoTest.multi = {
             AutoTest.MultiState(active, picking, screens.map { s ->
                 AutoTest.ScreenState(chans.getOrNull(s.channel)?.name ?: "?", s.current.muted,
-                    s.buffering, s.error, s.playingSince > 0, s.hd)
+                    s.buffering, s.error, s.playingSince > 0, s.hd,
+                    System.currentTimeMillis().let { t -> "frameAge=${if (s.frames.lastFrameAt == 0L) "none" else "${(t - s.frames.lastFrameAt) / 1000}s"} " +
+                        "still=${if (s.frames.changedAt == 0L) "none" else "${(t - s.frames.changedAt) / 1000}s"} " +
+                        "vlc=${runCatching { s.player.status().state() }.getOrNull()} bytes=${s.current.bytesRead()} " +
+                        "standby=${s.standby?.let { sb -> "${runCatching { sb.player.status().state() }.getOrNull()}/frame=${sb.frames.lastFrameAt > 0}/bytes=${sb.bytesRead()}" } ?: "-"}" })
             })
         }
         onDispose { AutoTest.multi = null; AutoTest.multiDo = null; screens.forEach { it.release() }; screens.clear() }
@@ -266,10 +273,16 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
                     openStandby(s)
                 }
                 s.standby?.let { sb -> if (sb.dropped) { s.standby = null; scope.launch(IO) { sb.release() } } }
+                // Only a standby that has its picture can take over; one still opening would leave the screen on a
+                // player that never starts. It's let go, and the screen reconnects with its status showing.
+                val ready = s.standby?.let { it.frames.lastFrameAt > 0 } == true
+                if ((s.current.dropped || now - last > MultiView.STALL_MS) && s.standby != null && !ready) {
+                    s.standby?.let { sb -> s.standby = null; scope.launch(IO) { sb.release() } }
+                }
                 val wasPlaying = s.playingSince > 0 && now - s.playingSince > MultiView.SEAMLESS_AFTER_MS
                 when {
-                    (s.current.dropped || now - last > MultiView.STALL_MS) && s.standby != null -> handOver(s, now)
-                    s.current.dropped && wasPlaying -> { s.failures = 0; open(s, quiet = true) }
+                    (s.current.dropped || now - last > MultiView.STALL_MS) && ready -> handOver(s, now)
+                    s.current.dropped && wasPlaying -> { s.failures = 0; open(s, quiet = true); s.buffering = true }
                     s.current.dropped -> {
                         s.failures++
                         if (s.failures == MultiView.WARN_AFTER) warnLimit()

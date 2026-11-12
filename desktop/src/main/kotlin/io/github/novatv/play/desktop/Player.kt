@@ -111,6 +111,9 @@ internal class Frames {
     var bitmap: Bitmap? = null
     /** When the last frame arrived, to spot a picture that has frozen. */
     @Volatile var lastFrameAt = 0L
+    /** Development only: when the picture's content last changed (set while a test scenario runs). */
+    @Volatile var changedAt = 0L
+    private var sample = 0
     var size = IntSize.Zero
     private var bytes = ByteArray(0)
     var version by mutableIntStateOf(0)
@@ -136,6 +139,12 @@ internal class Frames {
                 if (bytes.size != buf.remaining()) return
                 buf.get(bytes)
                 b.installPixels(b.imageInfo, bytes, size.width * 4)
+                // Development only (test driver): when the picture's content last changed, sampled cheaply.
+                if (AutoTest.scenario != null) {
+                    var h = 0; var i = 0; val step = maxOf(1, bytes.size / 4096)
+                    while (i < bytes.size) { h = h * 31 + bytes[i]; i += step }
+                    if (h != sample) { sample = h; changedAt = System.currentTimeMillis() }
+                }
             }
             lastFrameAt = System.currentTimeMillis()
             version++

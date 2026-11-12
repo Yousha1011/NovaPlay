@@ -25,7 +25,7 @@ object AutoTest {
     private var window: java.awt.Window? = null
     private var failures = 0
     // ---- probes (read only; set by the player and multi-view while a scenario runs) ----
-    data class ScreenState(val channel: String, val muted: Boolean, val buffering: Boolean, val error: String?, val playing: Boolean, val hd: Boolean)
+    data class ScreenState(val channel: String, val muted: Boolean, val buffering: Boolean, val error: String?, val playing: Boolean, val hd: Boolean, val detail: String = "")
     data class MultiState(val active: Int, val picking: Int?, val screens: List<ScreenState>)
     data class FullState(val channel: String, val playing: Boolean, val buffering: Boolean, val error: String?)
     @Volatile var multi: (() -> MultiState)? = null
@@ -74,6 +74,7 @@ object AutoTest {
                     "cycles" -> cycles()
                     "limits" -> limits()
                     "launch" -> launch()
+                    "netfreeze" -> netFreeze()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -169,6 +170,32 @@ object AutoTest {
         check("Left from Search reaches the menu", App.menuFocused)
         delay(1500)
         check("every VLC player freed", vlcLive() == 0)
+    }
+
+    /** Investigation: second by second through a 30 s cut, what each screen shows and what its players are doing. */
+    private suspend fun netFreeze() {
+        val r = relay ?: run { check("relay running", false); return }
+        check("into multi-view, both screens playing", intoMultiView())
+        delay(15_000)
+        fun row(m: MultiState?) = m?.screens?.joinToString(" || ") { "${it.channel.take(14)} shows=" +
+            (it.error ?: if (it.buffering) "spinner" else "picture") + " playing=${it.playing} ${it.detail}" } ?: "no multi-view"
+        log("before: ${row(multiNow())}")
+        r.cutAll(); log("CUT")
+        val t0 = System.currentTimeMillis()
+        var frozenSilent = 0
+        while (System.currentTimeMillis() - t0 < 30_000) {
+            delay(1000); val m = multiNow()
+            m?.screens?.forEach { if (it.error == null && !it.buffering && Regex("still=([0-9]+)s").find(it.detail)?.groupValues?.get(1)?.toInt()?.let { a -> a >= 5 } == true) frozenSilent++ }
+            log("cut +${(System.currentTimeMillis() - t0) / 1000}s: ${row(m)}")
+        }
+        r.restore(); log("RESTORED")
+        val t1 = System.currentTimeMillis()
+        while (System.currentTimeMillis() - t1 < 25_000) { delay(1000); log("back +${(System.currentTimeMillis() - t1) / 1000}s: ${row(multiNow())}") }
+        log("seconds a screen showed a picture unchanged 5 s+ with no spinner or message: $frozenSilent")
+        check("no frozen picture without a status during the cut", frozenSilent == 0)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        r.close()
     }
 
     /** Step 1: do keys sent from inside the app reach Compose, even with the window in the background? */
