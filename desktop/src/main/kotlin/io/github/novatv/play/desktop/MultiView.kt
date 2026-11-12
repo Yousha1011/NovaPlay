@@ -250,6 +250,10 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
                     s.buffering, s.error, s.playingSince > 0, s.hd,
                     System.currentTimeMillis().let { t -> "frameAge=${if (s.frames.lastFrameAt == 0L) "none" else "${(t - s.frames.lastFrameAt) / 1000}s"} " +
                         "still=${if (s.frames.changedAt == 0L) "none" else "${(t - s.frames.changedAt) / 1000}s"} " +
+                        "time=${runCatching { s.player.status().time() }.getOrNull()} shown=${s.frames.displayed} lum=${s.frames.brightness} " +
+                        "src=${runCatching { s.player.media().info().mrl()?.let { m -> if (m.startsWith("http://127.0.0.1")) "relay" else "direct" } }.getOrNull()} " +
+                        "video=${runCatching { s.player.media().info().videoTracks().joinToString { v -> "${v.codecName()} ${v.width()}x${v.height()}" } }.getOrNull()} audio=${runCatching { s.player.media().info().audioTracks().size }.getOrNull()} " +
+                        "err=${s.error} buf=${s.buffering} since=${if (s.playingSince > 0) (t - s.playingSince) / 1000 else -1} " +
                         "vlc=${runCatching { s.player.status().state() }.getOrNull()} bytes=${s.current.bytesRead()} " +
                         "standby=${s.standby?.let { sb -> "${runCatching { sb.player.status().state() }.getOrNull()}/frame=${sb.frames.lastFrameAt > 0}/bytes=${sb.bytesRead()}" } ?: "-"}" })
             })

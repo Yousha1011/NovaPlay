@@ -113,7 +113,12 @@ internal class Frames {
     @Volatile var lastFrameAt = 0L
     /** Development only: when the picture's content last changed (set while a test scenario runs). */
     @Volatile var changedAt = 0L
-    private var sample = 0
+    /** Development only: frames VLC has handed over (set while a test scenario runs). */
+    @Volatile var displayed = 0L
+    /** Development only: average brightness (0-255) of the sampled pixels of the last frame. */
+    @Volatile var brightness = -1
+    /** No frame yet: a value no frame's fingerprint can have (an all-black frame's is 0). */
+    private var sample = Long.MIN_VALUE
     var size = IntSize.Zero
     private var bytes = ByteArray(0)
     var version by mutableIntStateOf(0)
@@ -143,7 +148,11 @@ internal class Frames {
                 if (AutoTest.scenario != null) {
                     var h = 0; var i = 0; val step = maxOf(1, bytes.size / 4096)
                     while (i < bytes.size) { h = h * 31 + bytes[i]; i += step }
-                    if (h != sample) { sample = h; changedAt = System.currentTimeMillis() }
+                    if (h.toLong() != sample) { sample = h.toLong(); changedAt = System.currentTimeMillis() }
+                    displayed++
+                    var sum = 0L; var cnt = 0; var j = 0
+                    while (j + 2 < bytes.size) { sum += (bytes[j].toInt() and 255) + (bytes[j + 1].toInt() and 255) + (bytes[j + 2].toInt() and 255); cnt += 3; j += step * 4 }
+                    brightness = if (cnt > 0) (sum / cnt).toInt() else -1
                 }
             }
             lastFrameAt = System.currentTimeMillis()
@@ -166,12 +175,27 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     var overlay by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var epg by remember { mutableStateOf<List<Programme>>(emptyList()) }
     var retry by remember { mutableIntStateOf(0) }
+    /** Times this live channel's stream has ended by itself since it was chosen (the server closed it). */
+    var liveEnds by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
         AutoTest.vlcCreated.incrementAndGet()
         // Development only: what the test driver reads (see AutoTest); read only.
-        if (AutoTest.scenario != null) AutoTest.full = { AutoTest.FullState((item as? PlayItem.Live)?.channels?.getOrNull(index)?.name ?: item.title, playing, buffering, error) }
+        if (AutoTest.scenario != null) AutoTest.full = { AutoTest.FullState((item as? PlayItem.Live)?.channels?.getOrNull(index)?.name ?: item.title, playing, buffering, error, frames.changedAt,
+            "idx=$index lum=${frames.brightness} vlc=${runCatching { player.status().state() }.getOrNull()} time=${runCatching { player.status().time() }.getOrNull()} shown=${frames.displayed} " +
+            "video=${runCatching { player.media().info().videoTracks().joinToString { "${it.codecName()} ${it.width()}x${it.height()}" } }.getOrNull()}") }
+        // Development only: every VLC event of this player into the test log, to see why a stream stops.
+        if (AutoTest.scenario != null) player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
+            fun ev(what: String) = AutoTest.log("VLC idx=$index $what shown=${frames.displayed} buf=$buffering playing=$playing")
+            override fun opening(mediaPlayer: MediaPlayer) = ev("opening")
+            override fun playing(mediaPlayer: MediaPlayer) = ev("playing")
+            override fun stopped(mediaPlayer: MediaPlayer) = ev("stopped")
+            override fun finished(mediaPlayer: MediaPlayer) = ev("finished")
+            override fun error(mediaPlayer: MediaPlayer) = ev("error")
+            override fun videoOutput(mediaPlayer: MediaPlayer, newCount: Int) = ev("video outputs $newCount")
+            override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) { if (newCache >= 100f) ev("buffered 100%") }
+        })
         player.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
         player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
             override fun playing(mediaPlayer: MediaPlayer) { playing = true; buffering = false; error = null }
@@ -181,6 +205,13 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) { position = newTime }
             override fun error(mediaPlayer: MediaPlayer) { error = "This stream could not be played"; buffering = false }
             override fun finished(mediaPlayer: MediaPlayer) {
+                // A live stream never ends on its own: the server closed it. Open it again once, quietly; if it ends
+                // again, say so (instead of leaving the last picture, or black, with nothing on screen).
+                if (item is PlayItem.Live) {
+                    playing = false
+                    if (liveEnds++ == 0) { buffering = true; retry++ } else { error = "This stream could not be played"; buffering = false }
+                    return
+                }
                 val v = item as? PlayItem.Vod ?: return
                 saveProgress(v, length, length)
                 val next = v.nextEpisodes.firstOrNull() ?: return
@@ -212,6 +243,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
         }?.let(AutoTest::stream)
         if (url == null) { error = "This stream could not be opened"; buffering = false; return@LaunchedEffect }
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
+        if (AutoTest.scenario != null) AutoTest.log("PLAY idx=$index (${if (url.startsWith("http://127.0.0.1")) "relay" else "direct"})")
         player.media().play(url, *opts)
         if (it is PlayItem.Vod) App.store.progress(it.key)?.let { p -> delay(800); player.controls().setTime(p.first) }
         if (it is PlayItem.Live) {
@@ -222,6 +254,8 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
         }
         overlay = System.currentTimeMillis()
     }
+    // Another channel or programme: its stream gets its own quiet retry.
+    LaunchedEffect(item, index) { liveEnds = 0 }
     // VOD: save progress every half minute.
     LaunchedEffect(item) {
         while (true) { delay(30_000); (item as? PlayItem.Vod)?.let { saveProgress(it, position, length) } }
@@ -269,7 +303,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                     Key.DirectionRight -> { seek(30_000); true }
                     Key.F -> { fullscreen(); true }
                     Key.M -> { startMulti(); true }
-                    Key.Enter -> { if (error != null) retry++ else overlay = System.currentTimeMillis(); true }
+                    Key.Enter -> { if (error != null) { liveEnds = 0; retry++ } else overlay = System.currentTimeMillis(); true }
                     else -> false
                 }
             }
@@ -284,7 +318,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                 Text(it, style = T.h2)
                 Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Pill("Try again", onClick = { retry++ }, primary = true)
+                    Pill("Try again", onClick = { liveEnds = 0; retry++ }, primary = true)
                     if (live != null) Pill("Next channel", onClick = { zap(1) })
                 }
             }

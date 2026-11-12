@@ -79,7 +79,8 @@ private fun firstInstance(): Boolean {
 }
 
 fun main() {
-    if (!firstInstance()) return
+    // A test run (development only) runs beside an open NovaPlay with its own data, and never signals it.
+    if (AutoTest.scenario == null && !firstInstance()) return
     val previous = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { t, e ->
         io.github.novatv.play.data.CrashLog.record(e, "Windows, ${t.name}")

@@ -21,13 +21,23 @@ import java.io.File
  */
 object AutoTest {
     val scenario: String? = System.getenv("NOVAPLAY_AUTOTEST")?.trim()?.lowercase()?.ifEmpty { null }
-    private val file = File(System.getProperty("java.io.tmpdir"), "novaplay-autotest.log")
+    /** The run's own log (the runner gives each run its own file and id, so no run can read another's result). */
+    private val file = System.getenv("NOVAPLAY_AUTOTEST_LOG")?.let(::File) ?: File(System.getProperty("java.io.tmpdir"), "novaplay-autotest.log")
+    private val runId: String = System.getenv("NOVAPLAY_AUTOTEST_RUN") ?: "local-${System.currentTimeMillis()}"
+    private fun envInt(k: String, d: Int) = System.getenv(k)?.toIntOrNull() ?: d
+    /** Stop conditions: more VLC players than this, more Java heap (MB) than this, or a run longer than this (s). */
+    private val maxPlayers = envInt("NOVAPLAY_AUTOTEST_MAX_PLAYERS", 6)
+    private val maxHeapMb = envInt("NOVAPLAY_AUTOTEST_MAX_HEAP_MB", 1500)
+    private val timeoutS = envInt("NOVAPLAY_AUTOTEST_TIMEOUT_S", 900)
+    /** Screens multi-view scenarios use (2 to 4; 2 while the framework is being verified). */
+    private val mvScreens = envInt("NOVAPLAY_AUTOTEST_SCREENS", 2).coerceIn(2, 4)
+    @Volatile private var ended = false
     private var window: java.awt.Window? = null
     private var failures = 0
     // ---- probes (read only; set by the player and multi-view while a scenario runs) ----
     data class ScreenState(val channel: String, val muted: Boolean, val buffering: Boolean, val error: String?, val playing: Boolean, val hd: Boolean, val detail: String = "")
     data class MultiState(val active: Int, val picking: Int?, val screens: List<ScreenState>)
-    data class FullState(val channel: String, val playing: Boolean, val buffering: Boolean, val error: String?)
+    data class FullState(val channel: String, val playing: Boolean, val buffering: Boolean, val error: String?, val changedAt: Long = 0L, val detail: String = "")
     @Volatile var multi: (() -> MultiState)? = null
     /** Multi-view's own buttons (add a screen, change a screen's channel, remove one), for the driver to press. */
     class MultiActions(val add: () -> Unit, val changeNext: (Int) -> Unit, val remove: (Int) -> Unit)
@@ -63,7 +73,21 @@ object AutoTest {
         val s = scenario ?: return
         window = w
         runCatching { file.delete() }
-        log("scenario '$s' starting")
+        log("BEGIN run=$runId scenario=$s pid=${ProcessHandle.current().pid()} maxPlayers=$maxPlayers maxHeapMb=$maxHeapMb timeoutS=$timeoutS screens=$mvScreens")
+        // Stop conditions, checked every 2 s: too many players, too much heap, or too long.
+        CoroutineScope(Dispatchers.Default).launch {
+            val t0 = System.currentTimeMillis()
+            while (!ended) {
+                delay(2000)
+                val why = when {
+                    vlcLive() > maxPlayers -> "too many VLC players (${vlcLive()} > $maxPlayers)"
+                    heap() > maxHeapMb -> run { System.gc(); if (heap() > maxHeapMb) "Java heap ${heap()} MB > $maxHeapMb" else null }
+                    System.currentTimeMillis() - t0 > timeoutS * 1000L -> "scenario ran over ${timeoutS}s"
+                    else -> null
+                } ?: continue
+                abort(why)
+            }
+        }
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 when (s) {
@@ -75,12 +99,29 @@ object AutoTest {
                     "limits" -> limits()
                     "launch" -> launch()
                     "netfreeze" -> netFreeze()
+                    "netsoak" -> netSoak()
+                    "netmulti" -> netMulti()
+                    "chancheck" -> chanCheck()
+                    "fullscreen" -> fullScreen()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
+            if (ended) return@launch
+            ended = true
             log(if (failures == 0) "RESULT PASS" else "RESULT FAIL ($failures)")
+            log("END run=$runId status=${if (failures == 0) "PASS" else "FAIL"} failures=$failures vlcLive=${vlcLive()}")
             if (System.getenv("NOVAPLAY_AUTOTEST_STAY") == null) { delay(1500); Vlc.release(); kotlin.system.exitProcess(if (failures == 0) 0 else 3) }
         }
+    }
+
+    /** A stop condition was hit: the run ends now as ABORTED (never PASS), and the app quits. */
+    private fun abort(why: String) {
+        if (ended) return
+        ended = true
+        log("STOP $why")
+        log("RESULT ABORTED")
+        log("END run=$runId status=ABORTED failures=${failures + 1} vlcLive=${vlcLive()}")
+        Runtime.getRuntime().halt(4)
     }
 
     // ---- checks -------------------------------------------------------------------------------------------------
@@ -424,6 +465,388 @@ object AutoTest {
         log("drops per minute by screens: $per (the full-screen player stays open behind: one more stream each)")
         check("all four still playing at the end", allPlaying(4, 20_000))
         press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        delay(3000)
+        check("every VLC player freed", vlcLive() == 0)
+    }
+
+    // ---- Windows Test 4: long run ---------------------------------------------------------------------------------
+
+    private val pid = ProcessHandle.current().pid()
+    private val samples = mutableListOf<String>()
+
+    /** Private memory (MB) and handle count of NovaPlay's own process, read from Windows; (-1, -1) if unavailable. */
+    private fun winStats(): Pair<Long, Long> = runCatching {
+        val cmd = "\$p=Get-Process -Id $pid; Write-Output ([string][long](\$p.PrivateMemorySize64/1MB) + ' ' + [string]\$p.HandleCount)"
+        val p = ProcessBuilder("powershell", "-NoProfile", "-Command", cmd).redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText().trim().lines().last().trim().split(' ')
+        p.waitFor(); out[0].toLong() to out[1].toLong()
+    }.getOrDefault(-1L to -1L)
+
+    private data class Res(val priv: Long, val handles: Long, val heap: Long, val threads: Int, val vlc: Int, val streams: Int)
+    private suspend fun sample(tag: String): Res {
+        System.gc(); delay(500)
+        val (priv, h) = withContext(Dispatchers.IO) { winStats() }
+        val r = Res(priv, h, heap(), Thread.activeCount(), vlcLive(), relay?.streams() ?: -1)
+        val line = "SAMPLE $tag: private=${r.priv} MB handles=${r.handles} heap=${r.heap} MB threads=${r.threads} vlc=${r.vlc} streams=${r.streams}"
+        samples += line; log(line); return r
+    }
+
+    // ---- what a picture is doing ----------------------------------------------------------------------------------
+
+    /**
+     * What a screen shows, judged from two looks a moment apart, using VLC's state, its clock, the frames it handed over
+     * (counted from when the channel was opened), whether the stream has a video track, the picture's brightness and
+     * when it last changed.
+     *
+     * Not failures: MOVING, STATIC (a still picture while frames keep coming), BLACK (frames keep coming but they are
+     * black: the filler a dead feed sends), STATUS (an error message on screen), BUFFERING (the spinner), STARTING
+     * (within [GRACE_MS] of opening, before VLC plays and frames flow).
+     * Failures, only once the start-up time is over and nothing on screen says why: STOPPED (VLC isn't playing),
+     * NO_VIDEO (VLC plays a stream with no video track), NO_FRAMES (a video track, but no frame since opening),
+     * FROZEN (frames stopped arriving, or the clock and the picture both stood still).
+     */
+    enum class Health { MOVING, STATIC, BLACK, STATUS, BUFFERING, STARTING, STOPPED, NO_VIDEO, NO_FRAMES, FROZEN }
+    private val failing = setOf(Health.STOPPED, Health.NO_VIDEO, Health.NO_FRAMES, Health.FROZEN)
+    private val alive = setOf(Health.MOVING, Health.STATIC, Health.BLACK)
+    /** Time a channel gets after opening before missing frames count (VLC's first frame can take ~10 s on a slow feed). */
+    private const val GRACE_MS = 12_000L
+
+    private data class Look(val shown: Long, val time: Long, val lum: Int, val still: Long, val vlc: String,
+                            val err: Boolean, val buf: Boolean, val video: Boolean, val idx: String?)
+    private fun field(d: String, k: String): String? = Regex("(?:^| )$k=([^ ]*)").find(d)?.groupValues?.get(1)
+    private fun look(detail: String, err: Boolean, buf: Boolean, still: Long? = null, base: Long = 0) = Look(
+        (field(detail, "shown")?.toLongOrNull() ?: -1).let { if (it < 0) it else it - base }, field(detail, "time")?.toLongOrNull() ?: -1,
+        field(detail, "lum")?.toIntOrNull() ?: -1, still ?: field(detail, "still")?.removeSuffix("s")?.toLongOrNull() ?: -1,
+        field(detail, "vlc") ?: "?", err, buf, !Regex("(?:^| )video=(?: |$)").containsMatchIn(detail) && field(detail, "video") != "null",
+        field(detail, "idx"))
+
+    /** [age]: ms since this channel was opened on this player. */
+    private fun health(a: Look, b: Look, age: Long): Health {
+        val flowing = b.vlc == "PLAYING" && b.shown > 0 && b.shown != a.shown
+        return when {
+            b.err -> Health.STATUS
+            age < GRACE_MS && !flowing -> if (b.buf) Health.BUFFERING else Health.STARTING
+            b.buf -> Health.BUFFERING
+            b.vlc != "PLAYING" -> Health.STOPPED
+            b.shown <= 0 -> if (!b.video) Health.NO_VIDEO else Health.NO_FRAMES
+            b.shown == a.shown -> Health.FROZEN                        // no frame handed over between the looks
+            // Frames, but the clock stood still and the picture hasn't changed for 3 s (the clock reads 0 for a while
+            // after a stream opens: not counted).
+            b.time > 0 && b.time <= a.time && b.still !in 0..2 -> Health.FROZEN
+            b.lum in 0..2 -> Health.BLACK
+            b.still in 0..4 -> Health.MOVING
+            else -> Health.STATIC
+        }
+    }
+
+    /** When each multi-view screen's current player started (a new player starts its frame count again). */
+    private val mvStart = LongArray(8)
+    private val mvLast = LongArray(8) { -1 }
+
+    /** Each multi-view screen's [Health] (a screen whose player was just replaced is judged on the new one alone). */
+    private suspend fun multiHealth(gap: Long = 1500): List<Health> {
+        val a = multiNow()?.screens ?: return emptyList(); delay(gap)
+        val b = multiNow()?.screens ?: return emptyList()
+        if (a.size != b.size) return multiHealth(gap)
+        val now = System.currentTimeMillis()
+        return b.indices.map { i ->
+            val lb = look(b[i].detail, b[i].error != null, b[i].buffering)
+            var la = look(a[i].detail, false, false)
+            if (i < 8) {
+                if (mvStart[i] == 0L || lb.shown < mvLast[i]) mvStart[i] = now
+                mvLast[i] = lb.shown
+            }
+            if (la.shown > lb.shown) la = la.copy(shown = 0, time = -1)
+            health(la, lb, if (i < 8) now - mvStart[i] else Long.MAX_VALUE)
+        }
+    }
+
+    private fun lookFull(f: FullState, base: Long) = look(f.detail, f.error != null, f.buffering,
+        if (f.changedAt == 0L) -1 else (System.currentTimeMillis() - f.changedAt) / 1000, base)
+
+    /** The full-screen player's [Health] [age] ms after the channel opened, frames counted from [base]; and its channel. */
+    private suspend fun fullHealth(base: Long, openedAt: Long, gap: Long = 1500): Pair<Health, String>? {
+        val a = fullNow() ?: return null; delay(gap)
+        val b = fullNow() ?: return null
+        return health(lookFull(a, base), lookFull(b, base), System.currentTimeMillis() - openedAt) to b.channel
+    }
+
+    /** The full-screen player's position in its channel list (changes on every channel change, even between equal names). */
+    private suspend fun fullIdx(): String? = fullNow()?.let { field(it.detail, "idx") }
+
+    /**
+     * After a channel change (from list position [fromIdx]) or opening the player (null): waits for the change to
+     * happen, then up to [ms] for the channel to show frames, an error or a spinner, and judges it. A failing verdict
+     * is only given after the start-up time, and confirmed by two more looks. Null if the player never got there.
+     */
+    private suspend fun settleFull(fromIdx: String?, ms: Long = 25_000): Pair<Health, String>? {
+        val t0 = System.currentTimeMillis()
+        // The change itself: the player's list position moves (or, opening, a player exists).
+        while (System.currentTimeMillis() - t0 < 6000) {
+            val f = fullNow()
+            if (f != null && (fromIdx == null || field(f.detail, "idx") != fromIdx)) break
+            delay(100)
+        }
+        val openedAt = System.currentTimeMillis()
+        val base = if (fromIdx == null) 0L else fullNow()?.let { field(it.detail, "shown")?.toLongOrNull() } ?: 0L
+        var last: Pair<Health, String>? = null
+        while (System.currentTimeMillis() - openedAt < ms) {
+            val h = fullHealth(base, openedAt) ?: continue
+            last = h
+            if (h.first in alive || h.first == Health.STATUS) return h
+        }
+        // Failing: two more looks, so one look in which nothing moved yet isn't the verdict.
+        if (last != null && last.first in failing) repeat(2) { fullHealth(base, openedAt, 1000)?.let { if (it.first !in failing) return it; last = it } }
+        return last
+    }
+
+    /**
+     * Frozen for real: a screen judged FROZEN or NO_FRAMES in [need] looks in a row (about a second apart), so a single
+     * look in which VLC's clock or frame count didn't move yet isn't counted. Returns the screens that have now been
+     * failing long enough, once per look while they stay so.
+     */
+    private class Streaks(val need: Int = 3) {
+        private val run = IntArray(8)
+        fun feed(hs: List<Health>): List<Int> = hs.indices.filter { i ->
+            if (i >= run.size) return@filter false
+            run[i] = if (hs[i] in failing) run[i] + 1 else 0
+            run[i] >= need
+        }
+        fun reset() = run.fill(0)
+    }
+
+    private fun Map<Health, Int>.text() = entries.filter { it.value > 0 }.joinToString { "${it.key}=${it.value}" }
+    private fun MutableMap<Health, Int>.add(h: Health) { this[h] = (this[h] ?: 0) + 1 }
+
+    // ---- the long run -----------------------------------------------------------------------------------------------
+
+    private suspend fun netSoak() {
+        val r = relay ?: run { check("relay running", false); return }
+        val t0 = System.currentTimeMillis()
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
+        check("full screen showing a picture", settleFull(null, 20_000)?.first in alive)
+        delay(5000)
+        val base = sample("baseline (full screen, warm)")
+
+        zapRun(200, "1. ")
+
+        openRun(50, "2. ")
+
+        // 3, 4, 6. 30 multi-view cycles with 2, 3 and 4 screens; sound and keys each time.
+        var mvOk = 0; var soundGood = 0; var extra = 0; val mv = mutableMapOf<Health, Int>(); val badMv = mutableListOf<String>()
+        for (c in 1..30) {
+            val n = 2 + (c - 1) % (mvScreens - 1)
+            press(KeyEvent.VK_M, after = 0)
+            if (!waitFor(6000) { multi != null }) { log("mv $c: didn't open"); continue }
+            if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 800)
+            repeat(n - 2) { multiAction("Add a screen") { it.add() }; delay(300) }
+            val ok = allPlaying(n, 40_000)
+            delay(3000)
+            val st3 = Streaks(); var hs = multiHealth(1000); var bad = st3.feed(hs)
+            repeat(2) { hs = multiHealth(1000); bad = st3.feed(hs) }
+            hs.forEach { mv.add(it) }
+            if (bad.isNotEmpty()) badMv += "mv $c: frozen 3 s+ on $bad $hs"
+            var snd = true
+            repeat(n) { press(KeyEvent.VK_RIGHT, after = 500); if (!soundOk(multiNow())) snd = false }
+            if (snd) soundGood++
+            val streams = r.streams()
+            if (streams > 2 * n + 1) { extra++; log("mv $c: $streams streams open for $n screens") }
+            if (ok) mvOk++ else log("mv $c: not all playing: ${screens(multiNow())}")
+            log("mv $c: $n screens ok=$ok sound=$snd health=$hs streams=$streams vlc=${vlcLive()}")
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            if (!waitFor(6000) { multi == null }) { log("mv $c: didn't close"); break }
+            settleFull(null, 20_000)
+            if (c % 10 == 0) { delay(2000); sample("after $c multi-view cycles") }
+        }
+        check("3/4. 30 multi-view cycles (2, 3, 4 screens) all playing ($mvOk/30)", mvOk >= 29)
+        check("6. sound only from the selected screen through every move ($soundGood/30)", soundGood == 30)
+        check("10. no frozen screen or screen without frames in multi-view (${mv.text()}) $badMv", badMv.isEmpty())
+        check("10. no extra connections: at most 2 per screen + full screen ($extra cycles over)", extra == 0)
+        delay(2000)
+        check("3. back to one VLC player after multi-view", vlcLive() == 1)
+
+        // 5. Repeated drops with 3, then 4 screens.
+        press(KeyEvent.VK_M, after = 0); waitFor(6000) { multi != null }
+        if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 800)
+        val dropScreens = minOf(3, mvScreens)
+        repeat(dropScreens - 2) { multiAction("Add a screen") { it.add() } }
+        check("5. $dropScreens screens playing", allPlaying(dropScreens))
+        var recovered = 0; var silent = 0; val times = mutableListOf<Long>(); val streaks = Streaks()
+        for (d in 1..6) {
+            if (d == 4 && mvScreens > dropScreens) { multiAction("Add a screen") { it.add() }; allPlaying(4) }
+            val secs = if (d % 2 == 0) 30_000L else 12_000L
+            r.cutAll(); val cutAt = System.currentTimeMillis(); streaks.reset()
+            while (System.currentTimeMillis() - cutAt < secs) {
+                val hs = multiHealth(1000); val f = streaks.feed(hs)
+                if (f.isNotEmpty()) { silent += f.size; log("drop $d +${(System.currentTimeMillis() - cutAt) / 1000}s: frozen 3 s+ on screens $f: $hs | ${mrow()}") }
+            }
+            r.restore(); val back = System.currentTimeMillis()
+            var hs: List<Health> = emptyList()
+            val ok = waitFor(90_000) { multi?.invoke()?.screens?.all { it.playing && it.error == null && !it.buffering } == true }
+            val took = (System.currentTimeMillis() - back) / 1000
+            if (ok) { delay(2000); hs = multiHealth() }
+            if (ok && hs.isNotEmpty() && hs.all { it in alive }) { recovered++; times += took }
+            log("drop $d (${secs / 1000} s, ${multiNow()?.screens?.size} screens): back=$ok in ${took}s, health=$hs streams=${r.streams()}")
+            delay(15_000)
+        }
+        check("5. every drop recovered by itself, every screen showing frames ($recovered/6, seconds $times)", recovered == 6)
+        check("10. no screen frozen 3 s+ without a status during drops ($silent screen-seconds)", silent == 0)
+        check("6. sound still from one screen after the drops", soundOk(multiNow()))
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        check("6. full screen showing a picture after multi-view", settleFull(null, 20_000)?.first in alive)
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("player closed", waitFor(6000) { Desktop.playing == null })
+        delay(1000)
+        check("6. focus on the Live TV list", focusInside && App.openTab == "LIVE" && !App.menuFocused)
+        check("6. navigation: reached Search", goTab("SEARCH"))
+        check("6. navigation: back to Live TV", goTab("LIVE"))
+
+        // 8, 9. Cool down with nothing playing. Memory is reported, not judged here (looked at separately).
+        delay(5000)
+        val idle = sample("idle, just after")
+        log("cooldown 120 s"); delay(120_000)
+        val cool = sample("idle, after cooldown")
+        check("9. every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+        check("9. no stream left open through the relay (${r.streams()})", r.streams() == 0)
+        log("growth from warm baseline to cooldown: private ${cool.priv - base.priv} MB, handles ${cool.handles - base.handles}, heap ${cool.heap - base.heap} MB, threads ${cool.threads - base.threads}")
+        check("10. no handle growth (cooldown ${cool.handles} vs baseline ${base.handles}, under +300)", cool.handles in 0..(base.handles + 300))
+        check("10. no thread growth (cooldown ${cool.threads} vs baseline ${base.threads})", cool.threads <= base.threads + 10)
+        check("8. memory settled during cooldown (private ${idle.priv} -> ${cool.priv} MB)", cool.priv <= idle.priv + 30)
+        log("crash file written during the run: ${File(System.getenv("APPDATA") ?: "", "NovaPlay/cache/last-crash-full.txt").let { it.exists() && it.lastModified() > t0 }}")
+        log("all samples:"); samples.forEach { log("  $it") }
+        log("total ${(System.currentTimeMillis() - t0) / 60000} min")
+        r.close()
+    }
+
+    // ---- full screen: channel changes and opening the player -----------------------------------------------------
+
+    /** [n] channel changes in full screen, each judged after it settles; every one logged. */
+    private suspend fun zapRun(n: Int, tag: String) {
+        val zaps = mutableMapOf<Health, Int>(); val bad = mutableListOf<String>()
+        for (i in 1..n) {
+            val from = fullIdx()
+            press(if (i % 4 == 0) KeyEvent.VK_UP else KeyEvent.VK_DOWN, after = 0)
+            val h = settleFull(from)
+            val kind = h?.first ?: Health.NO_FRAMES
+            zaps.add(kind)
+            val line = "zap $i ${h?.second ?: "no player"}: $kind | ${fullNow()?.detail}"
+            if (kind in failing || h == null) { bad += line; log("FAILING $line") } else log(line)
+            if (i % 50 == 0) { log("zaps $i: ${zaps.text()}"); sample("after $i channel changes") }
+        }
+        log("zap results: ${zaps.text()}")
+        check("${tag}$n channel changes: none stopped, frozen or without frames (${zaps.text()})", bad.isEmpty())
+        check("${tag}one VLC player in full screen", vlcLive() == 1)
+    }
+
+    /** [n] times: close the player, back on the Live TV list, open a channel again; each opening judged. */
+    private suspend fun openRun(n: Int, tag: String) {
+        val opens = mutableMapOf<Health, Int>(); var focusOk = 0; val bad = mutableListOf<String>()
+        for (i in 1..n) {
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            if (!waitFor(6000) { Desktop.playing == null }) { log("open $i: player didn't close"); break }
+            delay(700)
+            if (focusInside && !App.menuFocused && App.openTab == "LIVE") focusOk++ else log("open $i: focus inside=$focusInside tab=${App.openTab} menu=${App.menuFocused}")
+            if (i % 2 == 0) press(KeyEvent.VK_DOWN, after = 400)
+            press(KeyEvent.VK_ENTER, after = 0)
+            val h = settleFull(null)
+            val kind = h?.first ?: Health.NO_FRAMES
+            opens.add(kind)
+            val line = "open $i ${h?.second ?: "no player"}: $kind | ${fullNow()?.detail}"
+            if (kind in failing || h == null) { bad += line; log("FAILING $line") } else log(line)
+            if (i % 10 == 0) sample("after $i full-screen opens")
+        }
+        log("open results: ${opens.text()}")
+        check("${tag}$n full-screen opens: none stopped, frozen or without frames (${opens.text()})", bad.isEmpty() && opens.values.sum() == n)
+        check("${tag}focus back on the Live TV list after every close ($focusOk/$n)", focusOk == n)
+        check("${tag}one VLC player", vlcLive() == 1)
+    }
+
+    /** Short full-screen check: 20 channel changes, 10 opens, every player freed. */
+    private suspend fun fullScreen() {
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
+        val first = settleFull(null)
+        log("first channel: $first | ${fullNow()?.detail}")
+        check("full screen opened (${first?.first})", first != null && first.first !in failing)
+        zapRun(20, "")
+        openRun(10, "")
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("player closed", waitFor(6000) { Desktop.playing == null })
+        delay(3000)
+        check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+    }
+
+    // ---- focused checks ---------------------------------------------------------------------------------------------
+
+    private suspend fun mrow(): String = multiNow()?.screens?.joinToString(" || ") { "${it.channel.takeLast(6)} ${it.detail}" } ?: "no multi-view"
+
+    /** Multi-view, [mvScreens] screens: six drops (12 s and 30 s); every second each screen is judged and logged. */
+    private suspend fun netMulti() {
+        val r = relay ?: run { check("relay running", false); return }
+        check("into multi-view", intoMultiView())
+        repeat(mvScreens - 2) { multiAction("Add a screen") { it.add() } }
+        check("$mvScreens screens playing", allPlaying(mvScreens))
+        val start = multiHealth(); log("start: $start | ${mrow()}")
+        check("every screen showing frames at the start ($start)", start.isNotEmpty() && start.all { it in alive })
+        var silent = 0; var recovered = 0; val times = mutableListOf<Long>(); val seen = mutableMapOf<Health, Int>(); val streaks = Streaks()
+        for (d in 1..6) {
+            val secs = if (d % 2 == 0) 30 else 12
+            r.cutAll(); log("CUT $d for $secs s"); val cutAt = System.currentTimeMillis()
+            while (System.currentTimeMillis() - cutAt < secs * 1000L) {
+                val hs = multiHealth(1000); hs.forEach { seen.add(it) }
+                streaks.feed(hs).let { f -> if (f.isNotEmpty()) { silent += f.size; log("FROZEN 3 s+ on screens $f | ${mrow()}") } }
+                log("cut$d +${(System.currentTimeMillis() - cutAt) / 1000}s: $hs")
+            }
+            r.restore(); log("RESTORE $d"); val back = System.currentTimeMillis()
+            var took = -1L
+            while (System.currentTimeMillis() - back < 60_000) {
+                val hs = multiHealth(1000)
+                streaks.feed(hs).let { f -> if (f.isNotEmpty()) { silent += f.size; log("FROZEN 3 s+ on screens $f | ${mrow()}") } }
+                val st = multiNow()
+                if (took < 0 && hs.isNotEmpty() && hs.all { it in alive } && st?.screens?.all { it.playing && it.error == null } == true) took = (System.currentTimeMillis() - back) / 1000
+                log("back$d +${(System.currentTimeMillis() - back) / 1000}s: $hs")
+                if (took >= 0 && System.currentTimeMillis() - back > 20_000) break
+            }
+            if (took >= 0) { recovered++; times += took }
+            log("drop $d: recovered=${took >= 0} in ${took}s | ${mrow()}")
+        }
+        log("during cuts: ${seen.text()}")
+        check("every drop recovered with every screen showing frames ($recovered/6, seconds $times)", recovered == 6)
+        check("no screen frozen 3 s+ or without frames, without a status ($silent screen-seconds)", silent == 0)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        delay(3000)
+        check("every VLC player freed", vlcLive() == 0)
+        r.close()
+    }
+
+    /** Full screen, channel by channel through the start of the list: each judged after it settles, then 8 s later. */
+    private suspend fun chanCheck() {
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_ENTER, after = 0)
+        val summary = mutableListOf<String>(); val kinds = mutableMapOf<Health, Int>()
+        for (n in 1..12) {
+            val from = if (n == 1) null else fullIdx()
+            val at = System.currentTimeMillis()
+            val h = settleFull(from, 30_000)
+            val kind = h?.first ?: Health.NO_FRAMES
+            val took = (System.currentTimeMillis() - at) / 1000
+            val d1 = fullNow()?.detail
+            // Held for 8 s more: a picture that stops later counts too.
+            var later = kind
+            if (kind in alive) { delay(8000); later = fullHealth(0, 0)?.first ?: Health.NO_FRAMES }
+            kinds.add(later)
+            val line = "$n ${h?.second ?: "no player"}: $kind after ${took}s, then $later | $d1 | later: ${fullNow()?.detail}"
+            summary += line; log("VERDICT $line")
+            press(KeyEvent.VK_DOWN, after = 0)
+        }
+        log("SUMMARY ${kinds.text()}"); summary.forEach { log("  $it") }
+        check("every channel shows frames (moving, still or black), a spinner or an error message (${kinds.text()})", kinds.keys.none { it in failing })
         press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
         delay(3000)
         check("every VLC player freed", vlcLive() == 0)
