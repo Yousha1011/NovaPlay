@@ -175,7 +175,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     var overlay by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var epg by remember { mutableStateOf<List<Programme>>(emptyList()) }
     var retry by remember { mutableIntStateOf(0) }
-    /** Times this live channel's stream has ended by itself since it was chosen (the server closed it). */
+    /** Times this live channel's stream has ended by itself since it was chosen or last played steadily (10 s). */
     var liveEnds by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
 
@@ -202,7 +202,11 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             override fun paused(mediaPlayer: MediaPlayer) { playing = false }
             override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) { buffering = newCache < 100f }
             override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) { length = newLength }
-            override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) { position = newTime }
+            override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
+                position = newTime
+                // Played steadily for 10 s since it was (re)opened: a later end gets its own quiet retry again.
+                if (newTime >= 10_000 && liveEnds != 0) liveEnds = 0
+            }
             override fun error(mediaPlayer: MediaPlayer) { error = "This stream could not be played"; buffering = false }
             override fun finished(mediaPlayer: MediaPlayer) {
                 // A live stream never ends on its own: the server closed it. Open it again once, quietly; if it ends

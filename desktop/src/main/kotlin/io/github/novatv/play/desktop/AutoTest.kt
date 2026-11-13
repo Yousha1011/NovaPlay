@@ -62,7 +62,13 @@ object AutoTest {
     /** Something inside the window's content has keyboard focus (Main's content box, while a scenario runs). */
     @Volatile var focusInside = false
 
+    /** Streams the full-screen player has started (its "PLAY" lines): first opens, channel changes and retries. */
+    @Volatile var plays = 0
+    /** Streams VLC reported as ended ("finished") in the full-screen player. */
+    @Volatile var ends = 0
     fun log(msg: String) {
+        if (msg.startsWith("PLAY idx=")) plays++
+        if (msg.startsWith("VLC idx=") && msg.contains(" finished ")) ends++
         val line = "${java.time.LocalTime.now().withNano(0)} $msg"
         runCatching { file.appendText(line + "\n") }
         println("[autotest] $line")
@@ -103,6 +109,7 @@ object AutoTest {
                     "netmulti" -> netMulti()
                     "chancheck" -> chanCheck()
                     "fullscreen" -> fullScreen()
+                    "netend" -> netEnd()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -778,6 +785,97 @@ object AutoTest {
         check("player closed", waitFor(6000) { Desktop.playing == null })
         delay(3000)
         check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+    }
+
+    // ---- a live stream ending by itself ---------------------------------------------------------------------------
+
+    /**
+     * Full screen through the relay: the server ends the stream (once: one quiet retry that plays; every time: one
+     * retry, then the error with Try again); a channel change and closing the player start no retry.
+     */
+    private suspend fun netEnd() {
+        val r = relay ?: run { check("relay running", false); return }
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_ENTER, after = 0)
+        val first = settleFull(null)
+        log("opened: $first | ${fullNow()?.detail} | relay streams ${r.streams()}")
+        check("full screen playing through the relay (${first?.first})", first?.first in alive && r.served > 0)
+        delay(5000)
+
+        // A. The stream ends once: one quiet retry, playing again, no message.
+        var p0 = plays
+        log("A: ending the stream once"); r.endAllNow()
+        val retried = waitFor(60_000) { plays > p0 }
+        val a = settleFull(null, 20_000)
+        delay(15_000)
+        val f = fullNow()
+        log("A: plays +${plays - p0}, then $a | error=${f?.error} | ${f?.detail}")
+        check("A. ended once: one retry (${plays - p0} new plays)", retried && plays - p0 == 1)
+        check("A. ended once: playing again without a message (${a?.first}, error=${f?.error})", a?.first in alive && f?.error == null)
+
+        // B. Later, on the same channel (it played again after A), every connection ends after 1.5 s: expected one
+        // retry, then the error and Try again; nothing more after that.
+        r.endAfterMs = 1500
+        p0 = plays
+        log("B: every stream now ends after 1.5 s"); r.endAllNow()
+        val shown = waitFor(40_000) { full?.invoke()?.error != null }
+        val err = fullNow()?.error
+        val afterError = plays - p0
+        delay(20_000)
+        log("B: error=\"$err\" plays +$afterError at the message, +${plays - p0} 20 s later | ${fullNow()?.detail}")
+        check("B. ended again: error shown (\"$err\")", shown && err == "This stream could not be played")
+        check("B. exactly one retry before the message ($afterError)", afterError == 1)
+        check("B. no further retries while the message shows (${plays - p0})", plays - p0 == 1)
+        check("B. message still on screen", fullNow()?.error != null)
+
+        // Try again (Enter on the message, as the Try again button): a fresh start that plays.
+        r.endAfterMs = -1
+        p0 = plays
+        press(KeyEvent.VK_ENTER, after = 0)
+        val again = settleFull(null, 25_000)
+        log("Try again: plays +${plays - p0}, $again | error=${fullNow()?.error}")
+        check("B. Try again opens the stream again and plays (${again?.first})", plays - p0 == 1 && again?.first in alive && fullNow()?.error == null)
+        delay(5000)
+
+        // B2. From a fresh start (just after Try again), every connection ends: one retry, then the message, then nothing.
+        r.endAfterMs = 1500
+        p0 = plays
+        log("B2: every stream now ends after 1.5 s"); r.endAllNow()
+        val shown2 = waitFor(60_000) { full?.invoke()?.error != null }
+        val err2 = fullNow()?.error
+        val atMsg = plays - p0
+        delay(20_000)
+        log("B2: error=\"$err2\" plays +$atMsg at the message, +${plays - p0} 20 s later | ${fullNow()?.detail}")
+        check("B2. ending every time: error shown (\"$err2\")", shown2 && err2 == "This stream could not be played")
+        check("B2. exactly one retry before the message ($atMsg)", atMsg == 1)
+        check("B2. no further retries while the message shows (${plays - p0})", plays - p0 == 1 && fullNow()?.error != null)
+        r.endAfterMs = -1
+        p0 = plays
+        press(KeyEvent.VK_ENTER, after = 0)
+        val again2 = settleFull(null, 25_000)
+        log("B2 Try again: plays +${plays - p0}, $again2 | error=${fullNow()?.error}")
+        check("B2. Try again plays again (${again2?.first})", plays - p0 == 1 && again2?.first in alive && fullNow()?.error == null)
+
+        // C. Intentional stops: a channel change starts exactly one stream; closing the player starts none.
+        val from = fullIdx(); p0 = plays; val e0 = ends
+        press(KeyEvent.VK_DOWN, after = 0)
+        val z = settleFull(from)
+        delay(10_000)
+        // The old stream's stop must start nothing; only the new stream ending by itself may bring its one retry.
+        val ended = ends - e0
+        log("C: channel change: plays +${plays - p0}, new stream ended by itself $ended times, $z")
+        check("C. channel change: one stream, plus at most one retry only if the new stream ended (${plays - p0} plays, $ended ends)",
+            plays - p0 == 1 + minOf(ended, 1))
+        p0 = plays
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        val closed = waitFor(6000) { Desktop.playing == null }
+        delay(8000)
+        log("C: closed=$closed plays +${plays - p0} vlc=${vlcLive()} relay streams ${r.streams()}")
+        check("C. closing the player: no retry (${plays - p0})", closed && plays == p0)
+        check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+        check("no stream left open through the relay (${r.streams()})", r.streams() == 0)
+        r.close()
     }
 
     // ---- focused checks ---------------------------------------------------------------------------------------------

@@ -47,6 +47,7 @@ $Known = [ordered]@{
     multiview  = 600
     cycles     = 900
     netfreeze  = 900
+    netend     = 600   # live stream ended by the server: retry, error, Try again (about 3 min)
     limits     = 900
     probes     = 600
     spike      = 600

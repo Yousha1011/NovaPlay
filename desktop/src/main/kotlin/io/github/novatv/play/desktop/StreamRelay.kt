@@ -39,6 +39,11 @@ class StreamRelay(private val userAgent: String, private val log: (String) -> Un
     /** Drops every stream now and refuses new ones until [restore]: what a lost connection looks like to VLC. */
     fun cutAll() { cut = true; synchronized(open) { open.toList() }.forEach { runCatching { it.close() } } }
     fun restore() { cut = false }
+    /** Ends every open stream now, cleanly, as a server that finished it would (new ones are served as usual). */
+    fun endAllNow() { endGen++ }
+    /** While >= 0: every stream ends cleanly this many ms after it starts (a server that keeps closing the channel). */
+    @Volatile var endAfterMs = -1L
+    @Volatile private var endGen = 0
     fun streams(): Int = open.size
 
     fun close() { runCatching { server.close() }; cutAll() }
@@ -80,7 +85,8 @@ class StreamRelay(private val userAgent: String, private val log: (String) -> Un
                     if (l.isBlank() || l.startsWith("#")) l else wrap(base.resolve(l.trim()).toString())
                 }
                 out.write(text.toByteArray()); bytes = text.length.toLong(); how = "playlist"
-            } else { bytes = pipe(body, out); how = if (cut) "cut" else "upstream ended" }
+            } else { val gen = endGen; bytes = pipe(body, out) { !cut && gen == endGen && (endAfterMs < 0 || System.currentTimeMillis() - t0 < endAfterMs) }
+                how = if (cut) "cut" else if (gen != endGen || endAfterMs >= 0) "ended by the test" else "upstream ended" }
         } catch (e: Exception) { how = "${e::class.simpleName}: ${e.message?.take(60)}"
         } finally {
             open.remove(client); runCatching { client.close() }
@@ -88,9 +94,9 @@ class StreamRelay(private val userAgent: String, private val log: (String) -> Un
         }
     }
 
-    private fun pipe(from: InputStream, to: OutputStream): Long {
+    private fun pipe(from: InputStream, to: OutputStream, go: () -> Boolean = { !cut }): Long {
         val buf = ByteArray(64 * 1024); var total = 0L
-        try { while (!cut) { val n = from.read(buf); if (n < 0) break; to.write(buf, 0, n); total += n } }
+        try { while (go()) { val n = from.read(buf); if (n < 0) break; to.write(buf, 0, n); total += n } }
         finally { runCatching { from.close() } }
         return total
     }
