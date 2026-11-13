@@ -136,8 +136,11 @@ private class VlcScreen(var channel: Int) {
 
     fun listen(v: Vlcp) {
         v.player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
-            override fun playing(mediaPlayer: MediaPlayer) { if (v === current) { buffering = false; error = null } }
-            override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) { if (v === current) buffering = newCache < 100f }
+            // VLC reports "playing" (and a full cache) before a reopened stream has its first frame, while the screen
+            // still shows the old one: the status stays until the screen's loop sees a new frame.
+            override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
+                if (v === current) { if (newCache < 100f) buffering = true else if (playingSince > 0) buffering = false }
+            }
             override fun error(mediaPlayer: MediaPlayer) { multiLog("channel $channel: stream error"); v.dropped = true }
             override fun finished(mediaPlayer: MediaPlayer) { multiLog("channel $channel: stream ended"); v.dropped = true }
         })
@@ -204,6 +207,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         sb.mute(screens.indexOf(s) != active)
         sb.player.controls().play()
         s.openedAt = now; s.playingSince = now; s.lastBytes = 0; s.bytesAt = now
+        s.buffering = false; s.error = null
         multiLog("channel ${s.channel}: handed over")
         scope.launch(IO) { old.release() }
     }
@@ -268,7 +272,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
             val now = System.currentTimeMillis()
             for (s in screens.toList()) {
                 val last = maxOf(s.frames.lastFrameAt, s.openedAt)
-                if (s.playingSince == 0L && s.frames.lastFrameAt > s.openedAt) s.playingSince = now
+                if (s.playingSince == 0L && s.frames.lastFrameAt > s.openedAt) { s.playingSince = now; s.buffering = false; s.error = null }
                 // The stream stopped arriving after playing a while: the server closed it. Open the next one now.
                 val bytes = s.current.bytesRead()
                 if (bytes > s.lastBytes) { s.lastBytes = bytes; s.bytesAt = now }

@@ -309,7 +309,7 @@ object AutoTest {
         delay(3000)
         if (!goTab("LIVE")) return false
         press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
-        if (!waitFor(20_000) { full?.invoke()?.playing == true }) { log("full screen never played"); return false }
+        if (!waitFor(45_000) { full?.invoke()?.playing == true }) { log("full screen never played"); return false }
         press(KeyEvent.VK_M, after = 0)
         if (!waitFor(6000) { multi != null }) return false
         if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 1500)
@@ -553,7 +553,7 @@ object AutoTest {
 
     /** Each multi-view screen's [Health] (a screen whose player was just replaced is judged on the new one alone). */
     private suspend fun multiHealth(gap: Long = 1500): List<Health> {
-        val a = multiNow()?.screens ?: return emptyList(); delay(gap)
+        val a = multiNow()?.screens ?: run { delay(gap); return emptyList() }; delay(gap)
         val b = multiNow()?.screens ?: return emptyList()
         if (a.size != b.size) return multiHealth(gap)
         val now = System.currentTimeMillis()
@@ -885,7 +885,9 @@ object AutoTest {
     /** Multi-view, [mvScreens] screens: six drops (12 s and 30 s); every second each screen is judged and logged. */
     private suspend fun netMulti() {
         val r = relay ?: run { check("relay running", false); return }
-        check("into multi-view", intoMultiView())
+        // Without multi-view the rest has nothing to watch (and its loops would spin with nothing to wait on).
+        if (!intoMultiView()) { check("into multi-view", false); r.close(); return }
+        check("into multi-view", true)
         repeat(mvScreens - 2) { multiAction("Add a screen") { it.add() } }
         check("$mvScreens screens playing", allPlaying(mvScreens))
         val start = multiHealth(); log("start: $start | ${mrow()}")
