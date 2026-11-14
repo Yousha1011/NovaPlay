@@ -66,9 +66,14 @@ object AutoTest {
     @Volatile var plays = 0
     /** Streams VLC reported as ended ("finished") in the full-screen player. */
     @Volatile var ends = 0
+    /** Hand-overs: full screen took the preview's player / gave it back (counted from the log). */
+    @Volatile var took = 0
+    @Volatile var gaveBack = 0
     fun log(msg: String) {
         if (msg.startsWith("PLAY idx=")) plays++
         if (msg.startsWith("VLC idx=") && msg.contains(" finished ")) ends++
+        if (msg.startsWith("FULL took the preview's player")) took++
+        if (msg.startsWith("FULL handed back to the preview")) gaveBack++
         val line = "${java.time.LocalTime.now().withNano(0)} $msg"
         runCatching { file.appendText(line + "\n") }
         println("[autotest] $line")
@@ -82,7 +87,7 @@ object AutoTest {
         log("BEGIN run=$runId scenario=$s pid=${ProcessHandle.current().pid()} maxPlayers=$maxPlayers maxHeapMb=$maxHeapMb timeoutS=$timeoutS screens=$mvScreens")
         // The Live TV preview runs only in the scenarios about it, so the others measure what they always have (their
         // player counts and connections). The test's own copy of the settings; the installed app's are never written.
-        val withPreview = s in setOf("netpreview")
+        val withPreview = s in setOf("netpreview", "nethandover")
         if (App.store.livePreview != withPreview) App.store.livePreview = withPreview
         log("live preview ${if (withPreview) "on" else "off"} for this scenario")
         // Stop conditions, checked every 2 s: too many players, too much heap, or too long.
@@ -120,6 +125,7 @@ object AutoTest {
                     "netmvcycle" -> netMvCycle()
                     "netrecord" -> netRecord()
                     "netpreview" -> netPreview()
+                    "nethandover" -> netHandover()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -1000,7 +1006,8 @@ object AutoTest {
         delay(1500)
         log("E: preview ${pName()} moving=${pMoving()} streams=${r.streams()} vlc=${vlcLive()}")
         check("E. preview back after full screen (${pName()})", back && pMoving())
-        check("E. one stream, one VLC player (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() == 1 && vlcLive() == 1)
+        // (A feed that sends a burst and closes plays on with no connection open.)
+        check("E. at most one stream, one VLC player (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() <= 1 && vlcLive() == 1)
 
         // F. Network drop under the preview: a status (not a frozen picture with none) and back on the next channel.
         // A channel that streams steadily: some feeds send minutes of picture in a burst and close, which would play on
@@ -1059,6 +1066,153 @@ object AutoTest {
         val cool = sample("idle, after 90 s cooldown")
         check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
         check("no connection left open (${r.streams()})", r.streams() == 0)
+        log("growth start -> cooldown: private ${cool.priv - start.priv} MB, handles ${cool.handles - start.handles}, threads ${cool.threads - start.threads}")
+        check("handles back near the start (${start.handles} -> ${cool.handles}, under +300)", cool.handles in 0..(start.handles + 300))
+        check("threads back near the start (${start.threads} -> ${cool.threads}, under +10)", cool.threads <= start.threads + 10)
+        check("memory settled during cooldown (private ${idle.priv} -> ${cool.priv} MB)", cool.priv <= idle.priv + 30)
+        log("all samples:"); samples.forEach { log("  $it") }
+        r.close()
+    }
+
+    // ---- seamless hand-over: preview <-> full screen --------------------------------------------------------------
+
+    /** The preview playing a channel whose connection stays open (some feeds send a burst and close). */
+    private suspend fun previewSteady(r: StreamRelay, tries: Int = 8): Boolean {
+        for (t in 1..tries) {
+            if (waitFor(25_000) { pPlaying() && pMoving() }) { delay(4000); if (pPlaying() && pMoving() && r.streams() == 1) return true }
+            log("not steady (${pName()}, streams ${r.streams()}), next channel")
+            val before = App.preview.channel?.id
+            press(KeyEvent.VK_DOWN, after = 0); waitFor(5000) { App.preview.channel?.id != before }
+        }
+        return false
+    }
+
+    /**
+     * Seamless Fullscreen Playback through the relay: OK on a previewing channel goes full screen in that same player
+     * (no new connection, picture straight away); Back gives it back, still playing (also after changing channel in
+     * full screen); with the switch off, or a preview still loading, full screen opens its own as before; multi-view
+     * and a network cut while holding it; everything freed at the end.
+     */
+    private suspend fun netHandover() {
+        val r = relay ?: run { check("relay running", false); return }
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        App.store.seamlessFullscreen = true
+        check("reached Live TV", goTab("LIVE"))
+        delay(1500)
+        val start = sample("start (Live TV)")
+        press(KeyEvent.VK_RIGHT, after = 0)
+        check("A. preview playing on a steady channel", previewSteady(r))
+
+        // A. 12 hand-overs and hand-backs; every third changes channel in full screen first.
+        var good = 0; val bad = mutableListOf<String>(); var maxStreams = 0; var maxVlc = 0
+        for (c in 1..12) {
+            if (!(pPlaying() && pMoving())) previewSteady(r, 4)
+            val ch0 = App.preview.channel?.name
+            val served0 = r.served; val took0 = took; val back0 = gaveBack
+            press(KeyEvent.VK_ENTER, after = 0)
+            val opened = waitFor(6000) { Desktop.playing != null && full != null }
+            delay(300)
+            // Picture straight away: full screen already playing, no spinner.
+            val atOnce = fullNow()?.let { it.playing && !it.buffering } == true
+            val tookIt = took == took0 + 1
+            delay(2500)
+            val fs = settleFull(null, 8000)
+            val newConn = r.served - served0
+            maxStreams = maxOf(maxStreams, r.streams()); maxVlc = maxOf(maxVlc, vlcLive())
+            var zapped = false
+            if (c % 3 == 0) { press(KeyEvent.VK_DOWN, after = 0); settleFull(null, 25_000); zapped = true }
+            val fullCh = fullNow()?.channel
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            val closed = waitFor(6000) { Desktop.playing == null }
+            val backIt = waitFor(3000) { gaveBack == back0 + 1 }
+            val previewBack = waitFor(5000) { pPlaying() && pMoving() }
+            val sameCh = App.preview.channel?.name == fullCh
+            val conns = r.served - served0
+            maxStreams = maxOf(maxStreams, r.streams()); maxVlc = maxOf(maxVlc, vlcLive())
+            val line = "cycle $c ($ch0${if (zapped) " -> $fullCh" else ""}): opened=$opened took=$tookIt atOnce=$atOnce full=${fs?.first} " +
+                "newConnOnOpen=$newConn closed=$closed handedBack=$backIt previewBack=$previewBack sameChannel=$sameCh conns=$conns streams=${r.streams()} vlc=${vlcLive()}"
+            log(line)
+            val ok = opened && tookIt && atOnce && newConn == 0 && fs != null && fs.first !in failing && closed && backIt && previewBack && sameCh &&
+                conns <= (if (zapped) 2 else 0) && vlcLive() == 1
+            if (ok) good++ else bad += line
+            delay(1500)
+        }
+        bad.forEach { log("  not ok: $it") }
+        check("A. 12 hand-overs and hand-backs, no new connection, picture at once, back in the window ($good/12)", good == 12)
+        check("A. never more than one stream or VLC player (most streams $maxStreams, players $maxVlc)", maxStreams <= 1 && maxVlc <= 1)
+
+        // B. Seamless off: full screen opens its own, the preview stops first.
+        App.store.seamlessFullscreen = false
+        previewSteady(r, 4)
+        val tookB = took
+        press(KeyEvent.VK_ENTER, after = 0)
+        val fb = settleFull(null, 45_000)
+        log("B: seamless off: full ${fb?.first} took=${took - tookB} preview player=${DesktopPreviewEngine.hasPlayer} streams=${r.streams()} vlc=${vlcLive()}")
+        check("B. seamless off: own player, preview stopped (took ${took - tookB}, preview player ${DesktopPreviewEngine.hasPlayer})",
+            took == tookB && !DesktopPreviewEngine.hasPlayer && fb != null && fb.first !in failing && vlcLive() == 1)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        check("B. preview back after full screen", waitFor(25_000) { pPlaying() })
+        App.store.seamlessFullscreen = true
+
+        // C. Preview still loading: OK opens full screen with its own player, one stream.
+        waitFor(25_000) { pPlaying() }
+        press(KeyEvent.VK_DOWN, after = 900)
+        val tookC = took
+        press(KeyEvent.VK_ENTER, after = 0)
+        val fc = settleFull(null, 45_000)
+        log("C: loading: full ${fc?.first} took=${took - tookC} preview player=${DesktopPreviewEngine.hasPlayer} streams=${r.streams()} vlc=${vlcLive()}")
+        check("C. preview still loading: own player, one stream (streams ${r.streams()}, vlc ${vlcLive()})",
+            fc != null && fc.first !in failing && !DesktopPreviewEngine.hasPlayer && r.streams() <= 1 && vlcLive() == 1)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+
+        // D. Multi-view while holding the preview's player, then back.
+        check("D. preview steady", previewSteady(r, 4))
+        val tookD = took
+        press(KeyEvent.VK_ENTER, after = 0); waitFor(6000) { full != null }
+        check("D. took the preview's player", took == tookD + 1)
+        delay(2000)
+        press(KeyEvent.VK_M, after = 0)
+        val mvOpen = waitFor(6000) { multi != null }
+        if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 1000)
+        val mvOk = allPlaying(2, 40_000)
+        log("D: multi-view open=$mvOpen playing=$mvOk streams=${r.streams()} vlc=${vlcLive()}")
+        check("D. multi-view from a handed-over player plays", mvOpen && mvOk)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        val fd = settleFull(null, 30_000)
+        check("D. full screen again after multi-view (${fd?.first})", fd != null && fd.first !in failing)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        delay(3000)
+        log("D: after closing: preview ${pName()} streams=${r.streams()} vlc=${vlcLive()}")
+        check("D. one player and stream after (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() <= 1 && vlcLive() <= 1)
+
+        // E. A network cut while full screen holds the preview's player: full screen's own recovery.
+        check("E. preview steady", previewSteady(r, 4))
+        val tookE = took
+        press(KeyEvent.VK_ENTER, after = 0); waitFor(6000) { full != null }
+        check("E. took the preview's player", took == tookE + 1)
+        delay(3000)
+        r.cutAll(); log("CUT 40 s"); delay(40_000); r.restore(); log("RESTORE")
+        // A cut this long outlasts full screen's one quiet retry: it then says so, with Try again (as since c31fac3).
+        val fe = waitFor(60_000) { full?.invoke()?.let { (it.playing && it.error == null && !it.buffering) || it.error != null } == true }
+        val errE = fullNow()?.error
+        log("E: after the cut: ${if (errE != null) "error \"$errE\"" else "playing again"} streams=${r.streams()}")
+        check("E. after the cut: playing again, or the error with Try again (${errE ?: "playing"})", fe)
+        if (errE != null) { press(KeyEvent.VK_ENTER, after = 0); log("E: Try again") }
+        val he = settleFull(null, 30_000)
+        log("E: then ${he?.first} error=${fullNow()?.error} streams=${r.streams()}")
+        check("E. playing after the cut (${he?.first})", he != null && he.first !in failing && fullNow()?.error == null)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+        delay(3000)
+        check("E. one player and stream after (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() <= 1 && vlcLive() <= 1)
+
+        // F. Leaving Live TV frees everything.
+        check("F. reached Home", goTab("HOME"))
+        delay(5000)
+        val idle = sample("idle, just after"); log("cooldown 90 s"); delay(90_000)
+        val cool = sample("idle, after 90 s cooldown")
+        check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+        check("no connection left open (${r.streams()})", r.streams() == 0)
+        check("preview holds nothing (player ${DesktopPreviewEngine.hasPlayer}, lent ${DesktopPreviewEngine.isLent})", !DesktopPreviewEngine.hasPlayer && !DesktopPreviewEngine.isLent)
         log("growth start -> cooldown: private ${cool.priv - start.priv} MB, handles ${cool.handles - start.handles}, threads ${cool.threads - start.threads}")
         check("handles back near the start (${start.handles} -> ${cool.handles}, under +300)", cool.handles in 0..(start.handles + 300))
         check("threads back near the start (${start.threads} -> ${cool.threads}, under +10)", cool.threads <= start.threads + 10)

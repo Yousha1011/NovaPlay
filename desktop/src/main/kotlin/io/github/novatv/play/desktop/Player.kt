@@ -165,22 +165,44 @@ internal class Frames {
 fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     var item by remember { mutableStateOf(start) }
     var index by remember { mutableIntStateOf((start as? PlayItem.Live)?.channelIndex ?: 0) }
-    val frames = remember { Frames() }
-    val player: EmbeddedMediaPlayer = remember { Vlc.factory.mediaPlayers().newEmbeddedMediaPlayer() }
-    var playing by remember { mutableStateOf(false) }
-    var buffering by remember { mutableStateOf(true) }
+    // The live channel already playing in the preview window (Seamless Fullscreen Playback): this screen takes that
+    // player, stream and all, instead of opening the channel again. Anything else builds this screen's own player.
+    val handed: HandedPlayer? = remember {
+        val h = if (start is PlayItem.Live && App.handoverActive) runCatching { DesktopPreviewEngine.handOff() }.getOrNull() else null
+        // The preview gave up its channel for this screen but no player came: clear it, so it doesn't wait for one.
+        if (h == null && App.handoverActive) App.preview.stop()
+        App.handingOver = false
+        if (AutoTest.scenario != null) AutoTest.log(when {
+            start !is PlayItem.Live -> "FULL own player (not live)"
+            h != null -> "FULL took the preview's player"
+            else -> "FULL own player (${App.handoverRefusal ?: "nothing to take"})"
+        })
+        h
+    }
+    /** Still holding the preview's player (it goes back to the window on Back, if fit). */
+    var adopted by remember { mutableStateOf(handed != null) }
+    /** The channel the preview's player was playing when taken: not opened again on arrival. */
+    var skipFirstPlay by remember { mutableStateOf(handed != null) }
+    val frames = remember { handed?.frames ?: Frames() }
+    val player: EmbeddedMediaPlayer = remember { handed?.player ?: Vlc.factory.mediaPlayers().newEmbeddedMediaPlayer() }
+    /** The address playing now (handed back with the player). */
+    var playingUrl by remember { mutableStateOf(handed?.url) }
+    var playing by remember { mutableStateOf(handed != null) }
+    var buffering by remember { mutableStateOf(handed == null) }
     var error by remember { mutableStateOf<String?>(null) }
     var position by remember { mutableLongStateOf(0L) }
     var length by remember { mutableLongStateOf(0L) }
     var overlay by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var epg by remember { mutableStateOf<List<Programme>>(emptyList()) }
     var retry by remember { mutableIntStateOf(0) }
+    var multi by remember { mutableStateOf(false) }
     /** Times this live channel's stream has ended by itself since it was chosen or last played steadily (10 s). */
     var liveEnds by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
-        AutoTest.vlcCreated.incrementAndGet()
+        if (handed == null) AutoTest.vlcCreated.incrementAndGet()
+        val listeners = mutableListOf<MediaPlayerEventAdapter>()
         // Development only: what the test driver reads (see AutoTest); read only.
         if (AutoTest.scenario != null) AutoTest.full = { AutoTest.FullState((item as? PlayItem.Live)?.channels?.getOrNull(index)?.name ?: item.title, playing, buffering, error, frames.changedAt,
             "idx=$index lum=${frames.brightness} vlc=${runCatching { player.status().state() }.getOrNull()} time=${runCatching { player.status().time() }.getOrNull()} shown=${frames.displayed} " +
@@ -195,8 +217,10 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             override fun error(mediaPlayer: MediaPlayer) = ev("error")
             override fun videoOutput(mediaPlayer: MediaPlayer, newCount: Int) = ev("video outputs $newCount")
             override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) { if (newCache >= 100f) ev("buffered 100%") }
-        })
-        player.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
+        }.also { listeners += it })
+        // A handed-over player already draws into its frames; its sound comes on now.
+        if (handed == null) player.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
+        else player.audio().isMute = false
         player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
             override fun playing(mediaPlayer: MediaPlayer) { playing = true; buffering = false; error = null }
             override fun paused(mediaPlayer: MediaPlayer) { playing = false }
@@ -223,17 +247,41 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                 item = PlayItem.Vod(App.repo.episodeKey(s, next), "${s.name} · S${next.season} E${next.number}", episode = next, series = s,
                     nextEpisodes = v.nextEpisodes.drop(1))
             }
-        })
+        }.also { listeners += it })
         onDispose {
+            AutoTest.full = null
             (item as? PlayItem.Vod)?.let { saveProgress(it, player.status().time(), player.status().length()) }
+            // Back to the preview with this very player: one live channel, playing, no error. Anything else lets it go.
+            val ch = (item as? PlayItem.Live)?.channels?.getOrNull(index)
+            val url = playingUrl
+            val fit = adopted && handed != null && !multi && ch != null && url != null && error == null && playing
+            if (fit) {
+                listeners.forEach { runCatching { player.events().removeMediaPlayerEventListener(it) } }
+                player.audio().isMute = true
+                val ok = DesktopPreviewEngine.giveBack(handed!!, url!!) &&
+                    runCatching { App.preview.adopt(ch!!, io.github.novatv.play.ui.TV_PREVIEW) }.getOrDefault(false)
+                if (AutoTest.scenario != null) AutoTest.log(if (ok) "FULL handed back to the preview" else "FULL hand back refused")
+                if (ok) return@onDispose
+            } else if (adopted && AutoTest.scenario != null) AutoTest.log("FULL closed without hand back (multi=$multi error=${error != null} playing=$playing)")
+            if (handed != null) { DesktopPreviewEngine.lost(handed); App.preview.stop() }
             player.controls().stop()
             player.release()
-            AutoTest.vlcReleased.incrementAndGet(); AutoTest.full = null
+            AutoTest.vlcReleased.incrementAndGet()
         }
     }
 
     // Resolve the stream (Stalker portals hand out links on request), then play it.
     LaunchedEffect(item, index, retry) {
+        // The channel the preview's player brought with it is already playing: nothing to open.
+        if (skipFirstPlay) {
+            skipFirstPlay = false
+            (item as? PlayItem.Live)?.let { l ->
+                val c = l.channels[index]
+                App.store.addRecentChannel(App.repo.channelKey(c)); App.store.lastChannel = App.repo.channelKey(c)
+                epg = withContext(IO) { App.repo.nowNext(c) }
+            }
+            return@LaunchedEffect
+        }
         buffering = true; error = null; position = 0; length = 0
         val it = item
         val url = withContext(IO) {
@@ -247,6 +295,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             } catch (e: Exception) { null }
         }?.let { u -> if (u.startsWith("file:")) u else AutoTest.stream(u) }
         if (url == null) { error = "This stream could not be opened"; buffering = false; return@LaunchedEffect }
+        playingUrl = url
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
         if (AutoTest.scenario != null) AutoTest.log("PLAY idx=$index (${if (url.startsWith("http://127.0.0.1")) "relay" else "direct"})")
         player.media().play(url, *opts)
@@ -276,7 +325,6 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     fun fullscreen() { window.placement = if (window.placement == WindowPlacement.Fullscreen) WindowPlacement.Floating else WindowPlacement.Fullscreen }
     val showUi = now - overlay < 4000 || !playing || error != null
 
-    var multi by remember { mutableStateOf(false) }
     // Back from multi-view: the keys go to the player again.
     LaunchedEffect(multi) { if (!multi) repeat(5) { try { focus.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(60) } } }
     if (multi && live != null) {
