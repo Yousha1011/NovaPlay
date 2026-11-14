@@ -51,6 +51,7 @@ $Known = [ordered]@{
     netzap     = 900   # 50 channel changes, resources sampled, 90 s cooldown (about 10 min)
     netopen    = 600   # 15 full-screen open/close cycles, resources sampled (about 5 min)
     netmvcycle = 900   # 10 multi-view entries/exits, 2 screens, resources sampled (about 10 min)
+    netrecord  = 600   # recording: 60 s with a network cut, playback, stop early, cancel, delete (about 5 min)
     limits     = 900
     probes     = 600
     spike      = 600
@@ -140,6 +141,8 @@ try {
         $env:NOVAPLAY_AUTOTEST = $s; $env:NOVAPLAY_AUTOTEST_RUN = $id; $env:NOVAPLAY_AUTOTEST_LOG = $appLog
         $env:NOVAPLAY_AUTOTEST_TIMEOUT_S = "$to"; $env:NOVAPLAY_AUTOTEST_MAX_PLAYERS = "$($Limits.Players)"
         $env:NOVAPLAY_AUTOTEST_MAX_HEAP_MB = "$($Limits.HeapMb)"; $env:NOVAPLAY_AUTOTEST_SCREENS = "$Screens"; $env:NOVAPLAY_LOG = '1'
+        # Recordings made by a test go to the test folder, never to Videos.
+        $env:NOVAPLAY_RECORD_DIR = Join-Path $OutDir 'recordings'
         $t0 = Get-Date
         Say "$s [$id] START (time limit $to s, cpu $cpu%, free $free MB)"
         $g = Start-Process -FilePath (Join-Path $Project 'gradlew.bat') -ArgumentList ':desktop:run', '--no-daemon', '-PnovaplayNoAccounts=true' `
@@ -147,7 +150,7 @@ try {
         $null = $g.Handle   # keeps the exit code readable after the process ends
         $env:APPDATA = $saved
         foreach ($k in 'NOVAPLAY_AUTOTEST', 'NOVAPLAY_AUTOTEST_RUN', 'NOVAPLAY_AUTOTEST_LOG', 'NOVAPLAY_AUTOTEST_TIMEOUT_S',
-                'NOVAPLAY_AUTOTEST_MAX_PLAYERS', 'NOVAPLAY_AUTOTEST_MAX_HEAP_MB', 'NOVAPLAY_AUTOTEST_SCREENS', 'NOVAPLAY_LOG') {
+                'NOVAPLAY_AUTOTEST_MAX_PLAYERS', 'NOVAPLAY_AUTOTEST_MAX_HEAP_MB', 'NOVAPLAY_AUTOTEST_SCREENS', 'NOVAPLAY_LOG', 'NOVAPLAY_RECORD_DIR') {
             Remove-Item "env:$k" -ErrorAction SilentlyContinue
         }
 

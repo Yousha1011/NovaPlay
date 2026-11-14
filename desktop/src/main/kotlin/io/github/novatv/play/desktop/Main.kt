@@ -49,6 +49,8 @@ object Desktop : Host {
     override fun toast(msg: String) { message = msg to System.nanoTime() }
     override fun openUrl(url: String) { runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(url)) } }
     override val updateAsset = Regex("""NovaPlay-Setup-[\d.]+\.msi""")
+    /** Recording while NovaPlay is open (see DesktopRecorder). */
+    override val recorder: io.github.novatv.play.data.Recorder get() = DesktopRecorder
     /** Starts the setup (it replaces this version and keeps the settings in %APPDATA%), then quits so it can. */
     override fun installUpdate(file: String) {
         try {
@@ -95,6 +97,8 @@ fun main() {
         previous?.uncaughtException(t, e)
     }
     App.start(Desktop)
+    // Recordings scheduled before: armed again, or started / marked missed (Windows can't wake NovaPlay to record).
+    Thread({ runCatching { DesktopRecorder.rearm() } }, "record-rearm").apply { isDaemon = true }.start()
     application {
         val window = rememberWindowState(size = DpSize(1440.dp, 860.dp))
         var contentFocused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }

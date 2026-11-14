@@ -241,10 +241,11 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                 val p = App.repo.provider ?: return@withContext null
                 when (it) {
                     is PlayItem.Live -> p.liveUrl(it.channels[index])
-                    is PlayItem.Vod -> it.movie?.let { m -> p.movieUrl(m) } ?: p.episodeUrl(it.series!!, it.episode!!)
+                    // A recording plays from its file, not through the provider.
+                    is PlayItem.Vod -> it.movie?.let { m -> m.url?.takeIf { u -> u.startsWith("file:") } ?: p.movieUrl(m) } ?: p.episodeUrl(it.series!!, it.episode!!)
                 }
             } catch (e: Exception) { null }
-        }?.let(AutoTest::stream)
+        }?.let { u -> if (u.startsWith("file:")) u else AutoTest.stream(u) }
         if (url == null) { error = "This stream could not be opened"; buffering = false; return@LaunchedEffect }
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
         if (AutoTest.scenario != null) AutoTest.log("PLAY idx=$index (${if (url.startsWith("http://127.0.0.1")) "relay" else "direct"})")
@@ -418,6 +419,7 @@ private fun SeekBar(fraction: Float, modifier: Modifier, onSeek: (Float) -> Unit
 }
 
 private fun saveProgress(v: PlayItem.Vod, pos: Long, dur: Long) {
-    if (dur <= 0) return
+    // Recordings aren't kept in Continue Watching (as on Android).
+    if (dur <= 0 || v.key.startsWith("rec:")) return
     App.store.saveProgress(v.key, v.title, v.movie?.poster ?: v.series?.poster, pos, dur)
 }

@@ -113,6 +113,7 @@ object AutoTest {
                     "netzap" -> netZap()
                     "netopen" -> netOpen()
                     "netmvcycle" -> netMvCycle()
+                    "netrecord" -> netRecord()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -906,6 +907,99 @@ object AutoTest {
         check("10 multi-view cycles, 2 screens, all playing ($ok/10) $bad", ok == 10)
         check("back to one VLC player after every cycle ($after)", after.size == 10 && after.all { it == 1 })
         check("at most 2 connections per screen + full screen (most $maxStreams)", maxStreams <= 5)
+    }
+
+    // ---- recording ----------------------------------------------------------------------------------------------------
+
+    private fun rec(id: String) = io.github.novatv.play.data.Recordings.get(id)
+    private fun recFile(r: io.github.novatv.play.data.Recording?) = r?.file?.let { File(java.net.URI(it)) }
+
+    /** Schedules [secs] seconds of [c] from [inS] seconds from now (no padding); returns its id or null. */
+    private fun recordSoon(c: io.github.novatv.play.data.Channel, inS: Int, secs: Int, title: String): String? {
+        val now = System.currentTimeMillis()
+        val p = io.github.novatv.play.data.Programme(App.repo.channelKey(c), now + inS * 1000L, now + (inS + secs) * 1000L, title, null, null)
+        val err = io.github.novatv.play.data.Recordings.schedule(c, p)
+        if (err != null) { log("schedule \"$title\": $err"); return null }
+        return io.github.novatv.play.data.Recordings.all.lastOrNull { it.title == title }?.id
+    }
+
+    /**
+     * Recording through the relay, into the test's own folder: a 60 s recording with a 10 s network cut in the middle,
+     * played back afterwards; one stopped early; one scheduled ahead and cancelled; delete.
+     */
+    private suspend fun netRecord() {
+        val r = relay ?: run { check("relay running", false); return }
+        val dir = System.getenv("NOVAPLAY_RECORD_DIR")
+        if (dir == null) { check("test recording folder set (NOVAPLAY_RECORD_DIR)", false); return }
+        check("recordings go to the test folder", DesktopRecorder.folder.canonicalPath == File(dir).canonicalPath)
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("recording offered (Recordings tab present)", io.github.novatv.play.tabs.any { it == io.github.novatv.play.Tab.RECORDINGS })
+        App.store.recordBeforeMin = 0; App.store.recordAfterMin = 0
+        // A channel whose stream can be recorded (not HLS-only), from the start of the list.
+        val ch = App.repo.state.value.lib.channels.take(40).firstOrNull { c ->
+            runCatching { App.repo.provider?.liveUrl(c) }.getOrNull()?.substringBefore('?')?.let { !it.endsWith(".m3u8", true) || it.contains("/live/") } == true
+        }
+        if (ch == null) { check("a recordable channel", false); return }
+        log("channel: ${ch.name}")
+        val free0 = DesktopRecorder.freeBytes()
+        check("free space reported (${free0 / (1024 * 1024)} MB)", free0 > 0)
+
+        // A. 60 s, with the network cut for 10 s at 25 s.
+        val a = recordSoon(ch, 0, 60, "Test recording A") ?: run { check("A. scheduled", false); return }
+        check("A. started", waitFor(15_000) { rec(a)?.status == io.github.novatv.play.data.Recording.Status.RECORDING && a in DesktopRecorder.running })
+        delay(20_000)
+        val atCut = recFile(rec(a))?.length() ?: 0
+        log("A: ${atCut / 1024} KB after 20 s, relay streams ${r.streams()}")
+        check("A. file growing before the cut (${atCut / 1024} KB)", atCut > 256 * 1024)
+        check("A. one connection while recording (${r.streams()})", r.streams() == 1)
+        r.cutAll(); log("CUT 10 s"); delay(10_000); r.restore(); log("RESTORE")
+        delay(15_000)
+        val afterCut = recFile(rec(a))?.length() ?: 0
+        log("A: ${afterCut / 1024} KB 15 s after the network came back")
+        check("A. reconnected and kept recording after the cut (+${(afterCut - atCut) / 1024} KB)", afterCut > atCut + 256 * 1024)
+        check("A. finished", waitFor(30_000) { rec(a)?.status == io.github.novatv.play.data.Recording.Status.DONE })
+        val ra = rec(a); val fa = recFile(ra)
+        log("A: status=${ra?.status} bytes=${ra?.bytes} file=${fa?.length()} error=${ra?.error}")
+        check("A. saved: file there, size recorded (${fa?.length()} bytes)", fa != null && fa.exists() && fa.length() > 0 && ra?.bytes == fa.length())
+        check("A. no error (${ra?.error})", ra?.error == null)
+        delay(2000)
+        check("A. connection closed after the end (${r.streams()})", r.streams() == 0)
+
+        // B. Playing it back from the file, in the normal player.
+        onUi { io.github.novatv.play.data.Recordings.play(ra!!) }
+        val pb = settleFull(null)
+        log("B: playback $pb | ${fullNow()?.detail}")
+        check("B. the recording plays back (${pb?.first})", pb != null && pb.first !in failing)
+        check("B. played from the file, not the network (${r.streams()} relay streams)", r.streams() == 0)
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("B. player closed", waitFor(6000) { Desktop.playing == null })
+        check("B. not added to Continue Watching", App.store.progress("rec:$a") == null)
+
+        // C. Stopped early.
+        val c = recordSoon(ch, 0, 120, "Test recording C") ?: run { check("C. scheduled", false); return }
+        waitFor(15_000) { c in DesktopRecorder.running }
+        delay(15_000)
+        onUi { io.github.novatv.play.data.Recordings.cancel(c) }
+        check("C. stopped when cancelled", waitFor(10_000) { c !in DesktopRecorder.running })
+        val rc = rec(c)
+        log("C: status=${rc?.status} bytes=${rc?.bytes} error=${rc?.error}")
+        check("C. kept what it saved (${rc?.status}, ${rc?.bytes} bytes)", rc?.status == io.github.novatv.play.data.Recording.Status.DONE && (rc.bytes) > 0)
+        delay(2000)
+        check("C. connection closed (${r.streams()})", r.streams() == 0)
+
+        // D. Scheduled ahead, then cancelled: never starts.
+        val d = recordSoon(ch, 30, 30, "Test recording D") ?: run { check("D. scheduled", false); return }
+        check("D. waiting, not recording", rec(d)?.status == io.github.novatv.play.data.Recording.Status.SCHEDULED && d !in DesktopRecorder.running)
+        onUi { io.github.novatv.play.data.Recordings.cancel(d) }
+        delay(35_000)
+        check("D. removed and never started", rec(d) == null && d !in DesktopRecorder.running && r.streams() == 0)
+
+        // E. Delete removes the file.
+        val fc = recFile(rec(c))
+        onUi { io.github.novatv.play.data.Recordings.delete(a); io.github.novatv.play.data.Recordings.delete(c) }
+        check("E. deleted: files and entries gone", fa?.exists() == false && fc?.exists() == false && rec(a) == null && rec(c) == null)
+        check("every VLC player freed", vlcLive() == 0)
+        r.close()
     }
 
     // ---- a live stream ending by itself ---------------------------------------------------------------------------
