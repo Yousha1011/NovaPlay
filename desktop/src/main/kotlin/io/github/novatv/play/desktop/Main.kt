@@ -51,6 +51,8 @@ object Desktop : Host {
     override val updateAsset = Regex("""NovaPlay-Setup-[\d.]+\.msi""")
     /** Recording while NovaPlay is open (see DesktopRecorder). */
     override val recorder: io.github.novatv.play.data.Recorder get() = DesktopRecorder
+    /** Live TV's preview window (see DesktopPreviewEngine). */
+    override val previewEngine: io.github.novatv.play.data.PreviewEngine get() = DesktopPreviewEngine
     /** Starts the setup (it replaces this version and keeps the settings in %APPDATA%), then quits so it can. */
     override fun installUpdate(file: String) {
         try {
@@ -103,7 +105,7 @@ fun main() {
         val window = rememberWindowState(size = DpSize(1440.dp, 860.dp))
         var contentFocused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
         Window(
-            onCloseRequest = { Vlc.release(); exitApplication() },
+            onCloseRequest = { App.preview.stop(); Vlc.release(); exitApplication() },
             title = "NovaPlay",
             icon = painterResource("icon.png"),
             state = window,
@@ -132,6 +134,11 @@ fun main() {
                 }
                 frame.addWindowFocusListener(l)
                 onDispose { frame.removeWindowFocusListener(l) }
+            }
+            // The app is out of sight behind the player (or minimised): its pages stop their preview, as on Android TV.
+            LaunchedEffect(Desktop.playing != null, window.isMinimized) {
+                App.away = Desktop.playing != null || window.isMinimized
+                if (window.isMinimized) App.preview.stop()
             }
             LaunchedEffect(wake) {
                 if (wake == 0) return@LaunchedEffect

@@ -80,6 +80,11 @@ object AutoTest {
         window = w
         runCatching { file.delete() }
         log("BEGIN run=$runId scenario=$s pid=${ProcessHandle.current().pid()} maxPlayers=$maxPlayers maxHeapMb=$maxHeapMb timeoutS=$timeoutS screens=$mvScreens")
+        // The Live TV preview runs only in the scenarios about it, so the others measure what they always have (their
+        // player counts and connections). The test's own copy of the settings; the installed app's are never written.
+        val withPreview = s in setOf("netpreview")
+        if (App.store.livePreview != withPreview) App.store.livePreview = withPreview
+        log("live preview ${if (withPreview) "on" else "off"} for this scenario")
         // Stop conditions, checked every 2 s: too many players, too much heap, or too long.
         CoroutineScope(Dispatchers.Default).launch {
             val t0 = System.currentTimeMillis()
@@ -114,6 +119,7 @@ object AutoTest {
                     "netopen" -> netOpen()
                     "netmvcycle" -> netMvCycle()
                     "netrecord" -> netRecord()
+                    "netpreview" -> netPreview()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -907,6 +913,158 @@ object AutoTest {
         check("10 multi-view cycles, 2 screens, all playing ($ok/10) $bad", ok == 10)
         check("back to one VLC player after every cycle ($after)", after.size == 10 && after.all { it == 1 })
         check("at most 2 connections per screen + full screen (most $maxStreams)", maxStreams <= 5)
+    }
+
+    // ---- Live TV preview ----------------------------------------------------------------------------------------------
+
+    private fun pState() = App.preview.state.value
+    private fun pName(s: io.github.novatv.play.data.PreviewController.State = pState()) = s::class.simpleName +
+        when (s) { is io.github.novatv.play.data.PreviewController.State.Failed -> " (${s.message})"; else -> "" }
+    private fun pPlaying() = pState() is io.github.novatv.play.data.PreviewController.State.Playing
+    /** The preview's picture: frames arriving in the last 2 s. */
+    private fun pMoving() = DesktopPreviewEngine.frames.lastFrameAt.let { it > 0 && System.currentTimeMillis() - it < 2000 }
+
+    /**
+     * The preview through the relay: it starts on the highlighted channel and shows frames; follows the highlight
+     * (one stream at a time, none opened while scrolling fast); closes before full screen opens its own; comes back
+     * after full screen; a network drop; leaving Live TV or turning previews off frees everything.
+     */
+    private suspend fun netPreview() {
+        val r = relay ?: run { check("relay running", false); return }
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("preview available", App.preview.available)
+        check("reached Live TV", goTab("LIVE"))
+        delay(1500)
+        val start = sample("start (Live TV, nothing highlighted yet)")
+        press(KeyEvent.VK_RIGHT, after = 0)
+        val t0 = System.currentTimeMillis()
+        val first = waitFor(25_000) { pPlaying() }
+        log("first preview: ${pName()} after ${(System.currentTimeMillis() - t0) / 1000}s, moving=${pMoving()} streams=${r.streams()} vlc=${vlcLive()}")
+        check("A. preview plays the highlighted channel (${pName()})", first)
+        delay(2000)
+        check("A. preview picture moving", pMoving())
+        check("A. one stream, one VLC player (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() == 1 && vlcLive() == 1)
+        check("A. through the relay", DesktopPreviewEngine.lastUrl?.startsWith("http://127.0.0.1") == true)
+
+        // B. Following the highlight: 10 channels, each given time to start.
+        var ok = 0; var most = 0; val bad = mutableListOf<String>(); val times = mutableListOf<Long>()
+        for (i in 1..10) {
+            val before = App.preview.channel?.id
+            press(KeyEvent.VK_DOWN, after = 0)
+            val t = System.currentTimeMillis()
+            // Timed from the highlight reaching the next channel (the key arrives a moment after it's sent).
+            waitFor(5000) { App.preview.channel?.id != before }
+            var played = false
+            while (System.currentTimeMillis() - t < 25_000) {
+                most = maxOf(most, r.streams())
+                if (pPlaying() && pMoving()) { played = true; break }
+                if (pState() is io.github.novatv.play.data.PreviewController.State.Failed) break
+                delay(250)
+            }
+            val took = System.currentTimeMillis() - t
+            log("preview $i: ${pName()} in ${took / 100 / 10.0}s moving=${pMoving()} streams=${r.streams()} vlc=${vlcLive()}")
+            if (played) { ok++; times += took / 1000 } else bad += "preview $i: ${pName()}"
+            delay(1500)
+        }
+        log("B: $ok/10 playing, seconds $times, most streams at once $most")
+        check("B. preview follows the highlight (${ok}/10 playing; ${bad.joinToString()})", ok >= 9)
+        check("B. never more than one stream at once (most $most)", most <= 1)
+        check("B. one VLC player at the end (${vlcLive()})", vlcLive() == 1)
+
+        // C. Scrolling fast: nothing opens until the highlight rests.
+        val served0 = r.served
+        repeat(8) { press(KeyEvent.VK_DOWN, after = 150) }
+        val opened = r.served - served0
+        log("C: streams opened while scrolling past 8 channels: $opened")
+        check("C. no stream opened while scrolling fast ($opened)", opened == 0)
+        check("C. the channel it rests on plays", waitFor(25_000) { pPlaying() })
+
+        // D. Full screen: the preview closes first, full screen plays with the only stream.
+        waitFor(10_000) { pMoving() }
+        press(KeyEvent.VK_ENTER, after = 0)
+        val full = settleFull(null, 45_000)
+        log("D: full screen $full | preview ${pName()} hasPlayer=${DesktopPreviewEngine.hasPlayer} streams=${r.streams()} vlc=${vlcLive()}")
+        check("D. full screen plays (${full?.first})", full != null && full.first !in failing)
+        check("D. preview stopped while full screen plays (${pName()}, player ${DesktopPreviewEngine.hasPlayer})", !DesktopPreviewEngine.hasPlayer)
+        check("D. one stream, one VLC player in full screen (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() == 1 && vlcLive() == 1)
+        check("D. the app counts as covered", App.away)
+        delay(8000)
+        // (Some feeds send a burst and close: full screen's own stream may be gone by now, which is not the preview's.)
+        check("D. preview stayed stopped behind full screen (player ${DesktopPreviewEngine.hasPlayer}, streams ${r.streams()})",
+            !DesktopPreviewEngine.hasPlayer && r.streams() <= 1 && vlcLive() == 1)
+
+        // E. Back from full screen: the preview starts again on its own, still one stream.
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("E. player closed", waitFor(6000) { Desktop.playing == null })
+        val back = waitFor(25_000) { pPlaying() }
+        delay(1500)
+        log("E: preview ${pName()} moving=${pMoving()} streams=${r.streams()} vlc=${vlcLive()}")
+        check("E. preview back after full screen (${pName()})", back && pMoving())
+        check("E. one stream, one VLC player (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() == 1 && vlcLive() == 1)
+
+        // F. Network drop under the preview: a status (not a frozen picture with none) and back on the next channel.
+        // A channel that streams steadily: some feeds send minutes of picture in a burst and close, which would play on
+        // through any cut. Moves down until the preview's connection is still open after 6 s of playing.
+        var steady = false
+        for (tries in 1..8) {
+            if (pPlaying() && pMoving()) { delay(6000); if (r.streams() == 1 && pPlaying()) { steady = true; break } }
+            log("F: not a steady stream (${pName()}, streams ${r.streams()}), next channel")
+            val before = App.preview.channel?.id
+            press(KeyEvent.VK_DOWN, after = 0); waitFor(5000) { App.preview.channel?.id != before }
+            waitFor(25_000) { pPlaying() && pMoving() }
+        }
+        check("F. found a steadily streaming channel", steady)
+        // VLC plays on from what it has buffered (often 20 s or more), so the cut lasts long enough for that to run out.
+        // Each second: is the window "Playing" with no new frame for 3 s+ (a frozen picture with no status)?
+        r.cutAll(); log("CUT 45 s"); val cutAt = System.currentTimeMillis()
+        var frozenSilent = 0; var run = 0; val seenF = linkedMapOf<String, Int>()
+        while (System.currentTimeMillis() - cutAt < 45_000) {
+            delay(1000)
+            val age = DesktopPreviewEngine.frames.lastFrameAt.let { if (it == 0L) -1 else (System.currentTimeMillis() - it) / 1000 }
+            val k = pName(); seenF[k] = (seenF[k] ?: 0) + 1
+            if (pPlaying() && (age < 0 || age >= 3)) { run++; if (run >= 1) frozenSilent++ } else run = 0
+            log("cut +${(System.currentTimeMillis() - cutAt) / 1000}s: $k frameAge=${age}s streams=${r.streams()}")
+        }
+        r.restore(); log("RESTORE")
+        log("F: during the cut: $seenF; seconds 'Playing' with no picture for 3 s+: $frozenSilent")
+        check("F. the drop was noticed during the cut (${seenF.keys})", seenF.keys.any { !it.startsWith("Playing") })
+        check("F. no frozen picture without a status for more than 5 s ($frozenSilent s)", frozenSilent <= 5)
+        val recovered = waitFor(30_000) { pPlaying() && pMoving() && r.streams() == 1 }
+        log("F: after restore: ${pName()} moving=${pMoving()} streams=${r.streams()} recovered=$recovered")
+        if (!recovered) {
+            check("F. after the drop: an error shown, not a frozen picture (${pName()})", pState() is io.github.novatv.play.data.PreviewController.State.Failed)
+            press(KeyEvent.VK_DOWN, after = 0)
+        }
+        check("F. preview plays after the drop (${pName()})", waitFor(30_000) { pPlaying() && pMoving() && r.streams() == 1 })
+        check("F. one stream (${r.streams()})", r.streams() == 1)
+
+        // G. Leaving Live TV frees the preview.
+        check("G. reached Home", goTab("HOME"))
+        delay(3000)
+        log("G: preview ${pName()} hasPlayer=${DesktopPreviewEngine.hasPlayer} streams=${r.streams()} vlc=${vlcLive()}")
+        check("G. leaving Live TV stops the preview (player ${DesktopPreviewEngine.hasPlayer}, streams ${r.streams()}, vlc ${vlcLive()})",
+            !DesktopPreviewEngine.hasPlayer && r.streams() == 0 && vlcLive() == 0)
+
+        // H. Previews turned off: nothing plays on Live TV.
+        App.store.livePreview = false
+        check("H. reached Live TV", goTab("LIVE"))
+        press(KeyEvent.VK_RIGHT, after = 0); press(KeyEvent.VK_DOWN, after = 3000)
+        log("H: previews off: ${pName()} hasPlayer=${DesktopPreviewEngine.hasPlayer} streams=${r.streams()}")
+        check("H. previews off: no player, no stream", !DesktopPreviewEngine.hasPlayer && r.streams() == 0)
+        App.store.livePreview = true
+
+        check("reached Home", goTab("HOME"))
+        delay(5000)
+        val idle = sample("idle, just after"); log("cooldown 90 s"); delay(90_000)
+        val cool = sample("idle, after 90 s cooldown")
+        check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+        check("no connection left open (${r.streams()})", r.streams() == 0)
+        log("growth start -> cooldown: private ${cool.priv - start.priv} MB, handles ${cool.handles - start.handles}, threads ${cool.threads - start.threads}")
+        check("handles back near the start (${start.handles} -> ${cool.handles}, under +300)", cool.handles in 0..(start.handles + 300))
+        check("threads back near the start (${start.threads} -> ${cool.threads}, under +10)", cool.threads <= start.threads + 10)
+        check("memory settled during cooldown (private ${idle.priv} -> ${cool.priv} MB)", cool.priv <= idle.priv + 30)
+        log("all samples:"); samples.forEach { log("  $it") }
+        r.close()
     }
 
     // ---- recording ----------------------------------------------------------------------------------------------------
