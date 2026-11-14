@@ -53,6 +53,7 @@ $Known = [ordered]@{
     netmvcycle = 900   # 10 multi-view entries/exits, 2 screens, resources sampled (about 10 min)
     netpreview = 900   # Live TV preview: follows the highlight, one stream, full screen, a drop, cleanup (about 6 min)
     nethandover = 900  # seamless hand-over: 12 to full screen and back, switch off, loading, multi-view, a cut (about 9 min)
+    netclick   = 900   # mouse: click previews, double click / Full screen button watch, no window freeze (about 6 min)
     netrecord  = 600   # recording: 60 s with a network cut, playback, stop early, cancel, delete (about 5 min)
     limits     = 900
     probes     = 600

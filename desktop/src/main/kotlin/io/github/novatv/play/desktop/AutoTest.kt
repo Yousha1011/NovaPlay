@@ -68,6 +68,8 @@ object AutoTest {
     @Volatile var ends = 0
     /** Hand-overs: full screen took the preview's player / gave it back (counted from the log). */
     @Volatile var took = 0
+    /** Gaps (ms) when the UI thread didn't respond (see start). */
+    val stalls = java.util.Collections.synchronizedList(mutableListOf<Long>())
     @Volatile var gaveBack = 0
     fun log(msg: String) {
         if (msg.startsWith("PLAY idx=")) plays++
@@ -79,6 +81,9 @@ object AutoTest {
         println("[autotest] $line")
     }
 
+    /** Before anything is drawn (test runs only): where clickable things are, for [click]. */
+    fun installHooks() { if (scenario != null) App.testBounds = { name, l, t, r, b -> bounds[name] = floatArrayOf(l, t, r, b) } }
+
     /** Called once the window exists. */
     fun start(w: java.awt.Window) {
         val s = scenario ?: return
@@ -87,9 +92,20 @@ object AutoTest {
         log("BEGIN run=$runId scenario=$s pid=${ProcessHandle.current().pid()} maxPlayers=$maxPlayers maxHeapMb=$maxHeapMb timeoutS=$timeoutS screens=$mvScreens")
         // The Live TV preview runs only in the scenarios about it, so the others measure what they always have (their
         // player counts and connections). The test's own copy of the settings; the installed app's are never written.
-        val withPreview = s in setOf("netpreview", "nethandover")
+        val withPreview = s in setOf("netpreview", "nethandover", "netclick")
         if (App.store.livePreview != withPreview) App.store.livePreview = withPreview
         log("live preview ${if (withPreview) "on" else "off"} for this scenario")
+        // How long the window stops responding: a tick on the UI thread every 50 ms; any gap over 250 ms is logged.
+        CoroutineScope(Dispatchers.Main).launch {
+            var last = System.currentTimeMillis()
+            while (!ended) {
+                delay(50)
+                val now = System.currentTimeMillis()
+                val gap = now - last - 50
+                if (gap > 250) { stalls += gap; log("UI STALL ${gap} ms (playing=${Desktop.playing != null})") }
+                last = now
+            }
+        }
         // Stop conditions, checked every 2 s: too many players, too much heap, or too long.
         CoroutineScope(Dispatchers.Default).launch {
             val t0 = System.currentTimeMillis()
@@ -126,6 +142,7 @@ object AutoTest {
                     "netrecord" -> netRecord()
                     "netpreview" -> netPreview()
                     "nethandover" -> netHandover()
+                    "netclick" -> netClick()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -1108,7 +1125,7 @@ object AutoTest {
         for (c in 1..12) {
             if (!(pPlaying() && pMoving())) previewSteady(r, 4)
             val ch0 = App.preview.channel?.name
-            val served0 = r.served; val took0 = took; val back0 = gaveBack
+            val served0 = r.served; val took0 = took; val back0 = gaveBack; val ends0 = ends
             press(KeyEvent.VK_ENTER, after = 0)
             val opened = waitFor(6000) { Desktop.playing != null && full != null }
             delay(300)
@@ -1117,7 +1134,9 @@ object AutoTest {
             val tookIt = took == took0 + 1
             delay(2500)
             val fs = settleFull(null, 8000)
-            val newConn = r.served - served0
+            // The server ending the stream meanwhile makes full screen's one quiet retry: its connection isn't the hand-over's.
+            val retried = ends > ends0
+            val newConn = if (retried) 0 else r.served - served0
             maxStreams = maxOf(maxStreams, r.streams()); maxVlc = maxOf(maxVlc, vlcLive())
             var zapped = false
             if (c % 3 == 0) { press(KeyEvent.VK_DOWN, after = 0); settleFull(null, 25_000); zapped = true }
@@ -1130,10 +1149,10 @@ object AutoTest {
             val conns = r.served - served0
             maxStreams = maxOf(maxStreams, r.streams()); maxVlc = maxOf(maxVlc, vlcLive())
             val line = "cycle $c ($ch0${if (zapped) " -> $fullCh" else ""}): opened=$opened took=$tookIt atOnce=$atOnce full=${fs?.first} " +
-                "newConnOnOpen=$newConn closed=$closed handedBack=$backIt previewBack=$previewBack sameChannel=$sameCh conns=$conns streams=${r.streams()} vlc=${vlcLive()}"
+                "newConnOnOpen=$newConn${if (retried) " (server ended it: full screen retried)" else ""} closed=$closed handedBack=$backIt previewBack=$previewBack sameChannel=$sameCh conns=$conns streams=${r.streams()} vlc=${vlcLive()}"
             log(line)
             val ok = opened && tookIt && atOnce && newConn == 0 && fs != null && fs.first !in failing && closed && backIt && previewBack && sameCh &&
-                conns <= (if (zapped) 2 else 0) && vlcLive() == 1
+                (retried || conns <= (if (zapped) 2 else 0)) && vlcLive() == 1
             if (ok) good++ else bad += line
             delay(1500)
         }
@@ -1218,6 +1237,166 @@ object AutoTest {
         check("threads back near the start (${start.threads} -> ${cool.threads}, under +10)", cool.threads <= start.threads + 10)
         check("memory settled during cooldown (private ${idle.priv} -> ${cool.priv} MB)", cool.priv <= idle.priv + 30)
         log("all samples:"); samples.forEach { log("  $it") }
+        r.close()
+    }
+
+    // ---- mouse: click, double click, the preview's Full screen button --------------------------------------------
+
+    /** Where clickable things are, in window pixels (reported by the app, see App.testBounds). */
+    private val bounds = java.util.concurrent.ConcurrentHashMap<String, FloatArray>()
+
+    /**
+     * Clicks [name]'s centre with the mouse ([count] 2: a double click), as AWT events into the app's own window only.
+     * Returns false if it isn't on screen.
+     */
+    private suspend fun click(name: String, count: Int = 1): Boolean {
+        val b = bounds[name] ?: run { log("click $name: not on screen"); return false }
+        val w = window ?: return false
+        val target = composeLayer(w) ?: run { log("click $name: no Compose layer found"); return false }
+        val scale = target.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
+        val x = (((b[0] + b[2]) / 2) / scale).toInt(); val y = (((b[1] + b[3]) / 2) / scale).toInt()
+        val t0 = System.currentTimeMillis()
+        EventQueue.invokeAndWait {
+            target.dispatchEvent(java.awt.event.MouseEvent(target, java.awt.event.MouseEvent.MOUSE_MOVED, t0, 0, x, y, 0, false, 0))
+        }
+        for (i in 1..count) {
+            val t = System.currentTimeMillis()
+            EventQueue.invokeAndWait {
+                val down = java.awt.event.InputEvent.BUTTON1_DOWN_MASK
+                target.dispatchEvent(java.awt.event.MouseEvent(target, java.awt.event.MouseEvent.MOUSE_PRESSED, t, down, x, y, i, false, java.awt.event.MouseEvent.BUTTON1))
+                target.dispatchEvent(java.awt.event.MouseEvent(target, java.awt.event.MouseEvent.MOUSE_RELEASED, t + 40, 0, x, y, i, false, java.awt.event.MouseEvent.BUTTON1))
+                target.dispatchEvent(java.awt.event.MouseEvent(target, java.awt.event.MouseEvent.MOUSE_CLICKED, t + 41, 0, x, y, i, false, java.awt.event.MouseEvent.BUTTON1))
+            }
+            if (i < count) delay(90)
+        }
+        log("mouse ${if (count == 2) "double click" else "click"} on $name")
+        return true
+    }
+
+    /** The component Compose draws in and takes the mouse on (not the window's empty glass pane). */
+    private fun composeLayer(c: Component): Component? {
+        if (c.isShowing && c.javaClass.name.let { it.contains("Skia") || it.contains("ComposeScene") || it.contains("ComposePanel") } &&
+            c.width > 0 && (c !is Container || c.componentCount == 0)) return c
+        if (c is Container) for (k in c.components) composeLayer(k)?.let { return it }
+        return null
+    }
+    private fun describeTree(c: Component, depth: Int = 0): String = "  ".repeat(depth) + c.javaClass.name + " ${c.width}x${c.height} showing=${c.isShowing}\n" +
+        (if (c is Container && depth < 8) c.components.joinToString("") { describeTree(it, depth + 1) } else "")
+
+    /** Visible channel rows, top to bottom. */
+    private fun rows(): List<String> = bounds.entries.filter { it.key.startsWith("row:") && it.value[1] >= 0 && it.value[3] > it.value[1] }
+        .sortedBy { it.value[1] }.map { it.key }
+
+    private fun stallsSince(n: Int): List<Long> = synchronized(stalls) { stalls.drop(n) }
+
+    /**
+     * Windows mouse rules in Live TV: a click picks a channel (its preview starts, nothing opens full screen); a double
+     * click, Enter, the preview's Full screen button or a double click on the preview watches it full screen at once,
+     * in the preview's own player when it is that channel; and the window never freezes doing any of it.
+     */
+    private suspend fun netClick() {
+        val r = relay ?: run { check("relay running", false); return }
+        App.store.seamlessFullscreen = true
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        check("channel rows on screen", waitFor(10_000) { rows().size >= 6 })
+        delay(1500)
+        val s0 = stalls.size
+        val list = rows()
+        log("rows: ${list.take(8)}")
+        log("window components:\n" + describeTree(window!!) + "click target: ${composeLayer(window!!)?.javaClass?.name}")
+        fun chId(row: String) = row.removePrefix("row:")
+
+        // A. One click: the channel is picked and previews; nothing opens full screen.
+        click(list[2])
+        delay(1500)
+        val picked = App.preview.channel?.id == chId(list[2])
+        log("A: after a click: full=${Desktop.playing != null} preview=${pName()} on ${App.preview.channel?.name}")
+        check("A. a click doesn't open full screen", Desktop.playing == null)
+        check("A. a click picks the channel for the preview", picked)
+        check("A. its preview plays", waitFor(25_000) { pPlaying() && pMoving() })
+
+        // B. A click on another channel: the preview moves to it, still no full screen.
+        click(list[4])
+        delay(1500)
+        check("B. another click moves the preview (${App.preview.channel?.name})", App.preview.channel?.id == chId(list[4]) && Desktop.playing == null)
+        check("B. its preview plays", waitFor(25_000) { pPlaying() && pMoving() })
+
+        // C. The preview's Full screen button: full screen at once, in the preview's player.
+        check("C. Full screen button shown on the playing preview", waitFor(5000) { bounds.containsKey("preview-full") })
+        var took0 = took; var served0 = r.served; var t = System.currentTimeMillis()
+        click("preview-full")
+        val openedC = waitFor(3000) { Desktop.playing != null && full != null }
+        val msC = System.currentTimeMillis() - t
+        delay(800)
+        log("C: Full screen button: opened=$openedC in ${msC} ms took=${took - took0} newConn=${r.served - served0} ${fullNow()?.let { "playing=${it.playing} buf=${it.buffering}" }}")
+        check("C. Full screen button opens full screen in the preview's player, no new connection (${msC} ms)", openedC && took == took0 + 1 && r.served == served0)
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("C. back in the window, still playing", waitFor(6000) { Desktop.playing == null } && waitFor(5000) { pPlaying() && pMoving() })
+        delay(1000)
+
+        // D. Double click on a channel that isn't previewing: full screen straight away with its own player.
+        val other = rows().first { chId(it) != App.preview.channel?.id }
+        t = System.currentTimeMillis(); val sD = stalls.size
+        click(other, count = 2)
+        val openedD = waitFor(3000) { Desktop.playing != null }
+        val msD = System.currentTimeMillis() - t
+        val fd = settleFull(null, 45_000)
+        log("D: double click on another channel: opened=$openedD in ${msD} ms, ${fd?.first}, stalls ${stallsSince(sD)}")
+        check("D. double click opens full screen at once (${msD} ms)", openedD && msD < 1500)
+        check("D. and it plays (${fd?.first})", fd != null && fd.first !in failing)
+        check("D. one stream, one player (streams ${r.streams()}, vlc ${vlcLive()})", r.streams() <= 1 && vlcLive() == 1)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+
+        // E. Double click on the previewing channel: full screen in the preview's player.
+        check("E. preview playing again", waitFor(25_000) { pPlaying() && pMoving() })
+        val cur = "row:${App.preview.channel?.id}"
+        if (!bounds.containsKey(cur)) log("E: the previewing channel's row isn't on screen")
+        took0 = took; served0 = r.served; t = System.currentTimeMillis()
+        click(cur, count = 2)
+        val openedE = waitFor(3000) { Desktop.playing != null && full != null }
+        val msE = System.currentTimeMillis() - t
+        delay(800)
+        log("E: double click on the previewing channel: opened=$openedE in ${msE} ms took=${took - took0} newConn=${r.served - served0}")
+        check("E. double click on the previewing channel: same player, no new connection (${msE} ms)", openedE && took == took0 + 1 && r.served == served0)
+
+        // F. In full screen: changing channel and multi-view without freezing.
+        val sF = stalls.size
+        repeat(3) { press(KeyEvent.VK_DOWN, after = 2500) }
+        press(KeyEvent.VK_M, after = 0); waitFor(6000) { multi != null }
+        if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 1000)
+        allPlaying(2, 40_000)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null }
+        delay(3000)
+        log("F: stalls while changing channel and in multi-view: ${stallsSince(sF)}")
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+
+        // G. Enter on the picked row still watches it (keyboard).
+        delay(1500)
+        click(rows()[1]); delay(800)
+        press(KeyEvent.VK_ENTER, after = 0)
+        val openedG = waitFor(3000) { Desktop.playing != null }
+        check("G. Enter on a picked row watches it", openedG)
+        settleFull(null, 30_000)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+
+        // H. Double click on the preview itself.
+        check("H. preview playing", waitFor(25_000) { pPlaying() && pMoving() })
+        took0 = took
+        click("preview", count = 2)
+        val openedH = waitFor(3000) { Desktop.playing != null }
+        check("H. double click on the preview watches it in the same player", openedH && took == took0 + 1)
+        delay(1500)
+        press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { Desktop.playing == null }
+
+        val all = stallsSince(s0)
+        log("UI stalls over 250 ms in Live TV and full screen: $all")
+        check("the window never froze for more than 0.5 s (longest ${all.maxOrNull() ?: 0} ms; ${all.count { it > 500 }} over 0.5 s)", all.none { it > 500 })
+
+        check("reached Home", goTab("HOME"))
+        delay(4000)
+        check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+        check("no connection left open (${r.streams()})", r.streams() == 0)
         r.close()
     }
 

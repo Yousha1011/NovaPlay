@@ -61,6 +61,7 @@ actual fun Tile(
     color: Color,
     focusedColor: Color,
     focusedContent: Color,
+    onDoubleClick: (() -> Unit)?,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val src = remember { MutableInteractionSource() }
@@ -74,7 +75,7 @@ actual fun Tile(
             .clip(shape)
             .background(if (lit) focusedColor else color)
             .hoverable(src)
-            .combinedClickable(interactionSource = src, indication = null, onLongClick = onLongClick, onClick = onClick),
+            .combinedClickable(interactionSource = src, indication = null, onLongClick = onLongClick, onDoubleClick = onDoubleClick, onClick = onClick),
         content = content,
     )
 }

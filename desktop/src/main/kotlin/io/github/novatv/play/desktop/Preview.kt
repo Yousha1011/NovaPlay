@@ -35,8 +35,6 @@ internal class HandedPlayer(val player: EmbeddedMediaPlayer, val frames: Frames,
  */
 object DesktopPreviewEngine : PreviewEngine {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    /** VLC's slow calls (freeing a player) in order, off the main thread. */
-    private val vlcThread = Executors.newSingleThreadExecutor { r -> Thread(r, "preview-vlc").apply { isDaemon = true } }
 
     /** Observed, so the window draws the new player's frames after a release. */
     internal var frames by androidx.compose.runtime.mutableStateOf(Frames())
@@ -74,13 +72,24 @@ object DesktopPreviewEngine : PreviewEngine {
         // Its sound is only needed if it may go full screen as it is.
         (if (App.store.seamlessFullscreen) emptyArray() else arrayOf(":no-audio"))
 
+    /**
+     * A channel asked for while full screen is open (a click's highlight can land just after a double click opened it):
+     * it waits, so the two never play at once, and starts when full screen closes ([fullScreenClosed]).
+     */
+    private var deferred: Pair<String, (PreviewEvent) -> Unit>? = null
+
     override fun play(url: String, onEvent: (PreviewEvent) -> Unit) {
         if (lent != null) { onEvent(PreviewEvent.Error("Playing full screen")); return }
+        if (Desktop.playing != null) {
+            generation++; watcher?.cancel(); deferred = url to onEvent
+            testLog("PREVIEW waits: full screen is open")
+            return
+        }
+        deferred = null
         val gen = ++generation
         watcher?.cancel()
         val p = player ?: build().also { player = it }
-        // The last channel's stream closes before this one opens.
-        runCatching { p.controls().stop() }
+        // The last channel's stream closes before this one opens (both queued, in order, off the window's thread).
         frames.lastFrameAt = 0L
         dropped = false; ready = false
         val target = AutoTest.stream(url)
@@ -88,8 +97,8 @@ object DesktopPreviewEngine : PreviewEngine {
         val o = opts()
         p.audio().isMute = true
         testLog("PREVIEW play (${if (target.startsWith("http://127.0.0.1")) "relay" else "direct"})")
-        p.media().play(target, *o)
-        watch(p, gen, onEvent, System.currentTimeMillis(), alreadyReady = false) { p.media().play(target, *o) }
+        Vlc.later { p.controls().stop(); p.media().play(target, *o) }
+        watch(p, gen, onEvent, System.currentTimeMillis(), alreadyReady = false) { Vlc.later { p.controls().stop(); p.media().play(target, *o) } }
     }
 
     /**
@@ -119,13 +128,12 @@ object DesktopPreviewEngine : PreviewEngine {
                         testLog("PREVIEW ${if (stalled) "no picture" else "stream dropped"}: retrying once")
                         delay(RETRY_MS)
                         if (gen != generation || player !== p) return@launch
-                        runCatching { p.controls().stop() }
                         replay()
                         openedAt = System.currentTimeMillis(); ready = false
                         continue
                     }
                     testLog("PREVIEW failed")
-                    runCatching { p.controls().stop() }
+                    Vlc.later { p.controls().stop() }
                     ready = false
                     onEvent(PreviewEvent.Error("This stream could not be played"))
                     return@launch
@@ -165,7 +173,11 @@ object DesktopPreviewEngine : PreviewEngine {
     }
     private var back: Pair<HandedPlayer, String>? = null
 
+    /** Full screen closed: a channel asked for meanwhile starts now. */
+    fun fullScreenClosed() { val d = deferred ?: return; deferred = null; if (lent == null && player == null) play(d.first, d.second) }
+
     override fun takeBack(onEvent: (PreviewEvent) -> Unit): Boolean {
+        deferred = null
         val (h, url) = back ?: return false
         back = null
         if (lent !== h) return false
@@ -178,7 +190,7 @@ object DesktopPreviewEngine : PreviewEngine {
         val gen = ++generation
         testLog("PREVIEW took the player back")
         val o = opts()
-        watch(h.player, gen, onEvent, frames.lastFrameAt.coerceAtLeast(1L) - 1, alreadyReady = true) { h.player.media().play(url, *o) }
+        watch(h.player, gen, onEvent, frames.lastFrameAt.coerceAtLeast(1L) - 1, alreadyReady = true) { Vlc.later { h.player.controls().stop(); h.player.media().play(url, *o) } }
         return true
     }
 
@@ -186,6 +198,7 @@ object DesktopPreviewEngine : PreviewEngine {
     internal fun lost(h: HandedPlayer) { if (lent === h) { lent = null; back = null } }
 
     override fun release() {
+        deferred = null
         generation++
         watcher?.cancel(); watcher = null
         // Full screen has the player: nothing here to stop, and that one isn't the preview's to touch.
@@ -193,11 +206,10 @@ object DesktopPreviewEngine : PreviewEngine {
         player = null
         ready = false
         // The stream closes now (full screen may be about to open its own); the player is freed off the main thread.
-        runCatching { p.controls().stop() }
         frames = Frames()
         lastUrl = null
         testLog("PREVIEW released")
-        vlcThread.execute { runCatching { p.release() }; AutoTest.vlcReleased.incrementAndGet() }
+        Vlc.later { p.controls().stop(); p.release(); AutoTest.vlcReleased.incrementAndGet() }
     }
 
     @Composable override fun Video(modifier: Modifier) { VideoCanvas(frames, modifier) }

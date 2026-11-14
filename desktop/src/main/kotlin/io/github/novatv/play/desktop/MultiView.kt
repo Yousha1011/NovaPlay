@@ -183,7 +183,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
             if (s !in screens) return@launch
             if (url == null) { s.current.dropped = true; return@launch }
             val v = s.current
-            withContext(IO) { v.player.media().play(url, *opts) }
+            Vlc.later { v.player.media().play(url, *opts) }
         }
     }
     /** Opens [s]'s channel again in a paused standby player, ready to take over. */
@@ -195,7 +195,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         scope.launch {
             val url = withContext(IO) { try { App.repo.provider?.liveUrl(streamFor(chans[s.channel]))?.let(AutoTest::stream) } catch (e: Exception) { null } }
             if (url == null || s.standby !== sb) return@launch
-            withContext(IO) { sb.player.media().play(url, *opts, ":start-paused") }
+            Vlc.later { sb.player.media().play(url, *opts, ":start-paused") }
         }
     }
     /** The standby takes over [s]: its picture carries on from the old one's last frame. */
@@ -209,7 +209,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         s.openedAt = now; s.playingSince = now; s.lastBytes = 0; s.bytesAt = now
         s.buffering = false; s.error = null
         multiLog("channel ${s.channel}: handed over")
-        scope.launch(IO) { old.release() }
+        Vlc.later { old.release() }
     }
     fun sound(a: Int) {
         active = a.coerceIn(0, screens.lastIndex)
@@ -235,7 +235,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
     }
     fun remove(i: Int) {
         if (screens.size <= 2) { onExit(chans[screens[if (i == 0) 1 else 0].channel]); return }
-        screens.removeAt(i).release()
+        screens.removeAt(i).let { s -> Vlc.later { s.release() } }
         sound(minOf(active, screens.lastIndex))
     }
 
@@ -262,7 +262,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
                         "standby=${s.standby?.let { sb -> "${runCatching { sb.player.status().state() }.getOrNull()}/frame=${sb.frames.lastFrameAt > 0}/bytes=${sb.bytesRead()}" } ?: "-"}" })
             })
         }
-        onDispose { AutoTest.multi = null; AutoTest.multiDo = null; screens.forEach { it.release() }; screens.clear() }
+        onDispose { AutoTest.multi = null; AutoTest.multiDo = null; screens.toList().forEach { s -> Vlc.later { s.release() } }; screens.clear() }
     }
     // The watchdog: a dropped stream reconnects after a short wait (longer after each failure in a row); a picture that
     // stops changing for too long, or never starts, is opened again.
@@ -280,12 +280,12 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
                     multiLog("channel ${s.channel}: cut off, opening the next stream")
                     openStandby(s)
                 }
-                s.standby?.let { sb -> if (sb.dropped) { s.standby = null; scope.launch(IO) { sb.release() } } }
+                s.standby?.let { sb -> if (sb.dropped) { s.standby = null; Vlc.later { sb.release() } } }
                 // Only a standby that has its picture can take over; one still opening would leave the screen on a
                 // player that never starts. It's let go, and the screen reconnects with its status showing.
                 val ready = s.standby?.let { it.frames.lastFrameAt > 0 } == true
                 if ((s.current.dropped || now - last > MultiView.STALL_MS) && s.standby != null && !ready) {
-                    s.standby?.let { sb -> s.standby = null; scope.launch(IO) { sb.release() } }
+                    s.standby?.let { sb -> s.standby = null; Vlc.later { sb.release() } }
                 }
                 val wasPlaying = s.playingSince > 0 && now - s.playingSince > MultiView.SEAMLESS_AFTER_MS
                 when {

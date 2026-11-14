@@ -103,7 +103,19 @@ object Vlc {
             uk.co.caprica.vlcj.factory.MediaPlayerFactory("--no-video-title-show", "--quiet", "--http-reconnect").also { factoryRef = it }
         }
 
-    fun release() { factoryRef?.release(); factoryRef = null }
+    /**
+     * VLC's calls that can wait on the network (start, stop, free a player) run here, one after another and in the
+     * order made, never on the window's thread: the window never freezes, and a stream still closes before the next
+     * one opens, so the provider never sees two.
+     */
+    private val control = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "vlc-control").apply { isDaemon = true } }
+    fun later(f: () -> Unit) { runCatching { control.execute { runCatching(f).onFailure { System.err.println("vlc: $it") } } } }
+
+    /** Closing the app: what is queued finishes first (up to a few seconds), then the engine goes. */
+    fun release() {
+        runCatching { control.submit { }.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+        factoryRef?.release(); factoryRef = null
+    }
 }
 
 /** VLC draws each frame into memory; Compose paints it. */
@@ -264,9 +276,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                 if (ok) return@onDispose
             } else if (adopted && AutoTest.scenario != null) AutoTest.log("FULL closed without hand back (multi=$multi error=${error != null} playing=$playing)")
             if (handed != null) { DesktopPreviewEngine.lost(handed); App.preview.stop() }
-            player.controls().stop()
-            player.release()
-            AutoTest.vlcReleased.incrementAndGet()
+            Vlc.later { player.controls().stop(); player.release(); AutoTest.vlcReleased.incrementAndGet() }
         }
     }
 
@@ -298,7 +308,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
         playingUrl = url
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
         if (AutoTest.scenario != null) AutoTest.log("PLAY idx=$index (${if (url.startsWith("http://127.0.0.1")) "relay" else "direct"})")
-        player.media().play(url, *opts)
+        Vlc.later { player.media().play(url, *opts) }
         if (it is PlayItem.Vod) App.store.progress(it.key)?.let { p -> delay(800); player.controls().setTime(p.first) }
         if (it is PlayItem.Live) {
             val c = it.channels[index]
@@ -340,7 +350,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
         }
         return
     }
-    fun startMulti() { if (live == null) return; player.controls().stop(); multi = true }
+    fun startMulti() { if (live == null) return; Vlc.later { player.controls().stop() }; multi = true }
 
     Box(
         Modifier.fillMaxSize().background(Color.Black)

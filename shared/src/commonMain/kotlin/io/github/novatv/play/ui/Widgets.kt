@@ -29,6 +29,8 @@ expect fun Tile(
     color: Color = C.panel,
     focusedColor: Color = C.panelHi,
     focusedContent: Color = C.text,
+    /** A mouse double click (Windows); the TV has no mouse and ignores it. */
+    onDoubleClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 )
 

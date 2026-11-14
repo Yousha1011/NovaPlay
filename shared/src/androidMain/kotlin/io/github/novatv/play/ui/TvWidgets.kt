@@ -46,6 +46,7 @@ actual fun Tile(
     color: Color,
     focusedColor: Color,
     focusedContent: Color,
+    onDoubleClick: (() -> Unit)?,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Surface(

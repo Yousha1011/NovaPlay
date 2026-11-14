@@ -85,7 +85,14 @@ class StreamRelay(private val userAgent: String, private val log: (String) -> Un
                     if (l.isBlank() || l.startsWith("#")) l else wrap(base.resolve(l.trim()).toString())
                 }
                 out.write(text.toByteArray()); bytes = text.length.toLong(); how = "playlist"
-            } else { val gen = endGen; bytes = pipe(body, out) { !cut && gen == endGen && (endAfterMs < 0 || System.currentTimeMillis() - t0 < endAfterMs) }
+            } else { val gen = endGen
+                // The player closing its end is seen at once (not only at the next write, which can be seconds later
+                // when the server is slow), so the count of open streams is exact.
+                Thread({
+                    try { while (client.getInputStream().read() >= 0) { } } catch (e: Exception) { }
+                    open.remove(client); runCatching { body.close() }; runCatching { client.close() }
+                }, "relay-$id-watch").apply { isDaemon = true }.start()
+                bytes = pipe(body, out) { !cut && gen == endGen && (endAfterMs < 0 || System.currentTimeMillis() - t0 < endAfterMs) }
                 how = if (cut) "cut" else if (gen != endGen || endAfterMs >= 0) "ended by the test" else "upstream ended" }
         } catch (e: Exception) { how = "${e::class.simpleName}: ${e.message?.take(60)}"
         } finally {

@@ -100,7 +100,7 @@ fun LiveGuideScreen(nav: Nav) {
     sync.Follow(visible, groups, group, focused?.first?.id, listState, select = { sel = it }, highlight = { focused = it to null })
 
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 22.dp, end = 28.dp)) {
-        if (shown != null) TopPanel(shown, focused?.second ?: nowNext(shown).firstOrNull(), t)
+        if (shown != null) TopPanel(shown, focused?.second ?: nowNext(shown).firstOrNull(), t, group.channels)
         SourceStatus()
         Spacer(Modifier.height(12.dp))
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -175,7 +175,7 @@ fun LiveGuideScreen(nav: Nav) {
 
 /** The focused programme, large: channel and LIVE, title, times and time left, progress and description; the preview on the right. */
 @Composable
-private fun TopPanel(c: Channel, p: Programme?, t: Long) {
+private fun TopPanel(c: Channel, p: Programme?, t: Long, list: List<Channel> = emptyList()) {
     Row(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(22.dp)).background(C.panel).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(132.dp, 168.dp).clip(RoundedCornerShape(14.dp)).background(C.panelHi), contentAlignment = Alignment.Center) {
@@ -200,7 +200,8 @@ private fun TopPanel(c: Channel, p: Programme?, t: Long) {
             } else Text("No guide information for this channel.", style = T.body.copy(color = C.dim))
         }
         Spacer(Modifier.width(18.dp))
-        PreviewBox(sharedChannel() ?: c, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "live")
+        val shown = sharedChannel() ?: c
+        PreviewBox(shown, Modifier.fillMaxHeight().aspectRatio(16f / 9f), "live", onFullScreen = { playFromPreview(shown, list) })
     }
 }
 
@@ -215,9 +216,11 @@ private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, 
     }
     val fav = App.store.isFavourite(App.repo.channelKey(c))
     Row(Modifier.height(56.dp).rememberFocusInList(), verticalAlignment = Alignment.CenterVertically) {
-        Tile({ playChannel(list, index) }, tile.width(chW).fillMaxHeight().onFocusChanged { if (it.isFocused) onFocus(null) }
+        // Windows: a click picks the channel (its preview starts), a double click or Enter watches it.
+        val pick = rememberPick { playChannel(list, index) }
+        Tile(pick.onClick, tile.width(chW).fillMaxHeight().testBounds("row:${c.id}").then(pick.modifier).onFocusChanged { if (it.isFocused) onFocus(null) }
             .let { if (current) it.border(2.dp, C.live.copy(alpha = 0.8f), RoundedCornerShape(12.dp)) else it },
-            onLongClick = onFavourite, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = C.panel) {
+            onLongClick = onFavourite, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = C.panel, onDoubleClick = pick.onDoubleClick) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (App.store.showChannelNumbers) Text(if (c.number > 0) "${c.number}" else "", style = T.body.copy(color = C.dim), maxLines = 1, modifier = Modifier.width(58.dp))
                 if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(40.dp, 30.dp)); Spacer(Modifier.width(12.dp)) }
@@ -251,7 +254,8 @@ private fun Cell(title: String, p: Programme?, modifier: Modifier, first: Boolea
                  onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit, onFocus: () -> Unit,
                  onLongClick: (() -> Unit)? = null, recording: Boolean = false, onClick: () -> Unit) {
     val live = p?.isLive == true
-    Tile(onClick, modifier.onFocusChanged { if (it.isFocused) onFocus() }.onPreviewKeyEvent { k ->
+    val pick = rememberPick(onClick)
+    Tile(pick.onClick, modifier.then(pick.modifier).onFocusChanged { if (it.isFocused) onFocus() }.onPreviewKeyEvent { k ->
         if (k.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
         when {
             k.key == Key.DirectionLeft && first -> onEarlier()
@@ -260,7 +264,7 @@ private fun Cell(title: String, p: Programme?, modifier: Modifier, first: Boolea
             k.key == Key.MediaRewind || k.key == Key.PageUp -> { onPage(false); true }
             else -> false
         }
-    }, onLongClick = onLongClick, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = if (live) C.panelHi else C.panel) {
+    }, onLongClick = onLongClick, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = if (live) C.panelHi else C.panel, onDoubleClick = pick.onDoubleClick) {
         Box(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (recording) { Dot(C.live, 8.dp); Spacer(Modifier.width(6.dp)) }

@@ -29,6 +29,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -143,7 +153,7 @@ fun LiveScreen(nav: Nav) {
             }
             if (panel) {
                 Spacer(Modifier.width(20.dp))
-                ChannelPanel(focusedChannel ?: group.channels.firstOrNull(), Modifier.width(360.dp))
+                ChannelPanel(focusedChannel ?: group.channels.firstOrNull(), Modifier.width(360.dp), group.channels)
             }
         }
         }
@@ -152,13 +162,14 @@ fun LiveScreen(nav: Nav) {
 
 /** The focused channel's programme: title, times, minutes left, progress, description and what's next. */
 @Composable
-private fun ChannelPanel(c: Channel?, modifier: Modifier) {
+private fun ChannelPanel(c: Channel?, modifier: Modifier, list: List<Channel> = emptyList()) {
     Column(modifier.padding(top = 22.dp)) {
         if (c == null) return@Column
         val nn = nowNext(c)
         val p = nn.firstOrNull()
         val t = now()
-        PreviewBox(sharedChannel() ?: c, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+        val shown = sharedChannel() ?: c
+        PreviewBox(shown, Modifier.fillMaxWidth().aspectRatio(16f / 9f), onFullScreen = { playFromPreview(shown, list) })
         Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.panel)) {
             Box(Modifier.width(3.dp).height(if (p != null) 190.dp else 70.dp).background(C.accent))
@@ -177,7 +188,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
             }
         }
         Spacer(Modifier.height(14.dp))
-        if (App.store.showHints) Text("OK  Play      Hold OK  Favourite", style = T.tiny)
+        if (App.store.showHints) Text(if (onDesktop) "Click  Preview      Double-click or Enter  Watch" else "OK  Play      Hold OK  Favourite", style = T.tiny)
     }
 }
 
@@ -186,7 +197,8 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier) {
  * (waiting, loading, couldn't play, or "Press OK to watch" where there is no preview).
  */
 @Composable
-internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", unavailable: String? = null, logoSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(150.dp, 90.dp)) {
+internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", unavailable: String? = null, logoSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(150.dp, 90.dp),
+    onFullScreen: (() -> Unit)? = null) {
     val ps by App.preview.state.collectAsState()
     // Only the page in front shows the picture ([owner] is the page): the player's one video view can't be in two places.
     val mine = unavailable == null && App.preview.surface == owner && when (val s = ps) {
@@ -196,19 +208,24 @@ internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", 
         is io.github.novatv.play.data.PreviewController.State.Failed -> s.channel.id == c.id
         else -> false
     }
-    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C)), contentAlignment = Alignment.Center) {
+    // Windows: the window itself goes full screen on a double click, or with its Full screen button.
+    val open = onFullScreen ?: { playFromPreview(c, emptyList()) }
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C))
+        .let { if (onDesktop && mine) it.pointerInput(c.id) { detectTapGestures(onDoubleTap = { open() }) } else it }.testBounds("preview"),
+        contentAlignment = Alignment.Center) {
         val playing = mine && ps is io.github.novatv.play.data.PreviewController.State.Playing
         // The video surface stays in place while this channel loads, so the first picture appears without a jump.
         if (mine && (playing || ps is io.github.novatv.play.data.PreviewController.State.Loading)) App.preview.Video(Modifier.fillMaxSize())
         if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize))
         val note = when {
             unavailable != null -> unavailable
-            playing -> "Muted preview · OK to watch"
+            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK to watch"
             !mine -> "Press OK to watch"
             ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message
             else -> null
         }
         if (mine && !playing && ps !is io.github.novatv.play.data.PreviewController.State.Failed) Spinner(Modifier.align(Alignment.TopEnd).padding(10.dp), 20.dp)
+        if (onDesktop && playing) Pill("Full screen", onClick = { open() }, Modifier.align(Alignment.TopEnd).padding(8.dp).testBounds("preview-full"), icon = androidx.compose.material.icons.Icons.Rounded.Fullscreen)
         if (note != null) Box(Modifier.align(Alignment.BottomStart).padding(8.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xB3000000))
             .padding(horizontal = 8.dp, vertical = 3.dp)) { Text(note, style = T.tiny.copy(color = C.dim), maxLines = 1) }
     }
@@ -224,8 +241,10 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocu
     val p = nn.firstOrNull()
     val t = now()
     val fav = App.store.isFavourite(App.repo.channelKey(c))
-    Tile(onClick, modifier.fillMaxWidth().height(52.dp).onFocusChanged { if (it.isFocused) onFocus() }, onLongClick = onLongClick, scale = 1.0f,
-        shape = RoundedCornerShape(8.dp), color = Color.Transparent) {
+    val pick = rememberPick(onClick)
+    Tile(pick.onClick, modifier.fillMaxWidth().height(52.dp).testBounds("row:${c.id}").then(pick.modifier).onFocusChanged { if (it.isFocused) onFocus() },
+        onLongClick = onLongClick, scale = 1.0f,
+        shape = RoundedCornerShape(8.dp), color = Color.Transparent, onDoubleClick = pick.onDoubleClick) {
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             // Numbers and logos can be turned off in Settings.
             if (App.store.showChannelNumbers) Text(if (c.number > 0) "${c.number}" else "", style = T.small.copy(color = C.faint), modifier = Modifier.width(52.dp), maxLines = 1)
@@ -253,4 +272,39 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocu
 internal fun sharedChannel(): Channel? {
     App.preview.state.collectAsState().value
     return App.preview.channel
+}
+
+/** Windows: a mouse and keyboard, so a click picks and a double click (or Enter) watches. */
+internal val onDesktop: Boolean get() = App.device == io.github.novatv.play.platform.Device.DESKTOP
+
+/**
+ * Full screen from the preview window: [c] in [list] (the list it was picked from, so Up and Down change channel
+ * through it), or in the whole channel list. The same channel as the preview, so it goes over in the same player.
+ */
+internal fun playFromPreview(c: Channel, list: List<Channel>) {
+    val l = list.takeIf { l -> l.any { it.id == c.id } } ?: App.repo.state.value.lib.channels.takeIf { l -> l.any { it.id == c.id } } ?: listOf(c)
+    playChannel(l, l.indexOfFirst { it.id == c.id }.coerceAtLeast(0))
+}
+
+/** Reports where this is to the Windows test driver (see App.testBounds); nothing otherwise. */
+internal fun Modifier.testBounds(name: String): Modifier {
+    val f = App.testBounds ?: return this
+    return onGloballyPositioned { val b = it.boundsInWindow(); f(name, b.left, b.top, b.right, b.bottom) }
+}
+
+/** How a channel (or programme) answers: see [rememberPick]. */
+internal class Pick(val onClick: () -> Unit, val modifier: Modifier, val onDoubleClick: (() -> Unit)?)
+
+/**
+ * Windows: a click picks it (it takes the highlight, so its preview starts in the window), a double click or Enter
+ * runs [watch] (full screen). Elsewhere a click or OK runs [watch], as always. Apply [Pick.modifier] to the tile.
+ */
+@Composable
+internal fun rememberPick(watch: () -> Unit): Pick {
+    if (!onDesktop) return Pick(watch, Modifier, null)
+    val fr = remember { FocusRequester() }
+    return Pick({ runCatching { fr.requestFocus() } }, Modifier.focusRequester(fr).onPreviewKeyEvent { e ->
+        if (e.key != Key.Enter && e.key != Key.NumPadEnter) false
+        else { if (e.type == KeyEventType.KeyDown) watch(); true }
+    }, watch)
 }

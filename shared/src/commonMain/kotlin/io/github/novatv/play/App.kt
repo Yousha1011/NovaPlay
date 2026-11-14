@@ -31,6 +31,11 @@ object App {
     /** The app's window is out of sight: the full-screen player is over it, or the app is in the background. */
     var away by androidx.compose.runtime.mutableStateOf(false)
     /** The open tab and whether the menu has focus, for the Windows dev build's test driver (read only; nothing acts on it). */
+    /**
+     * Windows dev build's test driver only: where clickable things are (name, left, top, right, bottom in window pixels),
+     * so it can click them with the mouse. Null otherwise, and then nothing reports.
+     */
+    @Volatile var testBounds: ((String, Float, Float, Float, Float) -> Unit)? = null
     @Volatile var openTab: String = "HOME"
     @Volatile var menuFocused: Boolean = false
 

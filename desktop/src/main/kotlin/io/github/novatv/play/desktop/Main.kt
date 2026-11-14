@@ -99,6 +99,9 @@ fun main() {
         previous?.uncaughtException(t, e)
     }
     App.start(Desktop)
+    AutoTest.installHooks()
+    // VLC's engine takes most of a second to load: done now, off the window's thread, not on the first channel.
+    Thread({ runCatching { Vlc.factory } }, "vlc-warmup").apply { isDaemon = true }.start()
     // Recordings scheduled before: armed again, or started / marked missed (Windows can't wake NovaPlay to record).
     Thread({ runCatching { DesktopRecorder.rearm() } }, "record-rearm").apply { isDaemon = true }.start()
     application {
@@ -139,6 +142,7 @@ fun main() {
             LaunchedEffect(Desktop.playing != null, window.isMinimized) {
                 App.away = Desktop.playing != null || window.isMinimized
                 if (window.isMinimized) App.preview.stop()
+                if (Desktop.playing == null) DesktopPreviewEngine.fullScreenClosed()
             }
             LaunchedEffect(wake) {
                 if (wake == 0) return@LaunchedEffect
