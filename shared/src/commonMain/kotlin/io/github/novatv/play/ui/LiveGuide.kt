@@ -81,6 +81,9 @@ fun LiveGuideScreen(nav: Nav) {
     var sel by remember { mutableStateOf("all") }
     val group = groups.firstOrNull { it.id == sel } ?: groups.first()
     var focused by remember { mutableStateOf<Pair<Channel, Programme?>?>(null) }
+    // TV: the channel OK was pressed on (moving through the guide previews nothing). Windows previews the highlight.
+    var picked by remember { mutableStateOf<Channel?>(null) }
+    var pickSeq by remember { mutableIntStateOf(0) }
     var start by remember { mutableLongStateOf(nowMs() / HALF * HALF) }
     val t = now()
     val earliest = { nowMs() / HALF * HALF }
@@ -91,13 +94,14 @@ fun LiveGuideScreen(nav: Nav) {
     val shown = focused?.first ?: group.channels.firstOrNull()
     val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, TV_PREVIEW) }
     val visible = nav.visibility(io.github.novatv.play.Tab.LIVE) == io.github.novatv.play.PageVisibility.VISIBLE
-    androidx.compose.runtime.LaunchedEffect(focused?.first, visible) { follower.update(focused?.first, focused?.first, visible) }
+    val previewed = if (onDesktop) focused?.first else picked
+    androidx.compose.runtime.LaunchedEffect(previewed, pickSeq, visible) { follower.update(previewed, previewed, visible) }
     androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.LIVE) App.preview.surface = "live" }
-    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focused = null; picked = null }
     // Back from full screen on another channel: the list, highlight and header follow the channel now playing.
     val sync = rememberReturnSync()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    sync.Follow(visible, groups, group, focused?.first?.id, listState, select = { sel = it }, highlight = { focused = it to null })
+    sync.Follow(visible, groups, group, focused?.first?.id, listState, select = { sel = it }, highlight = { focused = it to null; picked = it })
 
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 22.dp, end = 28.dp)) {
         if (shown != null) TopPanel(shown, focused?.second ?: nowNext(shown).firstOrNull(), t, group.channels)
@@ -156,6 +160,7 @@ fun LiveGuideScreen(nav: Nav) {
                                         val on = App.store.toggleFavourite(App.repo.channelKey(c)); favVersion++
                                         toast(if (on) "Added to favourites" else "Removed from favourites")
                                     },
+                                    onPick = { picked = c; pickSeq++ },
                                     onEarlier = { pageEarlier(HALF) }, onLater = { pageLater(HALF) },
                                     onPage = { forward -> if (forward) pageLater(SPAN) else pageEarlier(SPAN) })
                             }
@@ -208,7 +213,7 @@ private fun TopPanel(c: Channel, p: Programme?, t: Long, list: List<Channel> = e
 /** One channel: number, logo and name in a rounded box, then its programmes on the timeline as rounded boxes. */
 @Composable
 private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, chW: Dp, gridW: Dp, epgVersion: Int, current: Boolean, tile: Modifier,
-                      onFocus: (Programme?) -> Unit, onFavourite: () -> Unit,
+                      onFocus: (Programme?) -> Unit, onFavourite: () -> Unit, onPick: () -> Unit,
                       onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit) {
     val end = start + SPAN
     val progs by produceState(emptyList<Programme>(), c.id, start, epgVersion) {
@@ -217,7 +222,7 @@ private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, 
     val fav = App.store.isFavourite(App.repo.channelKey(c))
     Row(Modifier.height(56.dp).rememberFocusInList(), verticalAlignment = Alignment.CenterVertically) {
         // Windows: a click picks the channel (its preview starts), a double click or Enter watches it.
-        val pick = rememberPick { playChannel(list, index) }
+        val pick = rememberPick(c, { playChannel(list, index) }, { onPick() })
         Tile(pick.onClick, tile.width(chW).fillMaxHeight().testBounds("row:${c.id}").then(pick.modifier).onFocusChanged { if (it.isFocused) onFocus(null) }
             .let { if (current) it.border(2.dp, C.live.copy(alpha = 0.8f), RoundedCornerShape(12.dp)) else it },
             onLongClick = onFavourite, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = C.panel, onDoubleClick = pick.onDoubleClick) {
@@ -232,14 +237,14 @@ private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, 
         Spacer(Modifier.width(8.dp))
         Box(Modifier.width(gridW).fillMaxHeight()) {
             if (progs.isEmpty()) {
-                Cell(c.name, null, Modifier.fillMaxSize(), first = true, last = true, onEarlier, onLater, onPage, { onFocus(null) }) { playChannel(list, index) }
+                Cell(c.name, null, Modifier.fillMaxSize(), first = true, last = true, onEarlier, onLater, onPage, { onFocus(null) }, channel = c, onPick = onPick) { playChannel(list, index) }
             } else progs.forEachIndexed { i, p ->
                 val s = maxOf(p.start, start); val e = minOf(p.stop, end)
                 val x = gridW * ((s - start).toFloat() / SPAN)
                 val w = (gridW * ((e - s).toFloat() / SPAN) - 6.dp).coerceAtLeast(10.dp)
                 Cell(p.title, p, Modifier.offset(x = x).width(w).fillMaxHeight(), i == 0, i == progs.lastIndex, onEarlier, onLater, onPage, { onFocus(p) },
                     onLongClick = if (App.host.recorder == null) null else ({ toast(Recordings.schedule(c, p) ?: "Will record ${p.title}") }),
-                    recording = Recordings.version.let { Recordings.at(c, p.start) != null }) {
+                    recording = Recordings.version.let { Recordings.at(c, p.start) != null }, channel = c, onPick = onPick) {
                     if (p.isLive || p.start <= nowMs()) playChannel(list, index)
                     else toast("${p.title} starts ${dayLabel(p.start)} at ${clock(p.start)}")
                 }
@@ -252,9 +257,9 @@ private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, 
 @Composable
 private fun Cell(title: String, p: Programme?, modifier: Modifier, first: Boolean, last: Boolean,
                  onEarlier: () -> Boolean, onLater: () -> Unit, onPage: (Boolean) -> Unit, onFocus: () -> Unit,
-                 onLongClick: (() -> Unit)? = null, recording: Boolean = false, onClick: () -> Unit) {
+                 onLongClick: (() -> Unit)? = null, recording: Boolean = false, channel: Channel? = null, onPick: () -> Unit = {}, onClick: () -> Unit) {
     val live = p?.isLive == true
-    val pick = rememberPick(onClick)
+    val pick = rememberPick(channel, onClick, { onPick() })
     Tile(pick.onClick, modifier.then(pick.modifier).onFocusChanged { if (it.isFocused) onFocus() }.onPreviewKeyEvent { k ->
         if (k.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
         when {

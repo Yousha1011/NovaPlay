@@ -92,18 +92,22 @@ fun LiveScreen(nav: Nav) {
     var sel by remember { mutableStateOf("all") }
     val group = groups.firstOrNull { it.id == sel } ?: groups.first()
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
+    // TV: the channel OK was pressed on (moving through the list previews nothing). Windows previews the highlight.
+    var picked by remember { mutableStateOf<Channel?>(null) }
+    var pickSeq by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val first = remember { FocusRequester() }
     // The preview follows the highlighted row, and stops when Live TV is hidden (other tabs stay built), the playlist
     // changes, or the screen goes away.
     val follower = remember { io.github.novatv.play.data.PagePreview(App.preview, TV_PREVIEW) }
     val visible = nav.visibility(io.github.novatv.play.Tab.LIVE) == io.github.novatv.play.PageVisibility.VISIBLE
-    androidx.compose.runtime.LaunchedEffect(focusedChannel, visible) { follower.update(focusedChannel, focusedChannel, visible) }
+    val previewed = if (onDesktop) focusedChannel else picked
+    androidx.compose.runtime.LaunchedEffect(previewed, pickSeq, visible) { follower.update(previewed, previewed, visible) }
     androidx.compose.runtime.LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.LIVE) App.preview.surface = "live" }
-    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null }
+    androidx.compose.runtime.LaunchedEffect(st.source?.id) { focusedChannel = null; picked = null }
     // Back from full screen on another channel: the list and highlight follow the channel now playing.
     val sync = rememberReturnSync()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    sync.Follow(visible, groups, group, focusedChannel?.id, listState, select = { sel = it }, highlight = { focusedChannel = it })
+    sync.Follow(visible, groups, group, focusedChannel?.id, listState, select = { sel = it }, highlight = { focusedChannel = it; picked = it })
 
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
         Header("Live TV", "${group.name} · ${group.channels.size} channels")
@@ -146,7 +150,7 @@ fun LiveScreen(nav: Nav) {
                                 val on = App.store.toggleFavourite(App.repo.channelKey(c))
                                 favVersion++
                                 toast(if (on) "Added to favourites" else "Removed from favourites")
-                            }, onFocus = { focusedChannel = c }, modifier = sync.row(Modifier, c.id))
+                            }, onFocus = { focusedChannel = c }, modifier = sync.row(Modifier, c.id), onPick = { picked = c; pickSeq++ })
                         }
                     }
                 }
@@ -188,7 +192,11 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier, list: List<Channel> = 
             }
         }
         Spacer(Modifier.height(14.dp))
-        if (App.store.showHints) Text(if (onDesktop) "Click  Preview      Double-click or Enter  Watch" else "OK  Play      Hold OK  Favourite", style = T.tiny)
+        if (App.store.showHints) Text(when {
+            onDesktop -> "Click  Preview      Double-click or Enter  Watch"
+            App.preview.available -> "OK  Preview      OK again  Watch      Hold OK  Favourite"
+            else -> "OK  Play      Hold OK  Favourite"
+        }, style = T.tiny)
     }
 }
 
@@ -219,8 +227,8 @@ internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", 
         if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize))
         val note = when {
             unavailable != null -> unavailable
-            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK to watch"
-            !mine -> "Press OK to watch"
+            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK again to watch"
+            !mine -> if (onDesktop) "Click to preview" else if (App.preview.available) "Press OK to preview" else "Press OK to watch"
             ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message
             else -> null
         }
@@ -236,12 +244,12 @@ const val TV_PREVIEW = "tv"
 
 /** One dense channel row: number, logo, name, the programme on now and its progress. */
 @Composable
-fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocus: () -> Unit = {}, modifier: Modifier = Modifier) {
+fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocus: () -> Unit = {}, modifier: Modifier = Modifier, onPick: (() -> Unit)? = null) {
     val nn = nowNext(c)
     val p = nn.firstOrNull()
     val t = now()
     val fav = App.store.isFavourite(App.repo.channelKey(c))
-    val pick = rememberPick(onClick)
+    val pick = if (onPick != null) rememberPick(c, onClick, { onPick() }) else rememberPick(onClick)
     Tile(pick.onClick, modifier.fillMaxWidth().height(52.dp).testBounds("row:${c.id}").then(pick.modifier).onFocusChanged { if (it.isFocused) onFocus() },
         onLongClick = onLongClick, scale = 1.0f,
         shape = RoundedCornerShape(8.dp), color = Color.Transparent, onDoubleClick = pick.onDoubleClick) {
@@ -300,8 +308,18 @@ internal class Pick(val onClick: () -> Unit, val modifier: Modifier, val onDoubl
  * runs [watch] (full screen). Elsewhere a click or OK runs [watch], as always. Apply [Pick.modifier] to the tile.
  */
 @Composable
-internal fun rememberPick(watch: () -> Unit): Pick {
-    if (!onDesktop) return Pick(watch, Modifier, null)
+internal fun rememberPick(watch: () -> Unit): Pick = rememberPick(null, watch)
+
+/**
+ * As above, and on the TV for channel [c]: the first OK previews it ([pick]), OK again (it is in the window) watches it
+ * full screen; see [io.github.novatv.play.data.okAction]. Without a channel, OK watches as always.
+ */
+@Composable
+internal fun rememberPick(c: Channel?, watch: () -> Unit, pick: (Channel) -> Unit = {}): Pick {
+    if (!onDesktop) return Pick({
+        if (c == null || io.github.novatv.play.data.okAction(c, App.preview.state.value, App.preview.available) == io.github.novatv.play.data.OkAction.WATCH) watch()
+        else pick(c)
+    }, Modifier, null)
     val fr = remember { FocusRequester() }
     return Pick({ runCatching { fr.requestFocus() } }, Modifier.focusRequester(fr).onPreviewKeyEvent { e ->
         if (e.key != Key.Enter && e.key != Key.NumPadEnter) false

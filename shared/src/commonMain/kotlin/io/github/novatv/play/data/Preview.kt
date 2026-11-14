@@ -258,3 +258,24 @@ class PagePreview(private val controller: PreviewController, private val owner: 
         if (channel != null) controller.select(channel, owner)
     }
 }
+
+/** What OK on a channel does on the TV: start its preview in the window, or watch it full screen. */
+enum class OkAction { PREVIEW, WATCH }
+
+/**
+ * TV remote: the first OK on a channel previews it (moving through the list starts nothing); OK on the channel already
+ * in the window (waiting, loading or playing) watches it full screen, in the same player when it can. With no preview
+ * here (none on this device, or turned off) OK watches straight away, and a channel whose preview failed goes full
+ * screen, where it has its own retries and Try again.
+ */
+fun okAction(c: Channel, state: PreviewController.State, previewAvailable: Boolean): OkAction {
+    if (!previewAvailable) return OkAction.WATCH
+    val showing = when (state) {
+        is PreviewController.State.Waiting -> state.channel
+        is PreviewController.State.Loading -> state.channel
+        is PreviewController.State.Playing -> state.channel
+        is PreviewController.State.Failed -> state.channel
+        else -> null
+    }
+    return if (showing?.id == c.id) OkAction.WATCH else OkAction.PREVIEW
+}
