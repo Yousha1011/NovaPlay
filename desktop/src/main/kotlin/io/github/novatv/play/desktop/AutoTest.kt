@@ -110,6 +110,9 @@ object AutoTest {
                     "chancheck" -> chanCheck()
                     "fullscreen" -> fullScreen()
                     "netend" -> netEnd()
+                    "netzap" -> netZap()
+                    "netopen" -> netOpen()
+                    "netmvcycle" -> netMvCycle()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -345,7 +348,19 @@ object AutoTest {
         check("both screens came back by themselves", back)
         delay(10_000)
         log("10 s later: ${screens(multiNow())}  vlc live=${vlcLive()}")
-        check("still playing 10 s later", multiNow()?.screens?.all { it.playing && it.error == null } == true)
+        // The server may close a fresh stream (its stream limit): the screen then reopens it with its status showing.
+        // Passing: playing now, or back within 20 s, never without a status while it isn't playing.
+        val t10 = System.currentTimeMillis(); var noStatus = 0
+        var again = false
+        while (System.currentTimeMillis() - t10 < 20_000) {
+            val ss = multiNow()?.screens
+            ss?.forEach { if (!it.playing && it.error == null && !it.buffering) noStatus++ }
+            if (ss?.all { it.playing && it.error == null } == true) { again = true; break }
+            delay(500)
+        }
+        log("10 s later, playing again after ${(System.currentTimeMillis() - t10) / 1000}s: ${screens(multiNow())}")
+        check("still playing 10 s later, or back within 20 s", again)
+        check("no screen without a status while not playing ($noStatus looks)", noStatus == 0)
         press(KeyEvent.VK_ESCAPE, after = 0)
         check("multi-view closed", waitFor(6000) { multi == null })
         press(KeyEvent.VK_ESCAPE, after = 0)
@@ -785,6 +800,112 @@ object AutoTest {
         check("player closed", waitFor(6000) { Desktop.playing == null })
         delay(3000)
         check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+    }
+
+    // ---- Test 4 final: short resource-measured stages ------------------------------------------------------------
+
+    /**
+     * One short stage through the relay: an idle sample on the Live TV list, full screen opened, a warm sample, [body],
+     * the player closed, an idle sample and one after a 90 s cooldown. Growth is judged idle against idle.
+     */
+    private suspend fun stage(body: suspend (StreamRelay) -> Unit) {
+        val r = relay ?: run { check("relay running", false); return }
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        check("reached Live TV", goTab("LIVE"))
+        delay(2000)
+        val start = sample("start (idle, Live TV list)")
+        press(KeyEvent.VK_RIGHT, after = 1000); press(KeyEvent.VK_DOWN, 2); press(KeyEvent.VK_ENTER, after = 0)
+        val first = settleFull(null, 45_000)
+        log("first channel: $first | ${fullNow()?.detail}")
+        if (first == null || first.first in failing) { check("full screen opened (${first?.first})", false); r.close(); return }
+        check("full screen opened (${first.first})", true)
+        delay(3000)
+        sample("warm (full screen)")
+        body(r)
+        if (multi != null) { press(KeyEvent.VK_ESCAPE, after = 0); waitFor(6000) { multi == null } }
+        press(KeyEvent.VK_ESCAPE, after = 0)
+        check("player closed", waitFor(6000) { Desktop.playing == null })
+        delay(5000)
+        val idle = sample("idle, just after")
+        log("cooldown 90 s"); delay(90_000)
+        val cool = sample("idle, after 90 s cooldown")
+        check("every VLC player freed (made ${vlcCreated.get()}, freed ${vlcReleased.get()})", vlcLive() == 0)
+        check("no connection left open through the relay (${r.streams()})", r.streams() == 0)
+        log("growth start -> cooldown: private ${cool.priv - start.priv} MB, handles ${cool.handles - start.handles}, heap ${cool.heap - start.heap} MB, threads ${cool.threads - start.threads}")
+        check("handles back near the start (${start.handles} -> ${cool.handles}, under +300)", cool.handles in 0..(start.handles + 300))
+        check("threads back near the start (${start.threads} -> ${cool.threads}, under +10)", cool.threads <= start.threads + 10)
+        check("memory settled during cooldown (private ${idle.priv} -> ${cool.priv} MB)", cool.priv <= idle.priv + 30)
+        log("all samples:"); samples.forEach { log("  $it") }
+        r.close()
+    }
+
+    /** 50 channel changes, sampled every 10. */
+    private suspend fun netZap() = stage { _ ->
+        val zaps = mutableMapOf<Health, Int>(); val bad = mutableListOf<String>()
+        for (i in 1..50) {
+            val from = fullIdx()
+            press(if (i % 4 == 0) KeyEvent.VK_UP else KeyEvent.VK_DOWN, after = 0)
+            val h = settleFull(from)
+            val kind = h?.first ?: Health.NO_FRAMES
+            zaps.add(kind)
+            val line = "zap $i ${h?.second ?: "no player"}: $kind | ${fullNow()?.detail}"
+            if (kind in failing || h == null) { bad += line; log("FAILING $line") } else log(line)
+            if (i % 10 == 0) sample("after $i channel changes")
+        }
+        log("zap results: ${zaps.text()}")
+        check("50 channel changes: none stopped, frozen or without frames (${zaps.text()})", bad.isEmpty())
+        check("one VLC player in full screen", vlcLive() == 1)
+    }
+
+    /** 15 full-screen close/open cycles, sampled every 5. */
+    private suspend fun netOpen() = stage { _ ->
+        val opens = mutableMapOf<Health, Int>(); val bad = mutableListOf<String>(); var focusOk = 0
+        for (i in 1..15) {
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            if (!waitFor(6000) { Desktop.playing == null }) { log("open $i: player didn't close"); break }
+            delay(700)
+            if (focusInside && !App.menuFocused && App.openTab == "LIVE") focusOk++ else log("open $i: focus inside=$focusInside tab=${App.openTab}")
+            if (i % 2 == 0) press(KeyEvent.VK_DOWN, after = 400)
+            press(KeyEvent.VK_ENTER, after = 0)
+            val h = settleFull(null)
+            val kind = h?.first ?: Health.NO_FRAMES
+            opens.add(kind)
+            val line = "open $i ${h?.second ?: "no player"}: $kind | ${fullNow()?.detail}"
+            if (kind in failing || h == null) { bad += line; log("FAILING $line") } else log(line)
+            if (i % 5 == 0) sample("after $i opens")
+        }
+        log("open results: ${opens.text()}")
+        check("15 full-screen opens: none stopped, frozen or without frames (${opens.text()})", bad.isEmpty() && opens.values.sum() == 15)
+        check("focus back on the Live TV list after every close ($focusOk/15)", focusOk == 15)
+        check("one VLC player", vlcLive() == 1)
+    }
+
+    /** 10 multi-view entries and exits with 2 screens, each judged; sampled every 5; connections counted. */
+    private suspend fun netMvCycle() = stage { r ->
+        var ok = 0; var maxStreams = 0; var maxVlc = 0; val seen = mutableMapOf<Health, Int>(); val bad = mutableListOf<String>(); val after = mutableListOf<Int>()
+        for (c in 1..10) {
+            press(KeyEvent.VK_M, after = 0)
+            if (!waitFor(6000) { multi != null }) { log("mv $c: didn't open"); break }
+            if (multiNow()?.picking != null) press(KeyEvent.VK_ESCAPE, after = 800)
+            val playing = allPlaying(2, 40_000)
+            delay(3000)
+            val st = Streaks(); var hs = multiHealth(1000); var f = st.feed(hs)
+            repeat(2) { hs = multiHealth(1000); f = st.feed(hs) }
+            hs.forEach { seen.add(it) }
+            val streams = r.streams(); maxStreams = maxOf(maxStreams, streams); maxVlc = maxOf(maxVlc, vlcLive())
+            val good = playing && hs.size == 2 && hs.none { it in failing } && f.isEmpty()
+            if (good) ok++ else bad += "mv $c: playing=$playing $hs | ${mrow()}"
+            log("mv $c: playing=$playing health=$hs streams=$streams vlc=${vlcLive()}")
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            if (!waitFor(6000) { multi == null }) { log("mv $c: didn't close"); break }
+            settleFull(null)
+            delay(1500); after += vlcLive()
+            if (c % 5 == 0) sample("after $c multi-view cycles")
+        }
+        log("multi-view health: ${seen.text()}; most connections $maxStreams, most VLC players $maxVlc")
+        check("10 multi-view cycles, 2 screens, all playing ($ok/10) $bad", ok == 10)
+        check("back to one VLC player after every cycle ($after)", after.size == 10 && after.all { it == 1 })
+        check("at most 2 connections per screen + full screen (most $maxStreams)", maxStreams <= 5)
     }
 
     // ---- a live stream ending by itself ---------------------------------------------------------------------------
