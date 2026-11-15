@@ -31,7 +31,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "NovaPlay"
-            packageVersion = "1.8.3"
+            packageVersion = "1.8.4"
             description = "NovaPlay IPTV player"
             vendor = "NovaPlay"
             copyright = "NovaPlay"

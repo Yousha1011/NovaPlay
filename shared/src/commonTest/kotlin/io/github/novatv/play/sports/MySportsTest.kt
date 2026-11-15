@@ -98,4 +98,25 @@ class MySportsTest {
         // Earliest first; at the same time Football (Champions League, then Premier League), Cricket, Basketball.
         assertEquals(listOf("early", "ucl", "pl", "cricket", "nba"), MySports.upcoming(events, now).map { it.id })
     }
+
+    @Test fun groupedBySportThenCompetitionFriendliesMarked() {
+        val nba = Catalog.league("nba")!!
+        val friendly = Catalog.league("fifa.friendly")!!
+        val t = now + 3 * hour
+        val events = listOf(
+            game("nba", nba, t - hour, "A", "B"),
+            game("pl2", pl, t + hour, "C", "D"),
+            game("pl1", pl, t, "E", "F"),
+            game("ucl", ucl, t + 30 * 60_000L, "G", "H"),
+            game("fr", friendly, t + 2 * hour, "I", "J"),
+        )
+        val g = MySports.grouped(events)
+        // Basketball's match is earliest, so its section comes first.
+        assertEquals(listOf(Sport.BASKETBALL, Sport.FOOTBALL), g.map { it.sport })
+        val football = g[1].comps
+        assertEquals(listOf("Premier League", "Champions League", "International friendlies"), football.map { it.name })
+        assertEquals(listOf("pl1", "pl2"), football[0].games.map { it.id })
+        assertEquals(listOf(false, false, true), football.map { it.friendly })
+        assertEquals(5, g.sumOf { it.count })
+    }
 }

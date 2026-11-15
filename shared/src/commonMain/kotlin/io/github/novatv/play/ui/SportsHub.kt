@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.novatv.play.App
+import io.github.novatv.play.sports.icon
 import io.github.novatv.play.Nav
 import io.github.novatv.play.Route
 import io.github.novatv.play.data.Channel
@@ -306,13 +307,35 @@ private fun MySportsView(
             val list = if (shownTab == 0) liveList else upList
             if (list.isEmpty()) item(key = "empty_$shownTab") {
                 Text(if (shownTab == 0) "Nothing live or about to start." else "Nothing coming up.", style = T.small.copy(color = SportsLook.Faint))
-            } else list.chunked(cols).forEachIndexed { i, chunk ->
-                item(key = "g_${shownTab}_${chunk.first().id}") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        chunk.forEach { ev ->
-                            MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
-                                App.repo.matcher().airings(ev).firstOrNull()?.channel?.let(onWatchInWindow)
-                            })
+            } else io.github.novatv.play.sports.MySports.grouped(list).forEach { sg ->
+                // A section per sport, with its icon; under it each competition with its logo (a handshake for
+                // friendlies), then its matches.
+                item(key = "s_${shownTab}_${sg.sport.name}") {
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(sg.sport.icon, style = T.h2.copy(fontSize = 20.sp))
+                        Spacer(Modifier.width(10.dp))
+                        Text(sg.sport.label, style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp), modifier = Modifier.weight(1f))
+                        Text("${sg.count} ${if (sg.count == 1) "match" else "matches"}", style = T.tiny.copy(color = SportsLook.Dim))
+                    }
+                }
+                sg.comps.forEach { cg ->
+                    item(key = "c_${shownTab}_${sg.sport.name}_${cg.name}") {
+                        Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CompetitionMark(cg)
+                            Spacer(Modifier.width(10.dp))
+                            Text(cg.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text("${cg.games.size}", style = T.tiny.copy(color = SportsLook.Dim))
+                        }
+                    }
+                    cg.games.chunked(cols).forEach { chunk ->
+                        item(key = "g_${shownTab}_${chunk.first().id}") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                chunk.forEach { ev ->
+                                    MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
+                                        App.repo.matcher().airings(ev).firstOrNull()?.channel?.let(onWatchInWindow)
+                                    })
+                                }
+                            }
                         }
                     }
                 }
@@ -922,5 +945,19 @@ private fun ScoreBlock(score: String?, align: Alignment.Horizontal, modifier: Mo
             Text(big, style = T.h1.copy(fontWeight = FontWeight.Bold, color = Color.White, textAlign = textAlign), maxLines = 1)
             if (extra != null) Text(extra, style = T.tiny.copy(color = Color.White.copy(alpha = 0.8f), textAlign = textAlign), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+/**
+ * A competition's mark beside its name: its logo, a handshake for a friendly, else the sport's icon when no logo is
+ * known (a cricket series, a tennis tournament).
+ */
+@Composable
+private fun CompetitionMark(cg: io.github.novatv.play.sports.MySports.CompGroup) {
+    val logo = if (cg.friendly) null else io.github.novatv.play.sports.Espn.leagueLogo(cg.league.id)
+    when {
+        cg.friendly -> Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { Text("\uD83E\uDD1D", style = T.body.copy(fontSize = 18.sp)) }
+        logo != null -> LogoChip(logo, 28.dp)
+        else -> Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { Text(cg.league.sport.icon, style = T.body.copy(fontSize = 18.sp)) }
     }
 }

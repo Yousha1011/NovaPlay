@@ -50,6 +50,28 @@ object MySports {
     fun upcoming(events: List<SportEvent>, now: Long): List<SportEvent> =
         events.filter { it.state == State.PRE && it.start - now > SOON_MS && it.start < now + AHEAD_MS }.distinctBy { it.id }.sortedWith(order)
 
+    /** One competition's matches within a sport's section; [friendly] for friendlies (no competition: a handshake). */
+    data class CompGroup(val name: String, val league: League, val friendly: Boolean, val games: List<SportEvent>)
+
+    /** One sport's section: its competitions. */
+    data class SportGroup(val sport: Sport, val comps: List<CompGroup>) {
+        val count: Int get() = comps.sumOf { it.games.size }
+    }
+
+    /** A friendly, not a competition: "International friendlies", "Club Friendlies", "Friendly". */
+    fun isFriendly(name: String): Boolean = Regex("friendl", RegexOption.IGNORE_CASE).containsMatchIn(name)
+
+    /**
+     * A tab's matches in sections: by sport, then by competition, each match under its own. Sections come in kick-off
+     * order (the earliest match first; at the same time the sport's Follow order, then the name), matches by kick-off.
+     */
+    fun grouped(list: List<SportEvent>): List<SportGroup> = list.groupBy { it.league.sport }.map { (sport, games) ->
+        val comps = games.groupBy { it.subtitle ?: it.league.name }.map { (name, g) ->
+            CompGroup(name, g.first().league, isFriendly(name), g.sortedWith(order))
+        }.sortedWith(compareBy({ it.games.first().start }, { it.name.lowercase() }))
+        SportGroup(sport, comps)
+    }.sortedWith(compareBy({ g -> g.comps.minOf { it.games.first().start } }, { it.sport.ordinal }))
+
     /** The tag on a match: LIVE (red), TOMORROW (yellow), else its date. */
     enum class Tag { LIVE, TOMORROW, DATE, FINAL }
 
