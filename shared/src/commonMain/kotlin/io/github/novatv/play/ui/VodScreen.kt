@@ -79,7 +79,7 @@ fun VodScreen(nav: Nav, series: Boolean) {
     val count = if (series) st.lib.series.size else st.lib.movies.size
     Column(Modifier.fillMaxSize().padding(top = 30.dp)) {
         // Heading, count, loading and the TV window: fixed above the rows.
-        WindowBand(Modifier.padding(horizontal = S.gutter).padding(bottom = 10.dp)) {
+        WindowBand(Modifier.padding(horizontal = S.gutter).padding(bottom = 10.dp), owner = if (series) "corner:series" else "corner:movies") {
             Header(if (series) "Series" else "Movies", if (st.index == null) "Loading…" else "$count titles") {
                 Pill("Overview", onClick = { browse = false }, selected = !browse)
                 Pill("Browse all", onClick = { browse = true }, selected = browse)

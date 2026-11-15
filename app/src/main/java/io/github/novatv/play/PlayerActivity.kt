@@ -201,6 +201,12 @@ class PlayerActivity : ComponentActivity() {
     /** Channels skipped in a row because they wouldn't play (game lists that switch on failure). */
     private var switched = 0
 
+    /** Back from full screen: it shrinks into the TV window at the top right. */
+    override fun finish() {
+        super.finish()
+        @Suppress("DEPRECATION") overridePendingTransition(R.anim.player_stay, R.anim.player_shrink)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

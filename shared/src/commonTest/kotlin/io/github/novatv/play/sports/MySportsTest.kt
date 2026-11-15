@@ -144,4 +144,12 @@ class MySportsTest {
         // Trophy series (England in Australia: the Ashes) are tours too.
         assertEquals(3, MySports.grouped(events).single().comps.first { it.name == "International Fixtures" }.games.size)
     }
+
+    @Test fun uncategorizedGamesHaveTheirOwnTab() {
+        val known = game("k", pl, now + 2 * hour, "A", "B")
+        val unknown = UnidentifiedGame(pl, now + 3 * hour, now + 5 * hour, "Premier League", emptyList()).asEvent(now)
+        assertTrue(MySports.isUncategorized(unknown) && !MySports.isUncategorized(known))
+        assertEquals(listOf("k"), MySports.upcoming(listOf(known), now).map { it.id })
+        assertEquals(listOf(unknown.id), MySports.uncategorized(listOf(unknown), now).map { it.id })
+    }
 }

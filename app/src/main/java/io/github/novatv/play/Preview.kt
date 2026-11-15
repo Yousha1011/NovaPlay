@@ -130,6 +130,14 @@ class ExoPreviewEngine(private val ctx: Context) : PreviewEngine {
      */
     override fun canHandOver(): Boolean = holder.healthy()
 
+    /** OK on the window's channel: pause, or play on. Only while it's the preview's (full screen has its own controls). */
+    override fun togglePause(): Boolean {
+        val p = holder.player ?: return false
+        if (holder.mode != LivePlayerHolder.Mode.PREVIEW) return false
+        p.playWhenReady = !p.playWhenReady
+        return !p.playWhenReady
+    }
+
     /**
      * Full screen takes the player: the preview stops listening to it (full screen has its own listener and its own
      * retries), and the small window stops drawing it. Returns the player, or null if it isn't fit to hand over.

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full screen grows out of the TV window at the top right (as on Windows). -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/decelerate_cubic" android:duration="280">
+    <scale android:fromXScale="0.22" android:toXScale="1.0" android:fromYScale="0.22" android:toYScale="1.0"
+        android:pivotX="97%" android:pivotY="12%" />
+    <alpha android:fromAlpha="0.0" android:toAlpha="1.0" android:duration="200" />
+</set>

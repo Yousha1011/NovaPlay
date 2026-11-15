@@ -43,6 +43,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +84,10 @@ fun SportsPickerScreen(nav: Nav) {
     val leagues = remember(selectedSport) { leaguesOf(selectedSport) }
     var selectedLeague by remember(selectedSport) { mutableStateOf(leagues.firstOrNull()) }
     var searchQuery by remember { mutableStateOf("") }
+    // The remote starts on the chosen sport, and Down from the top bar comes back to it (not stuck in the search box).
+    val sportFocus = remember { FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(Unit) { kotlinx.coroutines.delay(150); runCatching { sportFocus.requestFocus() } }
+    val downToSport = Modifier.focusProperties { down = sportFocus }
 
     val rawTeams by produceState<List<TeamInfo>>(emptyList(), selectedLeague, version) {
         val l = selectedLeague
@@ -112,7 +119,7 @@ fun SportsPickerScreen(nav: Nav) {
         Column(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, top = 20.dp, bottom = 20.dp)) {
             // ---- Top Header Row ----
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Pill("‹ Sports", onClick = { nav.pop() })
+                Pill("‹ Sports", onClick = { nav.pop() }, modifier = downToSport)
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Follow Teams & Leagues", style = T.h1.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold))
@@ -126,13 +133,13 @@ fun SportsPickerScreen(nav: Nav) {
                         value = searchQuery,
                         onChange = { searchQuery = it },
                         hint = "Search teams and leagues",
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                        modifier = downToSport.fillMaxWidth().height(42.dp)
                     )
                 }
                 Spacer(Modifier.width(12.dp))
-                Pill(": Arrange", onClick = { toast("Arrange view") })
+                Pill(": Arrange", onClick = { toast("Arrange view") }, modifier = downToSport)
                 Spacer(Modifier.width(8.dp))
-                Pill("✓ Done", onClick = { nav.pop() }, selected = true)
+                Pill("✓ Done", onClick = { nav.pop() }, selected = true, modifier = downToSport)
             }
 
             Spacer(Modifier.height(14.dp))
@@ -173,6 +180,9 @@ fun SportsPickerScreen(nav: Nav) {
             Spacer(Modifier.height(14.dp))
 
             // ---- Main 2-Pane Picker ----
+            // Right from a sport goes to its competition's Follow button (on the TV, the remote can't find it otherwise).
+            val followFocus = remember { FocusRequester() }
+            val canRight = selectedLeague != null
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Left Sports Column
                 LazyColumn(
@@ -185,6 +195,8 @@ fun SportsPickerScreen(nav: Nav) {
                             sport = sp,
                             selected = sp == selectedSport && searchQuery.isBlank(),
                             count = count,
+                            right = if (canRight) followFocus else FocusRequester.Default,
+                            modifier = if (sp == selectedSport) Modifier.focusRequester(sportFocus) else Modifier,
                             onClick = {
                                 selectedSport = sp
                                 selectedLeague = leaguesOf(sp).firstOrNull()
@@ -220,6 +232,7 @@ fun SportsPickerScreen(nav: Nav) {
                             Pill(
                                 text = if (isFollowed) "★ Following ${league.name}" else "☆ Follow ${league.name}",
                                 selected = isFollowed,
+                                modifier = Modifier.focusRequester(followFocus),
                                 onClick = {
                                     if (isFollowed) unfollowLeague(league) else io.github.novatv.play.sports.Follow.follow(league, true)
                                     version++
@@ -311,11 +324,11 @@ private fun FollowedChip(title: String, onRemove: () -> Unit) {
 }
 
 @Composable
-private fun SportSidebarItem(sport: Sport, selected: Boolean, count: Int, onClick: () -> Unit) {
+private fun SportSidebarItem(sport: Sport, selected: Boolean, count: Int, right: FocusRequester = FocusRequester.Default, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(44.dp)
             .clip(SportsLook.SmallShape)
@@ -326,6 +339,7 @@ private fun SportSidebarItem(sport: Sport, selected: Boolean, count: Int, onClic
                 SportsLook.SmallShape
             )
             .onFocusChanged { focused = it.isFocused }
+            .focusProperties { this.right = right }
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp)
     ) {

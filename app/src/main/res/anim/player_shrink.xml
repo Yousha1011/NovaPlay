@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Back from full screen: it shrinks into the TV window at the top right. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/accelerate_cubic" android:duration="280">
+    <scale android:fromXScale="1.0" android:toXScale="0.22" android:fromYScale="1.0" android:toYScale="0.22"
+        android:pivotX="97%" android:pivotY="12%" />
+    <alpha android:fromAlpha="1.0" android:toAlpha="0.0" android:startOffset="40" android:duration="240" />
+</set>

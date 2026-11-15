@@ -33,7 +33,9 @@ class NovaApp : Application() {
             override val recorder = recorder
             override val previewEngine = preview
             override fun play(item: PlayItem) {
-                startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                // Full screen grows out of the TV window at the top right (PlayerActivity shrinks back into it).
+                val grow = android.app.ActivityOptions.makeCustomAnimation(this@NovaApp, R.anim.player_grow, R.anim.player_stay).toBundle()
+                startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), grow)
             }
             override fun toast(msg: String) { Toast.makeText(this@NovaApp, msg, Toast.LENGTH_SHORT).show() }
             override val backgroundSync = true

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -194,7 +195,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier, list: List<Channel> = 
         Spacer(Modifier.height(14.dp))
         if (App.store.showHints) Text(when {
             onDesktop -> "Click  Preview      Double-click or Enter  Watch"
-            App.preview.available -> "OK  Preview      OK again  Watch      Hold OK  Favourite"
+            App.preview.available -> "OK  Preview / pause      Double OK  Watch      Hold OK  Favourite"
             else -> "OK  Play      Hold OK  Favourite"
         }, style = T.tiny)
     }
@@ -227,7 +228,8 @@ internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", 
         if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize))
         val note = when {
             unavailable != null -> unavailable
-            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK again to watch"
+            playing && App.preview.paused -> "Paused · OK to play on"
+            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK to pause · double OK to watch"
             !mine -> if (onDesktop) "Click to preview" else if (App.preview.available) "Press OK to preview" else "Press OK to watch"
             ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message
             else -> null
@@ -316,10 +318,33 @@ internal fun rememberPick(watch: () -> Unit): Pick = rememberPick(null, watch)
  */
 @Composable
 internal fun rememberPick(c: Channel?, watch: () -> Unit, pick: (Channel) -> Unit = {}): Pick {
-    if (!onDesktop) return Pick({
-        if (c == null || io.github.novatv.play.data.okAction(c, App.preview.state.value, App.preview.available) == io.github.novatv.play.data.OkAction.WATCH) watch()
-        else pick(c)
-    }, Modifier, null)
+    if (!onDesktop) {
+        // TV remote: a quick double OK watches full screen; one OK (once the double has had its chance) previews the
+        // channel, or pauses / plays on the one already playing in the window. See okAction.
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        val last = remember { longArrayOf(0L) }
+        val pending = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
+        return Pick({
+            val now = io.github.novatv.play.platform.nowMs()
+            if (c == null) watch()
+            else if (now - last[0] < io.github.novatv.play.data.DOUBLE_OK_MS) {
+                pending[0]?.cancel(); pending[0] = null; last[0] = 0L
+                watch()
+            } else {
+                last[0] = now
+                pending[0]?.cancel()
+                pending[0] = scope.launch {
+                    kotlinx.coroutines.delay(io.github.novatv.play.data.DOUBLE_OK_MS)
+                    pending[0] = null
+                    when (io.github.novatv.play.data.okAction(c, App.preview.state.value, App.preview.available)) {
+                        io.github.novatv.play.data.OkAction.WATCH -> watch()
+                        io.github.novatv.play.data.OkAction.PAUSE -> App.preview.togglePause()
+                        io.github.novatv.play.data.OkAction.PREVIEW -> pick(c)
+                    }
+                }
+            }
+        }, Modifier, null)
+    }
     val fr = remember { FocusRequester() }
     return Pick({ runCatching { fr.requestFocus() } }, Modifier.focusRequester(fr).onPreviewKeyEvent { e ->
         if (e.key != Key.Enter && e.key != Key.NumPadEnter) false
@@ -332,9 +357,10 @@ internal fun rememberPick(c: Channel?, watch: () -> Unit, pick: (Channel) -> Uni
  * carries on, muted. Nothing when no channel is playing there. Full screen from its button (Windows) or a double click.
  */
 @Composable
-internal fun CornerWindow(modifier: Modifier) {
+internal fun CornerWindow(modifier: Modifier, owner: String = "corner") {
     val ps by App.preview.state.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(Unit) { App.preview.surface = "corner" }
+    // Each tab its own owner: tabs kept built in the background never show the one video at the same time.
+    androidx.compose.runtime.LaunchedEffect(Unit) { App.preview.surface = owner }
     val c = App.preview.channel
     val idle = c == null || ps is io.github.novatv.play.data.PreviewController.State.Idle || ps is io.github.novatv.play.data.PreviewController.State.Unsupported
     if (idle) {
@@ -345,7 +371,7 @@ internal fun CornerWindow(modifier: Modifier) {
         }
         return
     }
-    PreviewBox(c!!, modifier.width(320.dp).aspectRatio(16f / 9f), owner = "corner",
+    PreviewBox(c!!, modifier.width(320.dp).aspectRatio(16f / 9f), owner = owner,
         logoSize = androidx.compose.ui.unit.DpSize(96.dp, 56.dp), onFullScreen = { playFromPreview(c, emptyList()) })
 }
 
@@ -354,10 +380,10 @@ internal fun CornerWindow(modifier: Modifier) {
  * search box) on the left, the TV window on the right, fixed above the page's list so the window never covers it.
  */
 @Composable
-internal fun WindowBand(modifier: Modifier = Modifier, heading: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun WindowBand(modifier: Modifier = Modifier, owner: String = "corner", heading: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f), content = heading)
         Spacer(Modifier.width(24.dp))
-        CornerWindow(Modifier)
+        CornerWindow(Modifier, owner)
     }
 }

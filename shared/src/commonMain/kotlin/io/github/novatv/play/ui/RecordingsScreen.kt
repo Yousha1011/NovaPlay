@@ -47,7 +47,7 @@ fun RecordingsScreen(nav: Nav) {
     val done = all.filter { it.status == Recording.Status.DONE || it.status == Recording.Status.FAILED }.sortedByDescending { it.start }
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
         // Heading, space on the device and the TV window: fixed above the list.
-        WindowBand(Modifier.padding(bottom = 10.dp)) {
+        WindowBand(Modifier.padding(bottom = 10.dp), owner = "corner:recordings") {
             Header("Recordings", "${size(all.sumOf { it.bytes })} used · ${size(free)} free on this device")
         }
         if (all.isEmpty()) {

@@ -53,7 +53,7 @@ fun SearchScreen(nav: Nav) {
     }
     Column(Modifier.fillMaxSize()) {
     // The search box and the TV window: fixed above the results, the box ending before the window.
-    WindowBand(Modifier.padding(start = 36.dp, end = 36.dp, top = 30.dp, bottom = 12.dp)) {
+    WindowBand(Modifier.padding(start = 36.dp, end = 36.dp, top = 30.dp, bottom = 12.dp), owner = "corner:search") {
         Header("Search", if (App.device == io.github.novatv.play.platform.Device.TV)
             "Press OK to type. Hold the microphone button to speak, or type from the Fire TV app on your phone." else "Type a channel, film or series.")
         InputField(q, "Channels, movies, series", { q = it }, Modifier.fillMaxWidth().focusRequester(box))

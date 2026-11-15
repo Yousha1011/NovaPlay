@@ -48,6 +48,9 @@ interface PreviewEngine {
     fun canTakeOver(): Boolean = false
     /** A stream address is being looked up for the next play: keep the idle player for it until [play] or [release]. */
     fun starting() {}
+
+    /** Pauses the window's channel, or plays it on; returns whether it is paused now (false where it can't pause). */
+    fun togglePause(): Boolean = false
 }
 
 /**
@@ -104,6 +107,17 @@ class PreviewController(
     /** Bumped on every change, so a late event from an earlier stream is ignored. */
     private var generation = 0
 
+    /** The window's channel is paused (OK on it on the TV). Any other change plays again. */
+    var paused by mutableStateOf(false)
+        private set
+
+    /** Pauses the channel playing in the window, or plays it on. */
+    fun togglePause() {
+        val e = engine ?: return
+        if (_state.value !is State.Playing) return
+        paused = e.togglePause()
+    }
+
     private fun State.channel(): Channel? = when (this) {
         is State.Waiting -> channel; is State.Loading -> channel; is State.Playing -> channel; is State.Failed -> channel; else -> null
     }
@@ -113,6 +127,7 @@ class PreviewController(
      * stops at once.
      */
     fun select(c: Channel, by: String = "live") {
+        paused = false
         val e = engine
         if (e == null || !enabled()) { stop(); return }
         val cur = _state.value
@@ -185,6 +200,7 @@ class PreviewController(
 
     /** Stops any preview and frees its player: leaving the screen, switching playlist, the full-screen player, background. */
     fun stop() {
+        paused = false
         job?.cancel(); job = null
         watch?.cancel(); watch = null
         owner = ""
@@ -259,23 +275,19 @@ class PagePreview(private val controller: PreviewController, private val owner: 
     }
 }
 
-/** What OK on a channel does on the TV: start its preview in the window, or watch it full screen. */
-enum class OkAction { PREVIEW, WATCH }
+/** What one OK on a channel does on the TV (a quick double OK always watches it full screen). */
+enum class OkAction { PREVIEW, PAUSE, WATCH }
+
+/** Two OKs this close together (ms) are a double OK: full screen. */
+const val DOUBLE_OK_MS = 350L
 
 /**
- * TV remote: the first OK on a channel previews it (moving through the list starts nothing); OK on the channel already
- * in the window (waiting, loading or playing) watches it full screen, in the same player when it can. With no preview
- * here (none on this device, or turned off) OK watches straight away, and a channel whose preview failed goes full
- * screen, where it has its own retries and Try again.
+ * TV remote, one OK on [c]: previews it (moving through the list starts nothing); on the channel already playing in the
+ * window, pauses it or plays it on. With no preview here (none on this device, or turned off) OK watches straight
+ * away. A channel still starting, or whose preview failed, is asked for again.
  */
-fun okAction(c: Channel, state: PreviewController.State, previewAvailable: Boolean): OkAction {
-    if (!previewAvailable) return OkAction.WATCH
-    val showing = when (state) {
-        is PreviewController.State.Waiting -> state.channel
-        is PreviewController.State.Loading -> state.channel
-        is PreviewController.State.Playing -> state.channel
-        is PreviewController.State.Failed -> state.channel
-        else -> null
-    }
-    return if (showing?.id == c.id) OkAction.WATCH else OkAction.PREVIEW
+fun okAction(c: Channel, state: PreviewController.State, previewAvailable: Boolean): OkAction = when {
+    !previewAvailable -> OkAction.WATCH
+    state is PreviewController.State.Playing && state.channel.id == c.id -> OkAction.PAUSE
+    else -> OkAction.PREVIEW
 }

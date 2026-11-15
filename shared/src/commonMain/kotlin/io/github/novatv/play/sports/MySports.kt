@@ -46,6 +46,16 @@ object MySports {
     fun live(events: List<SportEvent>, now: Long): List<SportEvent> =
         events.filter { it.state == State.LIVE || (it.state == State.PRE && it.start - now <= SOON_MS) }.distinctBy { it.id }.sortedWith(order)
 
+    /**
+     * The Uncategorized tab: games the TV guide names only by their competition (no sides), on now and to come, in the
+     * same order as the other tabs. They are listed here only, never in Live or Upcoming.
+     */
+    fun uncategorized(events: List<SportEvent>, now: Long): List<SportEvent> =
+        events.filter { it.state == State.LIVE || (it.state == State.PRE && it.start < now + AHEAD_MS) }.distinctBy { it.id }.sortedWith(order)
+
+    /** An uncategorized game: from the TV guide, with no sides known. */
+    fun isUncategorized(e: SportEvent): Boolean = e.id.startsWith("guide:")
+
     /** The Upcoming tab: every later match, up to [AHEAD_MS] ahead. */
     fun upcoming(events: List<SportEvent>, now: Long): List<SportEvent> =
         events.filter { it.state == State.PRE && it.start - now > SOON_MS && it.start < now + AHEAD_MS }.distinctBy { it.id }.sortedWith(order)

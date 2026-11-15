@@ -1073,7 +1073,7 @@ object AutoTest {
         delay(4000)
         log("F2: Movies: ${pName()} surface=${App.preview.surface} moving=${pMoving()} streams=${r.streams()} vlc=${vlcLive()}")
         check("F2. the window plays on in the corner of Movies (${pName()}, surface ${App.preview.surface})",
-            pPlaying() && pMoving() && App.preview.surface == "corner" && r.streams() <= 1 && vlcLive() == 1)
+            pPlaying() && pMoving() && App.preview.surface.startsWith("corner") && r.streams() <= 1 && vlcLive() == 1)
 
         // G. Home frees the preview.
         check("G. reached Home", goTab("HOME"))

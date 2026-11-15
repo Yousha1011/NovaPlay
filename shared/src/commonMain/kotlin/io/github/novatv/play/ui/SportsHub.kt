@@ -230,8 +230,10 @@ private fun MySportsView(
     val unknownEvents = remember(unidentified, t) { unidentified.map { it.asEvent(t) } }
     // Two tabs: Live (on now, or starting within the hour) and Upcoming (the rest), each by kick-off, then sport, then
     // competition.
-    val liveList = remember(pool, unknownEvents, t) { io.github.novatv.play.sports.MySports.live(pool + unknownEvents, t) }
-    val upList = remember(pool, unknownEvents, t) { io.github.novatv.play.sports.MySports.upcoming(pool + unknownEvents, t) }
+    // Live and Upcoming list identified matches only; the guide's unnamed games have their own tab, Uncategorized.
+    val liveList = remember(pool, t) { io.github.novatv.play.sports.MySports.live(pool, t) }
+    val upList = remember(pool, t) { io.github.novatv.play.sports.MySports.upcoming(pool, t) }
+    val uncList = remember(unknownEvents, t) { io.github.novatv.play.sports.MySports.uncategorized(unknownEvents, t) }
     var tab by remember { mutableIntStateOf(-1) }
     /** Sports folded away (both tabs), by name. */
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
@@ -309,17 +311,21 @@ private fun MySportsView(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Pill("● Live · ${liveList.size}", onClick = { tab = 0 }, selected = shownTab == 0)
                         Pill("Upcoming · ${upList.size}", onClick = { tab = 1 }, selected = shownTab == 1)
+                        Pill("Uncategorized · ${uncList.size}", onClick = { tab = 2 }, selected = shownTab == 2)
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text((if (shownTab == 0) "On now, and starting within the hour" else "Later, up to two weeks ahead") +
+                    Text((when (shownTab) { 0 -> "On now, and starting within the hour"; 1 -> "Later, up to two weeks ahead"
+                        else -> "Games your TV guide names only by competition (sides unknown)" }) +
                         " · by kick-off, then sport, then competition" +
                         if (Follow.followedCompetitions().isEmpty()) " · follow competitions (✎ Follow Teams & Leagues) to list only theirs" else "",
                         style = T.tiny.copy(color = SportsLook.Dim))
                 }
             }
-            val list = if (shownTab == 0) liveList else upList
+            val list = when (shownTab) { 0 -> liveList; 1 -> upList; else -> uncList }
             if (list.isEmpty()) item(key = "empty_$shownTab") {
-                Text(if (shownTab == 0) "Nothing live or about to start." else "Nothing coming up.", style = T.small.copy(color = SportsLook.Faint))
+                Text(when (shownTab) { 0 -> "Nothing live or about to start."; 1 -> "Nothing coming up."
+                    else -> if (Follow.competitions().isEmpty()) "Follow a competition to look for its unnamed games in your TV guide." else "None: your TV guide names every game of your competitions." },
+                    style = T.small.copy(color = SportsLook.Faint))
             } else io.github.novatv.play.sports.MySports.grouped(list).forEach { sg ->
                 // A box per sport: its title centred between lines, a button to fold it away; inside, each competition
                 // with its logo (a handshake for friendlies), then its matches.

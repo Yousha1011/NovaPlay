@@ -70,7 +70,7 @@ import io.github.novatv.play.ui.teamKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private enum class When(val label: String) { LIVE("Live"), UPCOMING("Upcoming"), TABLES("Tables") }
+private enum class When(val label: String) { LIVE("Live"), UPCOMING("Upcoming"), UNCATEGORIZED("Uncategorized"), TABLES("Tables") }
 
 /**
  * Sports, in the iPhone's style. Live (on now, or starting within the hour) and Upcoming (later), each in sections: a
@@ -102,9 +102,15 @@ fun PhoneSports(nav: Nav) {
             } catch (x: Exception) { emptyList() }
         }
     }
-    val all = remember(pool, unidentified, t) { pool + unidentified.map { it.asEvent(t) } }
-    val list = remember(all, whenTab, sport, t) {
-        val l = if (whenTab == When.LIVE) io.github.novatv.play.sports.MySports.live(all, t) else io.github.novatv.play.sports.MySports.upcoming(all, t)
+    // Live and Upcoming list identified matches only; the guide's unnamed games are in Uncategorized.
+    val unknown = remember(unidentified, t) { unidentified.map { it.asEvent(t) } }
+    val all = remember(pool, unknown) { pool + unknown }
+    val list = remember(pool, unknown, whenTab, sport, t) {
+        val l = when (whenTab) {
+            When.LIVE -> io.github.novatv.play.sports.MySports.live(pool, t)
+            When.UNCATEGORIZED -> io.github.novatv.play.sports.MySports.uncategorized(unknown, t)
+            else -> io.github.novatv.play.sports.MySports.upcoming(pool, t)
+        }
         l.filter { sport == null || it.league.sport == sport }
     }
     val groups = remember(list) { io.github.novatv.play.sports.MySports.grouped(list) }
@@ -118,8 +124,9 @@ fun PhoneSports(nav: Nav) {
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         TopBar(nav) { RoundIcon(Icons.Rounded.Tune, onClick = { nav.push(Route.Leagues) }) }
         Chips(When.entries.map { w -> w.name to w.label + when (w) {
-            When.LIVE -> " · ${io.github.novatv.play.sports.MySports.live(all, t).size}"
-            When.UPCOMING -> " · ${io.github.novatv.play.sports.MySports.upcoming(all, t).size}"
+            When.LIVE -> " · ${io.github.novatv.play.sports.MySports.live(pool, t).size}"
+            When.UPCOMING -> " · ${io.github.novatv.play.sports.MySports.upcoming(pool, t).size}"
+            When.UNCATEGORIZED -> " · ${io.github.novatv.play.sports.MySports.uncategorized(unknown, t).size}"
             else -> ""
         } }, whenTab.name, { whenTab = When.valueOf(it) })
         Spacer(Modifier.height(8.dp))
@@ -129,7 +136,8 @@ fun PhoneSports(nav: Nav) {
             When.TABLES -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView() }
             else -> when {
                 sports.loading && sports.events.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
-                list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, if (whenTab == When.LIVE) "Nothing live or about to start" else "Nothing coming up",
+                list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, when (whenTab) { When.LIVE -> "Nothing live or about to start"
+                        When.UNCATEGORIZED -> "No uncategorized games"; else -> "Nothing coming up" },
                     if (Follow.followedCompetitions().isEmpty()) "Follow competitions (top right) to list only theirs." else null)
                 else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     for (sg in groups) {
