@@ -123,7 +123,13 @@ jobs:
           APP=build/Build/Products/Debug-iphonesimulator/NovaPlay.app
           BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
           xcrun simctl install "$DEVICE" "$APP"
-          xcrun simctl launch --console-pty "$DEVICE" "$BUNDLE" > shots/console.log 2>&1 &
+          # Launch (a fresh Simulator sometimes refuses the first launch): up to three tries, noting why one fails.
+          # --console-pty without a terminal could fail silently and leave the app never opened.
+          for try in 1 2 3; do
+            if xcrun simctl launch "$DEVICE" "$BUNDLE" >> shots/console.log 2>&1; then break; fi
+            echo "launch $try failed" >> shots/console.log; sleep 10
+          done
+          cat shots/console.log
           for t in 5 15 30; do
             sleep $([ $t = 5 ] && echo 5 || echo 10)
             xcrun simctl io "$DEVICE" screenshot "shots/after-${t}s.png"
