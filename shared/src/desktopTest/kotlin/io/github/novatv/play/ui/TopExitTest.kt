@@ -37,8 +37,8 @@ import androidx.compose.ui.unit.dp
 import kotlin.test.Test
 
 /**
- * Up from a page's top control goes to the open tab's rail icon (never to nothing), and Down from there returns to
- * that control. Each test lays out the top of one TV page the way the real screen does, inside a rail and a page
+ * Up from a page's top control (and Down from its last) stays on it: only Left and Right go to the rail, so the rail
+ * never takes focus and opens the tab above or below. Each test lays out the top of one TV page the way the real screen does, inside a rail and a page
  * wired as Root wires them, and drives it with key presses.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -62,7 +62,7 @@ class TopExitTest {
                 Column(Modifier.returnFromTop(state, page).enterAt(openTab)) {
                     Box(item("rail-home")); Box(item("rail-open", openTab)); Box(item("rail-settings"))
                 }
-                Box(Modifier.topExit(true, fm, openTab, state).rememberFocus(page)) {
+                Box(Modifier.topExit(true, fm, page, state).rememberFocus(page)) {
                     Column { Spacer(Modifier.height(60.dp)); content() }
                 }
             }
@@ -78,11 +78,9 @@ class TopExitTest {
         onAllNodes(isFocused()).assertCountEquals(1)
     }
 
-    /** Up leaves [first] for the open tab's icon, Down comes back to [first], and the rest of the page still works. */
+    /** Up on [first] stays there (not the rail), and Down still moves on through the page. */
     private fun ComposeUiTest.upThenDown(first: String, below: String) {
         press(Key.DirectionUp)
-        onNodeWithTag("rail-open").assertIsFocused()
-        press(Key.DirectionDown)
         onNodeWithTag(first).assertIsFocused()
         press(Key.DirectionDown)
         onNodeWithTag(below).assertIsFocused()
@@ -138,14 +136,19 @@ class TopExitTest {
         upThenDown("refresh", "live-now")
     }
 
-    @Test fun repeatedUpOnTheRailMovesThroughTheRailAsBefore() = runComposeUiTest {
+    @Test fun downFromTheLastControlStaysOnThePage() = runComposeUiTest {
         screen("a") { Column { Box(item("a")); Box(item("b")) } }
-        press(Key.DirectionUp)
-        onNodeWithTag("rail-open").assertIsFocused()
-        // Another Up is ordinary rail movement (and disarms the way back).
-        press(Key.DirectionUp)
-        onNodeWithTag("rail-home").assertIsFocused()
         press(Key.DirectionDown)
+        onNodeWithTag("b").assertIsFocused()
+        press(Key.DirectionDown)
+        onNodeWithTag("b").assertIsFocused()
+        press(Key.DirectionUp); press(Key.DirectionUp)
+        onNodeWithTag("a").assertIsFocused()
+    }
+
+    @Test fun leftStillGoesToTheRail() = runComposeUiTest {
+        screen("a") { Column { Box(item("a")); Box(item("b")) } }
+        press(Key.DirectionLeft)
         onNodeWithTag("rail-open").assertIsFocused()
     }
 

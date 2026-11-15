@@ -100,7 +100,7 @@ fun PhoneEpgSources(nav: Nav) {
             item { SectionLabel("TV guide") }
             item {
                 Card {
-                    Text(remember(st.epgVersion) { App.repo.epg.summary() }, style = P.body)
+                    Text(androidx.compose.runtime.produceState("", st.epgVersion) { value = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { App.repo.epg.summary() } }.value, style = P.body)
                     st.epgStatus?.takeIf { it.isNotBlank() }?.let { Text(it, style = P.small) }
                     SmallButton("Reload guide") { App.repo.reloadGuide() }
                 }

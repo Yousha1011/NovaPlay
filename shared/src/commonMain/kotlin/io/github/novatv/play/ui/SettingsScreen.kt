@@ -168,7 +168,7 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: St
     statusSection(st, syncing)
     updatesSection(changed)
     section("TV guide")
-    item { Text(remember(st.epgVersion) { App.repo.epg.summary() }, style = T.body) }
+    item { Text(androidx.compose.runtime.produceState("", st.epgVersion) { value = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { App.repo.epg.summary() } }.value, style = T.body) }
     section("Universal guide")
     item {
         Column {
@@ -219,7 +219,7 @@ private fun LazyListScope.statusSection(st: Repo.LibState, syncing: String?) {
             err != null) { if (syncing == null) App.repo.syncPlaylist(src) }
     }
     item(key = "status-guide") {
-        StatusRow("TV guide", "Updated ${Refresh.ago(remember(st.epgVersion) { App.repo.guideUpdatedAt() }, now)}", false) {
+        StatusRow("TV guide", "Updated ${Refresh.ago(androidx.compose.runtime.produceState<Long?>(null, st.epgVersion) { value = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { App.repo.guideUpdatedAt() } }.value, now)}", false) {
             if (syncing == null) App.repo.reloadGuide() }
     }
     if (App.host.backgroundSync) item(key = "status-night") {

@@ -271,7 +271,7 @@ private fun RootBody() {
                     // Each page is a focus group that remembers where focus was: Right from the rail, or Back from a
                     // detail page, lands on the item last used instead of the page's first one. Hidden pages keep the
                     // same group (only their placement changes), so they remember it while another tab is open too.
-                    Box(Modifier.topExit(App.device == Device.TV, focusManager, nav.railFocus, nav.topExit).rememberFocus(nav.page(t))
+                    Box(Modifier.topExit(App.device == Device.TV, focusManager, nav.page(t), nav.topExit).rememberFocus(nav.page(t))
                         .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
                         // The TV window plays on across Live TV, the TV guide and Sports, and in the corner of Movies,
                         // Series, Recordings and Search; Home and Settings let it go.

@@ -81,6 +81,7 @@ import io.github.novatv.play.sports.teamShades
 import io.github.novatv.play.sports.parseTeamColor
 import io.github.novatv.play.sports.sportsFrame
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class HubView { MINE, ALL, TABLES, NETWORKS }
@@ -263,9 +264,23 @@ private fun MySportsView(
                 val h = heroes[heroIdx.coerceIn(0, heroes.lastIndex)]
                 run {
                     Row(Modifier.fillMaxWidth().height(168.dp)) {
+                        // One focusable frame around the changing card: ◄ ► (and the timer) swap the match inside it,
+                        // so focus stays on the board instead of jumping to the top when the old card goes.
+                        var heroFocused by remember { mutableStateOf(false) }
+                        Box(Modifier.weight(1f).fillMaxHeight()
+                            .onFocusChanged { heroFocused = it.isFocused }
+                            .onPreviewKeyEvent { k ->
+                                if (k.type != KeyEventType.KeyDown || heroes.size < 2) return@onPreviewKeyEvent false
+                                when (k.key) {
+                                    Key.DirectionLeft -> { heroIdx = (heroIdx - 1 + heroes.size) % heroes.size; true }
+                                    Key.DirectionRight -> { heroIdx = (heroIdx + 1) % heroes.size; true }
+                                    else -> false
+                                }
+                            }
+                            .clickable { onOpen(heroes[heroIdx.coerceIn(0, heroes.lastIndex)]) }) {
                         androidx.compose.animation.AnimatedContent(
                             targetState = h,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            modifier = Modifier.fillMaxSize(),
                             transitionSpec = {
                                 (androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(450)) { it / 4 } +
                                     androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(450))) togetherWith
@@ -279,14 +294,15 @@ private fun MySportsView(
                             event = h,
                             index = heroIdx,
                             count = heroes.size,
+                            focused = heroFocused,
                             modifier = Modifier.fillMaxSize(),
                             onStep = { d -> heroIdx = (heroIdx + d + heroes.size) % heroes.size },
                             onClick = { onOpen(h) },
                             onHoldWatch = {
-                                val match = App.repo.matcher().airings(h).firstOrNull()?.channel
-                                if (match != null) onWatchInWindow(match)
+                                leadChannel(h) { onWatchInWindow(it) }
                             }
                         )
+                        }
                         }
                         Spacer(Modifier.width(16.dp))
                         Box(Modifier.fillMaxHeight().aspectRatio(16f / 9f)) {
@@ -354,12 +370,12 @@ private fun HeroCardRebuilt(
     event: SportEvent,
     index: Int,
     count: Int,
+    focused: Boolean,
     modifier: Modifier,
     onStep: (Int) -> Unit,
     onClick: () -> Unit,
     onHoldWatch: () -> Unit
 ) {
-    var focused by remember { mutableStateOf(false) }
     // Each side in the main colour of its own logo (ESPN's team colour until the logo has loaded).
     val (espnHome, espnAway) = teamShades(event.home, event.away)
     val homeTone = rememberLogoTone(event.home?.logo) ?: espnHome
@@ -382,16 +398,6 @@ private fun HeroCardRebuilt(
             )
             // A soft light from the top and shade at the bottom, so the colours read as a surface, not flat paint.
             .background(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.10f), 0.45f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.35f)))
-            .onFocusChanged { focused = it.isFocused }
-            .onPreviewKeyEvent { k ->
-                if (k.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (k.key) {
-                    Key.DirectionLeft -> { if (count > 1) { onStep(-1); true } else false }
-                    Key.DirectionRight -> { if (count > 1) { onStep(1); true } else false }
-                    else -> false
-                }
-            }
-            .clickable(onClick = onClick)
             .padding(14.dp)
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -498,8 +504,7 @@ private fun GameRowHeader(
                     favTeamName = favTeamName,
                     onClick = { onOpen(ev) },
                     onHoldWatch = {
-                        val ch = App.repo.matcher().airings(ev).firstOrNull()?.channel
-                        if (ch != null) onHoldWatch(ch)
+                        leadChannel(ev) { onHoldWatch(it) }
                     }
                 )
             }
@@ -688,8 +693,7 @@ private fun AllEventsView(
                                 isSelected = isSelected,
                                 onFocus = {
                                     selectedEvent = ev
-                                    val lead = App.repo.matcher().airings(ev).firstOrNull()?.channel
-                                    if (lead != null) onWatchInWindow(lead)
+                                    leadChannel(ev) { onWatchInWindow(it) }
                                 },
                                 onClick = { onOpen(ev) }
                             )
@@ -787,7 +791,9 @@ private fun AllEventsView(
                         ) {
                             Text("WATCHING ON", style = T.eyebrow.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold))
                             Spacer(Modifier.height(6.dp))
-                            val airings = App.repo.matcher().airings(ev)
+                            val airings by androidx.compose.runtime.produceState(emptyList<io.github.novatv.play.sports.Airing>(), ev.id) {
+                                value = withContext(IO) { try { App.repo.matcher().airings(ev) } catch (x: Exception) { emptyList() } }
+                            }
                             val lead = airings.firstOrNull()?.channel
                             if (lead != null) {
                                 Text(lead.name, style = T.small.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1004,7 +1010,7 @@ private fun SportSection(
                     Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         chunk.forEach { ev ->
                             MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
-                                App.repo.matcher().airings(ev).firstOrNull()?.channel?.let(onWatchInWindow)
+                                leadChannel(ev) { onWatchInWindow(it) }
                             }, modifier = Modifier.weight(1f))
                         }
                         // A short last row keeps its cards the same width.
@@ -1013,5 +1019,18 @@ private fun SportSection(
                 }
             }
         }
+    }
+}
+
+
+/**
+ * The first channel showing [ev], looked up off the main thread (it reads the TV guide, which a long guide job can hold
+ * for seconds: on the main thread that froze the app), then handed to [then] on the main thread.
+ */
+private val lookups = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+internal fun leadChannel(ev: SportEvent, then: (io.github.novatv.play.data.Channel) -> Unit) {
+    lookups.launch {
+        val ch = withContext(IO) { try { App.repo.matcher().airings(ev).firstOrNull()?.channel } catch (x: Exception) { null } }
+        if (ch != null) then(ch)
     }
 }

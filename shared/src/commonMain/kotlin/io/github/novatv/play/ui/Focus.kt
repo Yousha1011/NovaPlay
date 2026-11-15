@@ -38,20 +38,19 @@ fun Modifier.rememberFocus(requester: FocusRequester): Modifier = focusRequester
 fun Modifier.rememberFocusInList(): Modifier = focusRestorer()
 
 /**
- * Up from a page's top control: with nothing above it, focus used to go nowhere (the screen had no focused item). The
- * page now hands it to [fallback] (the open tab's rail icon) and arms [TopExit], so the next Down there comes straight
- * back to the control it left. Focus that would leave the page upwards some other way is sent to [fallback] too.
+ * Up or Down at a page's edge stays on the page: only Left and Right move between the page and the menu (they used to
+ * slip into the menu and open the tab above or below). [page] brings focus back to the control it left.
  */
 class TopExit {
     var armed = false
     internal var inPage = false
 }
 
-fun Modifier.topExit(enabled: Boolean, fm: FocusManager, fallback: FocusRequester, state: TopExit): Modifier =
+fun Modifier.topExit(enabled: Boolean, fm: FocusManager, page: FocusRequester, state: TopExit): Modifier =
     if (!enabled) this else onFocusChanged { state.inPage = it.hasFocus }.onKeyEvent { e ->
-        if (e.type != KeyEventType.KeyDown || e.key != Key.DirectionUp) return@onKeyEvent false
-        val moved = fm.moveFocus(FocusDirection.Up)
-        if (!moved || !state.inPage) { state.armed = true; fallback.requestFocus() }
+        if (e.type != KeyEventType.KeyDown || (e.key != Key.DirectionUp && e.key != Key.DirectionDown)) return@onKeyEvent false
+        val moved = fm.moveFocus(if (e.key == Key.DirectionUp) FocusDirection.Up else FocusDirection.Down)
+        if (moved && !state.inPage) try { page.requestFocus() } catch (x: Exception) { }
         true
     }
 

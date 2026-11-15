@@ -226,7 +226,9 @@ class Repo(val store: Store, val epg: Epg) {
         // Not while opening: the open itself reads a playlist that is due.
         if (_syncing.value != null || _state.value.loading || catalog.busy) return
         if (store.playlistRefreshHours > 0 && Refresh.due(store.syncedAt(src.id), store.playlistRefreshHours, now)) syncPlaylist(src)
-        if (store.guideRefreshHours > 0 && Refresh.due(guideUpdatedAt(), store.guideRefreshHours, now)) scope.launch { loadGuide(force = false) }
+        // The guide's age is read from its database, which a guide job can hold for seconds: never on the main thread
+        // (it is called from the app's onStart, and froze the TV coming back from full screen).
+        if (store.guideRefreshHours > 0) scope.launch { if (Refresh.due(guideUpdatedAt(), store.guideRefreshHours, now)) loadGuide(force = false) }
     }
 
     private fun plural(n: Int, what: String) = if (n == 1) "1 $what" else "$n ${what}s"
