@@ -49,7 +49,7 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:screenOrientation="sensorLandscape"
-            android:theme="@style/AppTheme" />
+            android:theme="@style/PlayerTheme" />
 
         <service
             android:name=".RecordService"

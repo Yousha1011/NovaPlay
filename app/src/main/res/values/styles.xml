@@ -6,4 +6,7 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:colorAccent">#FF5B8CFF</item>
     </style>
+
+    <!-- The full-screen player: opaque here (phone); see-through on the TV (src/tv), over the app. -->
+    <style name="PlayerTheme" parent="AppTheme" />
 </resources>

@@ -127,6 +127,8 @@ class PlayerActivity : ComponentActivity() {
     private var handedChannelId: String? = null
     /** Back was pressed on the adopted player: on leaving it goes back to the preview window instead of being released. */
     private var handingBack = false
+    /** The player went back to the small window at Back: it is the preview's now, never released here. */
+    private var handedBack = false
     /** The main listener, kept so it can be taken off the player before the preview gets it back. */
     private lateinit var mainListener: Player.Listener
 
@@ -225,6 +227,12 @@ class PlayerActivity : ComponentActivity() {
             else -> "full screen: own player (${App.handoverRefusal ?: "nothing to take"})"
         })
         App.handingOver = false
+        // The app behind stays started now (this screen is see-through on the TV), so what its onStop did is done
+        // here: it counts as covered, and a preview that didn't pass its player here lets its stream go.
+        if (!PHONE) {
+            App.away = true
+            if (handed == null && App.host.previewEngine != null) App.preview.stop()
+        }
         adopted = handed != null
         if (adopted) handedChannelId = (item as? PlayItem.Live)?.let { it.channels.getOrNull(it.channelIndex)?.id }
         player = handed ?: buildPlayer(light = false)
@@ -785,7 +793,7 @@ class PlayerActivity : ComponentActivity() {
             return super.dispatchKeyEvent(e)
         }
         if (e.action != KeyEvent.ACTION_DOWN) return when (e.keyCode) {
-            KeyEvent.KEYCODE_BACK -> { if (!e.isCanceled) { handingBack = canHandBack(); finish() }; true }
+            KeyEvent.KEYCODE_BACK -> { if (!e.isCanceled) backToWindow(); true }
             else -> e.keyCode != KeyEvent.KEYCODE_HOME && super.dispatchKeyEvent(e)
         }
         val isLive = item is PlayItem.Live
@@ -814,7 +822,7 @@ class PlayerActivity : ComponentActivity() {
         // The corner window was closed: stop for good.
         if (inPip) { finish(); return }
         // Back to the preview with this player: it keeps playing (the preview mutes it). Anything else pauses as before.
-        if (::player.isInitialized && !(isFinishing && handingBack && adopted)) player.pause()
+        if (::player.isInitialized && !handedBack && !(isFinishing && handingBack && adopted)) player.pause()
         extra.forEach { it.player.pause() }
         // Home or another app over the preview's player: this screen closes, and its end (onDestroy) lets the player
         // go, so the main screen never finds it still held by a hidden full screen. A rotation is not leaving.
@@ -829,9 +837,11 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Back over the app: uncovered. Not when the app went to the background too (Home from full screen).
+        if (!PHONE && MainActivity.started) App.away = false
         // Only a Back from full screen hands the player back; any other end (the Home button, the system closing it,
         // an error) lets it go as before.
-        if (::player.isInitialized) {
+        if (::player.isInitialized && !handedBack) {
             if (adopted && handingBack && canHandBack() && handBack()) { adopted = false; HandoverLog.i("full screen: handed back to the preview (${channel?.name})") }
             else if (adopted) { HandoverLog.i("full screen: closed without hand back${if (handingBack) " (not fit: multi=$multi hd=$mainHd error=${error != null})" else ""}"); releaseAdopted() }
             else player.release()
@@ -844,6 +854,19 @@ class PlayerActivity : ComponentActivity() {
      * Leaving with the preview's player: it goes now (Stage 2 has no hand back), and the preview's record of that
      * channel is cleared, so the window behind starts afresh instead of waiting on a player that is gone.
      */
+    /**
+     * Back: the player goes to the small window now, while this screen is still closing (it used to wait until this
+     * screen had gone, about a second with the picture frozen), then the screen shrinks away.
+     */
+    private fun backToWindow() {
+        handingBack = canHandBack()
+        if (handingBack && ::player.isInitialized && handBack()) {
+            adopted = false; handedBack = true
+            HandoverLog.i("full screen: handed back to the preview at Back (${channel?.name})")
+        }
+        finish()
+    }
+
     /** Back to the preview with this very player: one live screen, playing, no error, with the app still in front. */
     private fun canHandBack(): Boolean = adopted && !multi && !mainHd && live != null && channel != null &&
         player.playerError == null && error == null && player.mediaItemCount > 0 &&

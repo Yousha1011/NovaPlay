@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The TV's full-screen player opens over the app without stopping it (as full screen does on Windows): the app
+      stays started behind, so Back returns to it at once instead of starting it again. The player draws its own black.
+    -->
+    <style name="PlayerTheme" parent="AppTheme">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

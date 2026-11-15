@@ -8,6 +8,11 @@ import io.github.novatv.play.ui.NovaTheme
 import io.github.novatv.play.ui.phone.PhoneRoot
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** The app's screen is started (on screen, or under the TV's see-through full screen). */
+        @Volatile var started = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (PHONE) {
@@ -19,6 +24,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        started = true
         App.away = false
         // Back in the app: the open playlist and the guide are read again if their interval has passed.
         App.repo.refreshIfDue()
@@ -30,6 +36,7 @@ class MainActivity : ComponentActivity() {
      */
     override fun onStop() {
         super.onStop()
+        started = false
         App.away = true
         // Not while the preview's player is passing to full screen: stopping it now would cut the stream it is taking.
         // (Once full screen has it, the preview's stop leaves that player alone: see ExoPreviewEngine.release.)
