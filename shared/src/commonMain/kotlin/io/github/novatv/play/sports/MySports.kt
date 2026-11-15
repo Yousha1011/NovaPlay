@@ -62,15 +62,17 @@ object MySports {
     fun isFriendly(name: String): Boolean = Regex("friendl", RegexOption.IGNORE_CASE).containsMatchIn(name)
 
     /**
-     * A tab's matches in sections: by sport, then by competition, each match under its own. Sections come in kick-off
-     * order (the earliest match first; at the same time the sport's Follow order, then the name), matches by kick-off.
+     * A tab's matches in sections: by sport, in the Follow screen's order (Football, Cricket, Basketball…), then by
+     * competition (its earliest match first, then its name), each competition's matches by kick-off.
      */
     fun grouped(list: List<SportEvent>): List<SportGroup> = list.groupBy { it.league.sport }.map { (sport, games) ->
-        val comps = games.groupBy { it.subtitle ?: it.league.name }.map { (name, g) ->
+        val comps = games.groupBy { e ->
+            (if (sport == Sport.CRICKET) Cricket.groupName(e.subtitle, e.teams.map { it.name }) else null) ?: e.subtitle ?: e.league.name
+        }.map { (name, g) ->
             CompGroup(name, g.first().league, isFriendly(name), g.sortedWith(order))
         }.sortedWith(compareBy({ it.games.first().start }, { it.name.lowercase() }))
         SportGroup(sport, comps)
-    }.sortedWith(compareBy({ g -> g.comps.minOf { it.games.first().start } }, { it.sport.ordinal }))
+    }.sortedBy { it.sport.ordinal }
 
     /** The tag on a match: LIVE (red), TOMORROW (yellow), else its date. */
     enum class Tag { LIVE, TOMORROW, DATE, FINAL }

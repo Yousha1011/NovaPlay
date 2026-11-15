@@ -334,9 +334,30 @@ internal fun rememberPick(c: Channel?, watch: () -> Unit, pick: (Channel) -> Uni
 @Composable
 internal fun CornerWindow(modifier: Modifier) {
     val ps by App.preview.state.collectAsState()
-    val c = App.preview.channel ?: return
-    if (ps is io.github.novatv.play.data.PreviewController.State.Idle || ps is io.github.novatv.play.data.PreviewController.State.Unsupported) return
     androidx.compose.runtime.LaunchedEffect(Unit) { App.preview.surface = "corner" }
-    PreviewBox(c, modifier.width(320.dp).aspectRatio(16f / 9f), owner = "corner",
+    val c = App.preview.channel
+    val idle = c == null || ps is io.github.novatv.play.data.PreviewController.State.Idle || ps is io.github.novatv.play.data.PreviewController.State.Unsupported
+    if (idle) {
+        // Nothing playing: the window's place stays, so the page never moves when a channel starts.
+        Box(modifier.width(320.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C)), contentAlignment = Alignment.Center) {
+            Text(if (App.preview.available) "Pick a channel in Live TV to keep it playing here" else "No preview on this device",
+                style = T.tiny.copy(color = C.dim), modifier = Modifier.padding(16.dp))
+        }
+        return
+    }
+    PreviewBox(c!!, modifier.width(320.dp).aspectRatio(16f / 9f), owner = "corner",
         logoSize = androidx.compose.ui.unit.DpSize(96.dp, 56.dp), onFullScreen = { playFromPreview(c, emptyList()) })
+}
+
+/**
+ * The top of Movies, Series, Recordings and Search: the page's heading (and what goes with it: counts, buttons, the
+ * search box) on the left, the TV window on the right, fixed above the page's list so the window never covers it.
+ */
+@Composable
+internal fun WindowBand(modifier: Modifier = Modifier, heading: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f), content = heading)
+        Spacer(Modifier.width(24.dp))
+        CornerWindow(Modifier)
+    }
 }

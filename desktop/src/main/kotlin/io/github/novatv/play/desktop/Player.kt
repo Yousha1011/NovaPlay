@@ -119,7 +119,11 @@ object Vlc {
 }
 
 /** VLC draws each frame into memory; Compose paints it. */
-internal class Frames {
+/**
+ * [maxWidth]: the widest picture VLC hands over; a wider stream (4K, 8K) is scaled down by VLC first, so a small
+ * window never holds full-size frames (an 8K frame is over 130 MB).
+ */
+internal class Frames(private val maxWidth: Int = Int.MAX_VALUE) {
     var bitmap: Bitmap? = null
     /** When the last frame arrived, to spot a picture that has frozen. */
     @Volatile var lastFrameAt = 0L
@@ -137,12 +141,17 @@ internal class Frames {
 
     val format = object : BufferFormatCallback {
         override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
+            // Scaled to [maxWidth] (even sizes, as VLC's scaler wants), keeping the shape.
+            val w = if (sourceWidth > maxWidth) maxWidth and 1.inv() else sourceWidth
+            val h = if (sourceWidth > maxWidth) ((sourceHeight.toLong() * maxWidth / sourceWidth).toInt() and 1.inv()).coerceAtLeast(2) else sourceHeight
             synchronized(this@Frames) {
-                size = IntSize(sourceWidth, sourceHeight)
-                bitmap = Bitmap().apply { allocPixels(ImageInfo(sourceWidth, sourceHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)) }
-                bytes = ByteArray(sourceWidth * sourceHeight * 4)
+                size = IntSize(w, h)
+                // The last picture's buffer goes now, not whenever the garbage collector gets to it.
+                bitmap?.close()
+                bitmap = Bitmap().apply { allocPixels(ImageInfo(w, h, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)) }
+                bytes = ByteArray(w * h * 4)
             }
-            return RV32BufferFormat(sourceWidth, sourceHeight)
+            return RV32BufferFormat(w, h)
         }
         override fun allocatedBuffers(buffers: Array<out ByteBuffer>) {}
     }
@@ -210,6 +219,8 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
     var multi by remember { mutableStateOf(false) }
     /** Times this live channel's stream has ended by itself since it was chosen or last played steadily (10 s). */
     var liveEnds by remember { mutableIntStateOf(0) }
+    /** When the stream playing now was asked for: a late position from the one before it isn't this one's steady play. */
+    var openedAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
@@ -241,7 +252,8 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
             override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
                 position = newTime
                 // Played steadily for 10 s since it was (re)opened: a later end gets its own quiet retry again.
-                if (newTime >= 10_000 && liveEnds != 0) liveEnds = 0
+                // Only once this stream (not the last one, still reporting while it stops) has played 10 s.
+                if (newTime >= 10_000 && liveEnds != 0 && System.currentTimeMillis() - openedAt >= 10_000) liveEnds = 0
             }
             override fun error(mediaPlayer: MediaPlayer) { error = "This stream could not be played"; buffering = false }
             override fun finished(mediaPlayer: MediaPlayer) {
@@ -306,6 +318,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
         }?.let { u -> if (u.startsWith("file:")) u else AutoTest.stream(u) }
         if (url == null) { error = "This stream could not be opened"; buffering = false; return@LaunchedEffect }
         playingUrl = url
+        openedAt = System.currentTimeMillis()
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
         if (AutoTest.scenario != null) AutoTest.log("PLAY idx=$index (${if (url.startsWith("http://127.0.0.1")) "relay" else "direct"})")
         Vlc.later { player.media().play(url, *opts) }

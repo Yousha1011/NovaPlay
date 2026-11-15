@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import io.github.novatv.play.App
 import io.github.novatv.play.sports.icon
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import io.github.novatv.play.Nav
 import io.github.novatv.play.Route
 import io.github.novatv.play.data.Channel
@@ -215,14 +217,8 @@ private fun MySportsView(
     val pool = remember(events, store.sportsLeagues, store.sportsComps, store.sportsLeagueTeams) {
         if (Follow.followedCompetitions().isEmpty()) shown else events.filter { Follow.followed(it) }
     }
-    // Two tabs: Live (on now, or starting within the hour) and Upcoming (the rest), each by kick-off, then sport, then
-    // competition.
-    val liveList = remember(pool, t) { io.github.novatv.play.sports.MySports.live(pool, t) }
-    val upList = remember(pool, t) { io.github.novatv.play.sports.MySports.upcoming(pool, t) }
-    var tab by remember { mutableIntStateOf(-1) }
-    val shownTab = if (tab >= 0) tab else if (liveList.isEmpty() && upList.isNotEmpty()) 1 else 0
-    val upcoming = remember(liveList, upList) { liveList + upList }
-    // Games the guide lists by the competition's name alone, for the followed competitions.
+    // Games the guide lists by the competition's name alone, for the followed competitions: listed under their own
+    // competition, in Live or Upcoming by their time, as "? Team 1 v ? Team 2".
     val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), events.size, store.sportsLeagues, t / 600_000L) {
         value = withContext(IO) {
             try {
@@ -232,6 +228,21 @@ private fun MySportsView(
         }
     }
     val unknownEvents = remember(unidentified, t) { unidentified.map { it.asEvent(t) } }
+    // Two tabs: Live (on now, or starting within the hour) and Upcoming (the rest), each by kick-off, then sport, then
+    // competition.
+    val liveList = remember(pool, unknownEvents, t) { io.github.novatv.play.sports.MySports.live(pool + unknownEvents, t) }
+    val upList = remember(pool, unknownEvents, t) { io.github.novatv.play.sports.MySports.upcoming(pool + unknownEvents, t) }
+    var tab by remember { mutableIntStateOf(-1) }
+    /** Sports folded away (both tabs), by name. */
+    var collapsed by remember { mutableStateOf(emptySet<String>()) }
+    val shownTab = if (tab >= 0) tab else if (liveList.isEmpty() && upList.isNotEmpty()) 1 else 0
+    // The scorecards show real matches only (an unidentified game has no sides to show).
+    val upcoming = remember(liveList, upList) { (liveList + upList).filterNot { it.id.startsWith("guide:") } }
+    /** OK on a match: its page; an unidentified one has none, so its channel plays in the window. */
+    val open: (SportEvent) -> Unit = { ev ->
+        if (ev.id.startsWith("guide:")) unidentified.firstOrNull { "guide:${it.league.id}:${it.start}" == ev.id }?.channels?.firstOrNull()?.let(onWatchInWindow)
+        else onOpen(ev)
+    }
     val heroes = remember(upcoming, shown) { upcoming.take(8).ifEmpty { shown.filter { it.state == State.LIVE }.take(8) } }
     var heroIdx by remember { mutableIntStateOf(0) }
     LaunchedEffect(heroIdx, heroes.size) {
@@ -244,18 +255,11 @@ private fun MySportsView(
     }
 
     Column(Modifier.fillMaxSize()) {
-        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {
-        // Match cards are 280 wide with 12 between: as many to a row as fit.
-        val cols = maxOf(1, ((maxWidth + 12.dp) / 292.dp).toInt())
-        LazyColumn(
-            Modifier.fillMaxSize().rememberFocusInList(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
-        ) {
-            // Hero card + Video Window top row (168dp height)
+        // The scorecards and the window: fixed at the top, the list scrolling under them.
+        // Hero card + Video Window top row (168dp height)
             if (heroes.isNotEmpty()) {
                 val h = heroes[heroIdx.coerceIn(0, heroes.lastIndex)]
-                item(key = "hero_row") {
+                run {
                     Row(Modifier.fillMaxWidth().height(168.dp)) {
                         androidx.compose.animation.AnimatedContent(
                             targetState = h,
@@ -290,6 +294,15 @@ private fun MySportsView(
                 }
             }
 
+        if (heroes.isNotEmpty()) Spacer(Modifier.height(16.dp))
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {
+        // Four match cards to a row, sharing the width.
+        val cols = 4
+        LazyColumn(
+            Modifier.fillMaxSize().rememberFocusInList(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
             // Two tabs under the scorecards: Live and Upcoming.
             item(key = "tabs") {
                 Column(Modifier.fillMaxWidth()) {
@@ -308,51 +321,15 @@ private fun MySportsView(
             if (list.isEmpty()) item(key = "empty_$shownTab") {
                 Text(if (shownTab == 0) "Nothing live or about to start." else "Nothing coming up.", style = T.small.copy(color = SportsLook.Faint))
             } else io.github.novatv.play.sports.MySports.grouped(list).forEach { sg ->
-                // A section per sport, with its icon; under it each competition with its logo (a handshake for
-                // friendlies), then its matches.
+                // A box per sport: its title centred between lines, a button to fold it away; inside, each competition
+                // with its logo (a handshake for friendlies), then its matches.
                 item(key = "s_${shownTab}_${sg.sport.name}") {
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(sg.sport.icon, style = T.h2.copy(fontSize = 20.sp))
-                        Spacer(Modifier.width(10.dp))
-                        Text(sg.sport.label, style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp), modifier = Modifier.weight(1f))
-                        Text("${sg.count} ${if (sg.count == 1) "match" else "matches"}", style = T.tiny.copy(color = SportsLook.Dim))
-                    }
-                }
-                sg.comps.forEach { cg ->
-                    item(key = "c_${shownTab}_${sg.sport.name}_${cg.name}") {
-                        Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            CompetitionMark(cg)
-                            Spacer(Modifier.width(10.dp))
-                            Text(cg.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            Text("${cg.games.size}", style = T.tiny.copy(color = SportsLook.Dim))
-                        }
-                    }
-                    cg.games.chunked(cols).forEach { chunk ->
-                        item(key = "g_${shownTab}_${chunk.first().id}") {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                chunk.forEach { ev ->
-                                    MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
-                                        App.repo.matcher().airings(ev).firstOrNull()?.channel?.let(onWatchInWindow)
-                                    })
-                                }
-                            }
-                        }
-                    }
+                    val folded = sg.sport.name in collapsed
+                    SportSection(sg, folded, cols, onToggle = { collapsed = if (folded) collapsed - sg.sport.name else collapsed + sg.sport.name },
+                        onOpen = open, onWatchInWindow = onWatchInWindow)
                 }
             }
 
-            // Unidentified Games: always shown, from the TV guide.
-            item(key = "unidentified") {
-                if (unknownEvents.isEmpty()) Column(Modifier.fillMaxWidth()) {
-                    Text("? Unidentified Games", style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp))
-                    Text(if (Follow.competitions().isEmpty()) "Follow a competition to look for its unnamed games in your TV guide."
-                        else "None right now: your TV guide names every game of your competitions.", style = T.tiny.copy(color = SportsLook.Dim))
-                } else GameRowHeader(title = "? Unidentified Games",
-                    subtitle = "In your TV guide by competition name only · ${unknownEvents.size}", events = unknownEvents,
-                    // No match details to open: OK plays its channel in the window.
-                    onOpen = { ev -> unidentified.firstOrNull { "guide:${it.league.id}:${it.start}" == ev.id }?.channels?.firstOrNull()?.let(onWatchInWindow) },
-                    onHoldWatch = onWatchInWindow)
-            }
         }
         }
 
@@ -530,15 +507,16 @@ internal fun MatchCardItem(
     event: SportEvent,
     favTeamName: String?,
     onClick: () -> Unit,
-    onHoldWatch: () -> Unit
+    onHoldWatch: () -> Unit,
+    /** Its width: 280 in a row of cards, or a share of a row (four to a row on My Sports). */
+    modifier: Modifier = Modifier.width(280.dp)
 ) {
     var focused by remember { mutableStateOf(false) }
     val (homeShade, awayShade) = teamShades(event.home, event.away)
     val band = Color(0xFF1B1F27)
 
     Box(
-        modifier = Modifier
-            .width(280.dp)
+        modifier = modifier
             .height(130.dp)
             .sportsFrame(focused, accent = SportsLook.Gold, radius = 12.dp)
             .background(
@@ -959,5 +937,75 @@ private fun CompetitionMark(cg: io.github.novatv.play.sports.MySports.CompGroup)
         cg.friendly -> Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { Text("\uD83E\uDD1D", style = T.body.copy(fontSize = 18.sp)) }
         logo != null -> LogoChip(logo, 28.dp)
         else -> Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { Text(cg.league.sport.icon, style = T.body.copy(fontSize = 18.sp)) }
+    }
+}
+
+/**
+ * One sport's box on My Sports: a header with the sport's icon, name and match count centred between fine blue lines,
+ * and a button to fold the box away (just the header stays) or open it again; inside, each competition's heading and
+ * its match cards.
+ */
+@Composable
+private fun SportSection(
+    sg: io.github.novatv.play.sports.MySports.SportGroup,
+    folded: Boolean,
+    cols: Int,
+    onToggle: () -> Unit,
+    onOpen: (SportEvent) -> Unit,
+    onWatchInWindow: (Channel) -> Unit,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(shape)
+            .background(Brush.verticalGradient(listOf(Color(0xFF1A1E27), Color(0xFF12151C))))
+            .border(1.dp, Brush.verticalGradient(listOf(SportsLook.Blue.copy(alpha = 0.35f), SportsLook.Border)), shape)
+            .padding(horizontal = 18.dp, vertical = 14.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // Lines that fade out towards the edges, meeting the title in gold.
+            Box(Modifier.weight(1f).height(1.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, SportsLook.Blue.copy(alpha = 0.7f)))))
+            Row(
+                Modifier.padding(horizontal = 14.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFF0E1015))
+                    .border(1.dp, SportsLook.Blue.copy(alpha = 0.55f), RoundedCornerShape(50))
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(sg.sport.icon, style = T.body.copy(fontSize = 18.sp))
+                Spacer(Modifier.width(8.dp))
+                Text(sg.sport.label.uppercase(), style = T.body.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp, color = Color.White))
+                Spacer(Modifier.width(10.dp))
+                Text("${sg.count} ${if (sg.count == 1) "match" else "matches"}", style = T.tiny.copy(color = SportsLook.Blue))
+            }
+            Box(Modifier.weight(1f).height(1.dp).background(Brush.horizontalGradient(listOf(SportsLook.Blue.copy(alpha = 0.7f), Color.Transparent))))
+            Spacer(Modifier.width(10.dp))
+            Pill(if (folded) "Expand" else "Collapse", onClick = onToggle,
+                icon = if (folded) androidx.compose.material.icons.Icons.Rounded.ExpandMore else androidx.compose.material.icons.Icons.Rounded.ExpandLess)
+        }
+        if (!folded) {
+            Spacer(Modifier.height(12.dp))
+            sg.comps.forEachIndexed { i, cg ->
+                if (i > 0) Box(Modifier.fillMaxWidth().padding(vertical = 12.dp).height(1.dp).background(SportsLook.Border.copy(alpha = 0.6f)))
+                Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CompetitionMark(cg)
+                    Spacer(Modifier.width(10.dp))
+                    Text(cg.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text("${cg.games.size}", style = T.tiny.copy(color = SportsLook.Dim))
+                }
+                cg.games.chunked(cols).forEach { chunk ->
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        chunk.forEach { ev ->
+                            MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
+                                App.repo.matcher().airings(ev).firstOrNull()?.channel?.let(onWatchInWindow)
+                            }, modifier = Modifier.weight(1f))
+                        }
+                        // A short last row keeps its cards the same width.
+                        repeat(cols - chunk.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
     }
 }

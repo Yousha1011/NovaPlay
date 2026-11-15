@@ -132,8 +132,11 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
         val starts = known.filter { it.league.id == league.id }.map { it.start }
         val progs = names.flatMap { n -> epg.find(listOf(n), from, to, limit = 300) }
             .filter { p -> p.start >= from - 3 * 3600_000L && unnamed(p.title, own) }
+            // A match's length: a short show or highlights isn't a game.
+            .filter { p -> p.stop - p.start >= 75 * 60_000L }
             .filter { p -> starts.none { kotlin.math.abs(it - p.start) <= 20 * 60_000L } }
-        return progs.groupBy { it.start / (5 * 60_000L) }.values.mapNotNull { same ->
+        // Kick-offs within a quarter of an hour of each other are one game on several channels.
+        return progs.groupBy { it.start / (15 * 60_000L) }.values.mapNotNull { same ->
             val p = same.minBy { it.start }
             val chans = same.flatMap { byKey[it.channelKey].orEmpty() }.distinctBy { it.id }
             if (chans.isEmpty()) null else UnidentifiedGame(league, p.start, same.maxOf { it.stop }, p.title, chans)

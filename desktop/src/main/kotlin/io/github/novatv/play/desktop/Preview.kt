@@ -37,7 +37,7 @@ object DesktopPreviewEngine : PreviewEngine {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /** Observed, so the window draws the new player's frames after a release. */
-    internal var frames by androidx.compose.runtime.mutableStateOf(Frames())
+    internal var frames by androidx.compose.runtime.mutableStateOf(Frames(PREVIEW_MAX_WIDTH))
         private set
     private var player: EmbeddedMediaPlayer? = null
     /** Lent to full screen: the preview mustn't touch it until it comes back. */
@@ -57,7 +57,7 @@ object DesktopPreviewEngine : PreviewEngine {
     val isLent: Boolean get() = lent != null
 
     private fun build(): EmbeddedMediaPlayer {
-        val f = Frames().also { frames = it }
+        val f = Frames(PREVIEW_MAX_WIDTH).also { frames = it }
         val p = Vlc.factory.mediaPlayers().newEmbeddedMediaPlayer()
         p.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(f.format, f.render, true))
         p.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
@@ -68,7 +68,7 @@ object DesktopPreviewEngine : PreviewEngine {
         return p
     }
 
-    private fun opts(): Array<String> = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=3000") +
+    private fun opts(): Array<String> = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=3000", ":adaptive-maxheight=1080") +
         // Its sound is only needed if it may go full screen as it is.
         (if (App.store.seamlessFullscreen) emptyArray() else arrayOf(":no-audio"))
 
@@ -157,7 +157,7 @@ object DesktopPreviewEngine : PreviewEngine {
         val h = HandedPlayer(p, frames, url)
         lent = h
         player = null
-        frames = Frames()
+        frames = Frames(PREVIEW_MAX_WIDTH)
         testLog("PREVIEW handed to full screen")
         return h
     }
@@ -206,7 +206,7 @@ object DesktopPreviewEngine : PreviewEngine {
         player = null
         ready = false
         // The stream closes now (full screen may be about to open its own); the player is freed off the main thread.
-        frames = Frames()
+        frames = Frames(PREVIEW_MAX_WIDTH)
         lastUrl = null
         testLog("PREVIEW released")
         Vlc.later { p.controls().stop(); p.release(); AutoTest.vlcReleased.incrementAndGet() }
@@ -215,6 +215,8 @@ object DesktopPreviewEngine : PreviewEngine {
     @Composable override fun Video(modifier: Modifier) { VideoCanvas(frames, modifier) }
 
     private const val RETRY_MS = 3_000L
+    /** The preview's widest picture (full HD, as it may go full screen): VLC scales 4K and 8K channels down to it. */
+    private const val PREVIEW_MAX_WIDTH = 1920
 }
 
 /** Development only: what the test driver reads; nothing is written outside a test run. */

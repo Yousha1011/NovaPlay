@@ -142,9 +142,12 @@ class Repo(val store: Store, val epg: Epg) {
      */
     fun afterSync(keys: Set<String>) {
         var opened = false
-        if ("sources" in keys || "active" in keys) {
+        if ("sources" in keys) {
+            // Only when this device's own playlist changed (its address or login, or it was removed): another device
+            // refreshing its list must not reload this one, or switch it.
+            val cur = _state.value.source
             val src = store.sources.firstOrNull { it.id == store.activeSourceId } ?: store.sources.firstOrNull()
-            if (src != null) { open(src, force = false); opened = true }
+            if (src != null && src != cur) { open(src, force = false); opened = true }
         }
         // Opening a playlist loads the guide after it (with the new guide list): a second, forced import on top would
         // read every guide twice, which a Fire TV Stick or iPhone just logged in can't afford.

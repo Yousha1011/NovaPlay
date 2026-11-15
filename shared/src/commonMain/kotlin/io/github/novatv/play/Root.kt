@@ -291,8 +291,6 @@ private fun RootBody() {
                         }
                     }
                 }
-                // Movies, Series, Recordings and Search: the channel playing in the TV window carries on in the corner.
-                if (nav.tab in CORNER_TABS && top == null) io.github.novatv.play.ui.CornerWindow(Modifier.align(Alignment.TopEnd).padding(top = 18.dp, end = 24.dp))
             }
             Rail(nav) { nav.menuOpen = it }
         }

@@ -126,7 +126,7 @@ object Follow {
         if (s == Sport.CRICKET) Cricket.tournament(e.subtitle, e.teams.map { it.name })?.let { tn ->
             // National sides picked inside the tournament narrow it to their matches.
             val picks = leagueTeams("cricket:intl:${tn.name}")
-            val narrowed = picks.isEmpty() || e.teams.any { side -> picks.any { (_, name) -> Cricket.nation(side.name) == name || side.name == name } }
+            val narrowed = picks.isEmpty() || e.teams.any { side -> picks.any { (_, name) -> Cricket.sameSide(side.name, name) } }
             if ((Cricket.ALL_INTERNATIONAL in store.sportsComps || Cricket.tournamentKey(tn.name) in store.sportsComps) && narrowed) return true
         }
         if (s == Sport.CRICKET) e.subtitle?.let { c -> Cricket.leagueHome(c, e.teams.map { it.name }) }?.let { home ->
@@ -143,7 +143,10 @@ object Follow {
      * leagues. ESPN lists no cricket competitions or teams of its own.
      */
     fun cricketCompetitions(): List<League> =
-        Cricket.tournaments.map { it.name }.distinct().map { League("cricket:intl:$it", Sport.CRICKET, it, country = "International") } +
+        // Tours and series (Tests, ODIs, T20Is) are one competition here: International Fixtures.
+        Cricket.tournaments.map { it.name }.distinct().map { n ->
+            League("cricket:intl:$n", Sport.CRICKET, if (n == "Bilateral series and tours") Cricket.INTERNATIONAL_FIXTURES else n, country = "International")
+        } +
             Cricket.major.map { League("cricket:leagues:$it", Sport.CRICKET, "$it domestic leagues", country = it) }
 
     /** What following [l] stores: a competition key for cricket's, else the catalogue id. */
@@ -166,7 +169,7 @@ object Follow {
 
     /** The teams the Follow screen offers inside [l]: cricket's national sides for its international tournaments. */
     fun cricketTeams(l: League): List<TeamInfo>? = when {
-        l.id.startsWith("cricket:intl:") -> Cricket.nationsInOrder().map { n -> TeamInfo(l.id, n, n, n, n.take(3).uppercase(), null, null, null, null, null) }
+        l.id.startsWith("cricket:intl:") -> Cricket.followSides().map { n -> TeamInfo(l.id, n, n, n, n.take(3).uppercase(), null, null, null, null, null) }
         l.id.startsWith("cricket:leagues:") -> emptyList()
         else -> null
     }
@@ -191,7 +194,41 @@ object Cricket {
     private val nations = (major + others).toSet()
     /** Full members first, then the rest A to Z. */
     fun nationsInOrder(): List<String> = major + others.sorted()
-    private val tails = listOf(" Women", " A", " U19", " Under-19s", " Under 19s", " XI", " Emerging", " Development", " Legends", " Masters")
+    private val tails = listOf(" Women", " A", " U19", " Under-19s", " Under 19s", " XI", " Emerging", " Development", " Legends", " Masters",
+        " Lions", " Wolves", " Shaheens", " High Performance")
+
+    /** A full member's second side, by the name it plays under: England Lions, Ireland Wolves, Pakistan Shaheens, else "X A". */
+    private val secondSide = mapOf("England" to "England Lions", "Ireland" to "Ireland Wolves", "Pakistan" to "Pakistan Shaheens")
+
+    /**
+     * The sides the Follow screen offers, in order: each full member's main team, then its A / high-performance side,
+     * women's and under-19 teams; then the other nations' main teams, A to Z.
+     */
+    fun followSides(): List<String> = major.flatMap { n -> listOf(n, secondSide[n] ?: "$n A", "$n Women", "$n U19") } + others.sorted()
+
+    /**
+     * A side's name as the Follow screen writes it: "USA" -> "United States of America", "India Under-19s" -> "India U19".
+     * Unlike [nation], India A stays India A (not India).
+     */
+    fun canonical(side: String): String {
+        var n = side.trim().replace(Regex(" (Under[- ]?19s?|U-19)$", RegexOption.IGNORE_CASE), " U19")
+        for ((a, b) in listOf("USA" to "United States of America", "United States" to "United States of America", "UAE" to "United Arab Emirates"))
+            if (n == a || n.startsWith("$a ")) n = b + n.removePrefix(a)
+        return n
+    }
+
+    /** Whether [side] (as a feed names it) is the side [picked] on the Follow screen: India A is not India. */
+    fun sameSide(side: String, picked: String): Boolean = canonical(side) == picked
+
+    /**
+     * The heading a cricket match is listed under on My Sports: tours and series between national sides (Tests, ODIs,
+     * T20Is, T10s, trophy series such as the Ashes) together as "International Fixtures"; multi-nation tournaments
+     * (World Cups, Asia Cup) and domestic competitions under their own name.
+     */
+    fun groupName(comp: String?, sides: List<String>): String? =
+        tournament(comp, sides)?.takeIf { it.group == "Other international" || it.group == "Bilateral trophies" }?.let { INTERNATIONAL_FIXTURES }
+
+    const val INTERNATIONAL_FIXTURES = "International Fixtures"
 
     /** The country a national side plays for, or null for a club or franchise. */
     fun nation(side: String): String? {

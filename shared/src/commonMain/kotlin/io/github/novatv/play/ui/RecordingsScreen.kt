@@ -46,7 +46,10 @@ fun RecordingsScreen(nav: Nav) {
     val scheduled = all.filter { it.status == Recording.Status.SCHEDULED }.sortedBy { it.start }
     val done = all.filter { it.status == Recording.Status.DONE || it.status == Recording.Status.FAILED }.sortedByDescending { it.start }
     Column(Modifier.fillMaxSize().padding(start = S.gutter, top = 30.dp, end = S.gutter)) {
-        Header("Recordings", "${size(all.sumOf { it.bytes })} used · ${size(free)} free on this device")
+        // Heading, space on the device and the TV window: fixed above the list.
+        WindowBand(Modifier.padding(bottom = 10.dp)) {
+            Header("Recordings", "${size(all.sumOf { it.bytes })} used · ${size(free)} free on this device")
+        }
         if (all.isEmpty()) {
             Message("No recordings yet", "Hold OK on a programme in the TV guide, or use Record in the player, to record it.")
             return@Column

@@ -14,9 +14,13 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = arr("sources").let { a -> (0 until a.length()).map { Source.fromJson(a.getJSONObject(it)) } }
         set(v) = put("sources", JSONArray(v.map { it.toJson() }))
 
+    /**
+     * The playlist in use on this device. Kept in the backup (a reinstall comes back on it) but not synced: each device
+     * picks its own, and opening it again (every start) changes nothing when it is the same.
+     */
     override var activeSourceId: String?
         get() = sp.getString("active", null)
-        set(v) { ps("active", v) }
+        set(v) { if (sp.getString("active", null) != v) ps("active", v) }
 
     /** Favourite channels, movies and series as "kind:sourceId:itemId". */
     var favourites: Set<String>
@@ -386,14 +390,15 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     /** Writes [k], and refreshes the backup when it is a value worth keeping across reinstalls. */
     private fun ps(k: String, v: String?) {
         sp.putString(k, v)
-        if (k in backedUp) { backup?.invoke(snapshot()); onSyncedChange?.invoke(k) }
+        if (k in backedUp) { backup?.invoke(snapshot()); if (k in syncedKeys) onSyncedChange?.invoke(k) }
     }
 
     // ---------- account (see AccountSync) ----------
 
     /** Called with each synced setting changed on this device (not when one arrives from another device). */
     var onSyncedChange: ((String) -> Unit)? = null
-    val syncedKeys: Set<String> get() = backedUp
+    /** What an account syncs: the backed-up settings except this device's own choice of playlist. */
+    val syncedKeys: Set<String> get() = backedUp - LOCAL_ONLY
     fun raw(k: String): String? = sp.getString(k, null)
     /** Writes a setting that came from another device. */
     fun putFromSync(k: String, v: String?) { sp.putString(k, v); backup?.invoke(snapshot()) }
@@ -437,3 +442,6 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     private fun strSet(k: String): Set<String> = strList("$k.json").toSet()
     private fun putSet(k: String, v: Set<String>) = put("$k.json", JSONArray(v.toList()))
 }
+
+/** Backed-up settings that stay on the device and aren't synced to the account: the playlist in use. */
+internal val LOCAL_ONLY = setOf("active")

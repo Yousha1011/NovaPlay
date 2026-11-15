@@ -154,12 +154,27 @@ fun main() {
                 .onFocusChanged { contentFocused = it.hasFocus; if (AutoTest.scenario != null) AutoTest.focusInside = it.hasFocus }) {
                 NovaTheme {
                     Root()
-                    Desktop.playing?.let { item ->
-                        PlayerScreen(item, window, onClose = {
-                            Desktop.playing = null
-                            App.playerClosed++
-                            if (window.placement == WindowPlacement.Fullscreen) window.placement = WindowPlacement.Floating
-                        })
+                    // Full screen grows out of the TV window at the top right, and shrinks back into it on Back.
+                    val lastItem = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<io.github.novatv.play.data.PlayItem?>(null) }
+                    Desktop.playing?.let { if (lastItem.value !== it) lastItem.value = it }
+                    val toWindow = androidx.compose.ui.graphics.TransformOrigin(0.97f, 0.12f)
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = Desktop.playing != null,
+                        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)) +
+                            androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(280), initialScale = 0.22f, transformOrigin = toWindow),
+                        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240)) +
+                            androidx.compose.animation.scaleOut(androidx.compose.animation.core.tween(280), targetScale = 0.22f, transformOrigin = toWindow),
+                    ) {
+                        lastItem.value?.let { item ->
+                            androidx.compose.runtime.key(item) {
+                                PlayerScreen(item, window, onClose = {
+                                    if (Desktop.playing == null) return@PlayerScreen
+                                    Desktop.playing = null
+                                    App.playerClosed++
+                                    if (window.placement == WindowPlacement.Fullscreen) window.placement = WindowPlacement.Floating
+                                })
+                            }
+                        }
                     }
                     Desktop.message?.let { (msg, at) ->
                         LaunchedEffect(at) { delay(2500); if (Desktop.message?.second == at) Desktop.message = null }

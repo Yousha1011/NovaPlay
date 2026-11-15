@@ -76,4 +76,13 @@ class AccountSyncTest {
         assertNull(AccountSync.cleanName("no spaces"))
         assertNull(AccountSync.cleanName("../etc"))
     }
+
+    @Test fun thePlaylistInUseIsNotSynced() {
+        // Each device keeps its own playlist: another device's choice in the account never switches this one.
+        assertTrue("active" in LOCAL_ONLY)
+        val synced = setOf("favs.json", "sources", "active") - LOCAL_ONLY
+        val local = mapOf("active" to "tv-list")
+        val m = AccountSync.merge(synced, JSONObject(), local::get, remote(Triple("active", "pc-list", 900)), now = 1000)
+        assertTrue("active" !in m.arrived)
+    }
 }

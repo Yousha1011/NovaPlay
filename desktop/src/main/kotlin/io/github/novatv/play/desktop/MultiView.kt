@@ -85,7 +85,7 @@ internal fun multiLog(msg: String) {
 }
 
 /** A VLC player drawing into its own frames. */
-private class Vlcp(val frames: Frames = Frames()) {
+private class Vlcp(val frames: Frames = Frames(1920)) {
     val player: EmbeddedMediaPlayer = Vlc.factory.mediaPlayers().newEmbeddedMediaPlayer().also {
         it.videoSurface().set(Vlc.factory.videoSurfaces().newVideoSurface(frames.format, frames.render, true))
     }
@@ -171,7 +171,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
     val focus = remember { FocusRequester() }
 
     // A few seconds of cache at least, so a closed stream plays on while the next one opens.
-    val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(5000, 15000)}")
+    val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(5000, 15000)}", ":adaptive-maxheight=1080")
     fun open(s: VlcScreen, quiet: Boolean = false) {
         s.current.dropped = false; s.openedAt = System.currentTimeMillis(); s.playingSince = 0L; s.lastBytes = 0; s.bytesAt = s.openedAt
         if (!quiet) { s.error = null; s.buffering = true }

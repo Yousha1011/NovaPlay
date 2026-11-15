@@ -111,12 +111,37 @@ class MySportsTest {
             game("fr", friendly, t + 2 * hour, "I", "J"),
         )
         val g = MySports.grouped(events)
-        // Basketball's match is earliest, so its section comes first.
-        assertEquals(listOf(Sport.BASKETBALL, Sport.FOOTBALL), g.map { it.sport })
-        val football = g[1].comps
+        // Sports in the Follow screen's order, even though Basketball's match is earliest.
+        assertEquals(listOf(Sport.FOOTBALL, Sport.BASKETBALL), g.map { it.sport })
+        val football = g[0].comps
         assertEquals(listOf("Premier League", "Champions League", "International friendlies"), football.map { it.name })
         assertEquals(listOf("pl1", "pl2"), football[0].games.map { it.id })
         assertEquals(listOf(false, false, true), football.map { it.friendly })
         assertEquals(5, g.sumOf { it.count })
+    }
+
+    @Test fun cricketSidesMainAndOthersAreDistinct() {
+        val sides = Cricket.followSides()
+        assertTrue(sides.containsAll(listOf("India", "India A", "India Women", "India U19", "England Lions", "Ireland Wolves", "Pakistan Shaheens")))
+        assertTrue(Cricket.sameSide("India", "India"))
+        assertTrue(!Cricket.sameSide("India A", "India"), "India A is not India")
+        assertTrue(Cricket.sameSide("India Under-19s", "India U19"))
+        assertTrue(Cricket.sameSide("UAE", "United Arab Emirates"))
+    }
+
+    @Test fun cricketToursGoUnderInternationalFixtures() {
+        val cricket = Catalog.league("cricket")!!
+        fun c(id: String, series: String, a: String, b: String) =
+            SportEvent(id, cricket, series, "$a v $b", now + 3 * hour, State.PRE, "", side(a, a), side(b, b), emptyList(), null)
+        val events = listOf(
+            c("t1", "Zimbabwe tour of United Arab Emirates 2026/27", "Zimbabwe", "United Arab Emirates"),
+            c("t2", "India tour of New Zealand 2026/27", "New Zealand", "India"),
+            c("ashes", "England tour of Australia 2026/27", "Australia", "England"),
+            c("wc", "ICC Men's T20 World Cup 2026", "India", "Pakistan"),
+        )
+        val names = MySports.grouped(events).single().comps.map { it.name }.toSet()
+        assertEquals(setOf("International Fixtures", "ICC Men's T20 World Cup 2026"), names)
+        // Trophy series (England in Australia: the Ashes) are tours too.
+        assertEquals(3, MySports.grouped(events).single().comps.first { it.name == "International Fixtures" }.games.size)
     }
 }
