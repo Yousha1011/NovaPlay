@@ -52,10 +52,11 @@ fun PhoneLeagues(nav: Nav) {
     val comps = remember(events) {
         events.orEmpty().filter { it.league.header != null || it.league.sport == Sport.TENNIS }.mapNotNull { it.subtitle }.distinct().sorted()
     }
+    // Clubs by competition: picked inside it, they narrow it to their matches (a club is never followed on its own).
     val clubs = remember(events) {
-        events.orEmpty().flatMap { e -> e.teams.map { (e.subtitle ?: e.league.name) to (e to it) } }
-            .groupBy({ it.first }, { it.second }).mapValues { (_, l) -> l.distinctBy { it.second.name }.sortedBy { it.second.name } }
-            .entries.sortedBy { it.key }.associate { it.key to it.value }
+        events.orEmpty().filter { it.league.header == null }.flatMap { e -> e.teams.map { e.league to it } }
+            .groupBy({ it.first }, { it.second }).mapValues { (_, l) -> l.distinctBy { it.name }.sortedBy { it.name } }
+            .entries.sortedBy { it.key.name.lowercase() }.associate { it.key to it.value }
     }
     val cricket = remember(events, sport) {
         if (sport != Sport.CRICKET) emptyList() else {
@@ -103,13 +104,15 @@ fun PhoneLeagues(nav: Nav) {
                             store.sportsLeagues = store.sportsLeagues - leagues.map { it.id }.toSet()
                             store.sportsComps = store.sportsComps.filterNot { it.startsWith(sport.name + "|") }.toSet()
                             store.favouriteTeams = store.favouriteTeams.filterNot { it.startsWith(sport.name + "|") }.toSet()
+                            val ids = (leagues.map { it.id } + Follow.cricketCompetitions().filter { it.sport == sport }.map { it.id }).toSet()
+                            store.sportsLeagueTeams = store.sportsLeagueTeams.filterNot { it.substringBefore('|') in ids }.toSet()
                             changed()
                         })
                     }
                 }
             }
             item {
-                Text("Pick nothing to follow every match, or pick competitions, countries or clubs to narrow it.", style = P.small,
+                Text("Pick nothing to follow every match, or follow competitions; pick teams inside one to list only their matches.", style = P.small,
                     modifier = Modifier.padding(horizontal = 20.dp))
             }
 
@@ -133,37 +136,44 @@ fun PhoneLeagues(nav: Nav) {
             if (events == null) item { Text("Loading clubs and series…", style = P.small, modifier = Modifier.padding(horizontal = 20.dp)) }
 
             if (sport == Sport.CRICKET) {
-                item { Section("INTERNATIONAL TOURNAMENTS") }
+                item { Section("INTERNATIONAL") }
                 item {
                     Group(null) {
                         val on = remember(v) { Cricket.ALL_INTERNATIONAL in store.sportsComps }
-                        Pick("All international tournaments", on) { toggleComp(Cricket.ALL_INTERNATIONAL, on) }
+                        Pick("All international cricket", on) { toggleComp(Cricket.ALL_INTERNATIONAL, on) }
                     }
                 }
-                val groups = Cricket.tournaments.map { it.group to it.name }.distinct().groupBy({ it.first }, { it.second })
-                for ((group, names) in groups) item(key = "intl:$group") {
-                    Group(group) {
-                        for (n in names) {
-                            val k = Cricket.tournamentKey(n)
-                            val on = remember(v) { k in store.sportsComps }
-                            Pick(n, on) { toggleComp(k, on) }
+                // Each competition: follow it, then (once followed) pick sides inside it to list only their matches.
+                val intl = Follow.cricketCompetitions().filter { it.id.startsWith("cricket:intl:") }
+                for (l in intl) item(key = "intl:${l.id}") {
+                    Group(null) {
+                        val on = remember(v) { Follow.isFollowed(l) }
+                        Pick(l.name, on) {
+                            if (on) {
+                                Follow.follow(l, false)
+                                store.sportsLeagueTeams = store.sportsLeagueTeams.filterNot { it.startsWith("${l.id}|") }.toSet()
+                            } else Follow.follow(l, true)
+                            changed()
                         }
-                    }
-                }
-                if (cricket.isNotEmpty()) item { Section("COUNTRIES") }
-                for ((country, national, comps2) in cricket) item(key = "cr:$country") {
-                    Group(country) {
-                        val nKey = Cricket.nationKey(country)
-                        val lKey = Cricket.leaguesKey(country)
-                        if (national) {
-                            val both = remember(v) { nKey in store.sportsComps && lKey in store.sportsComps }
-                            Pick("All of $country", both) {
-                                store.sportsComps = if (both) store.sportsComps - nKey - lKey else store.sportsComps + nKey + lKey
-                                changed()
+                        if (on) {
+                            Text("Sides: pick to list only theirs", style = P.small, modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp))
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for (n in Cricket.followSides()) {
+                                    val k = "${l.id}|$n|$n"
+                                    val picked = remember(v) { k in store.sportsLeagueTeams }
+                                    Text(n, style = P.small.copy(color = if (picked) Color.Black else Color.White),
+                                        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (picked) Color(0xFF4DA3FF) else Color(0x22FFFFFF))
+                                            .tap { store.sportsLeagueTeams = if (picked) store.sportsLeagueTeams - k else store.sportsLeagueTeams + k; changed() }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp))
+                                }
                             }
-                            val n = remember(v) { nKey in store.sportsComps }
-                            Pick("National team", n) { toggleComp(nKey, n) }
                         }
+                    }
+                }
+                if (cricket.isNotEmpty()) item { Section("COUNTRIES' OWN COMPETITIONS") }
+                for ((country, _, comps2) in cricket) item(key = "cr:$country") {
+                    Group(country) {
+                        val lKey = Cricket.leaguesKey(country)
                         val l = remember(v) { lKey in store.sportsComps }
                         Pick("All leagues", l) { toggleComp(lKey, l) }
                         for (c in comps2) {
@@ -188,14 +198,16 @@ fun PhoneLeagues(nav: Nav) {
                 }
             }
             if (sport != Sport.CRICKET && clubs.isNotEmpty()) {
-                item { Section(if (sport == Sport.TENNIS) "PLAYERS" else "CLUBS AND TEAMS · NEXT TWO WEEKS") }
-                for ((comp, list) in clubs) item(key = "t:$sport:$comp") {
-                    Group(comp) {
-                        for ((e, side) in list) {
-                            val on = remember(v) { Follow.teamPicked(e, side) }
+                item { Section(if (sport == Sport.TENNIS) "PLAYERS · INSIDE THEIR TOUR" else "TEAMS · INSIDE THEIR COMPETITION") }
+                for ((league, list) in clubs) item(key = "t:$sport:${league.id}") {
+                    Group(league.name) {
+                        for (side in list) {
+                            // Picked inside the competition: it is followed too, and lists only its picked teams' matches.
+                            val k = "${league.id}|${side.id}|${side.name}"
+                            val on = remember(v) { k in store.sportsLeagueTeams }
                             Pick(side.name, on, star = true) {
-                                store.favouriteTeams = if (on) store.favouriteTeams.filterNot { it.endsWith("|${side.name}") || it == teamKey(e, side) }.toSet()
-                                    else store.favouriteTeams + teamKey(e, side)
+                                if (on) store.sportsLeagueTeams = store.sportsLeagueTeams - k
+                                else { store.sportsLeagueTeams = store.sportsLeagueTeams + k; store.sportsLeagues = store.sportsLeagues + league.id }
                                 changed()
                             }
                         }

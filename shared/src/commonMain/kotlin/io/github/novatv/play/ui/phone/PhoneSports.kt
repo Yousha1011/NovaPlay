@@ -1,6 +1,7 @@
 package io.github.novatv.play.ui.phone
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +53,7 @@ import io.github.novatv.play.sports.Airing
 import io.github.novatv.play.sports.Broadcast
 import io.github.novatv.play.sports.Broadcasters
 import io.github.novatv.play.sports.Follow
+import io.github.novatv.play.sports.icon
 import io.github.novatv.play.sports.Side
 import io.github.novatv.play.sports.Sport
 import io.github.novatv.play.sports.SportEvent
@@ -68,50 +70,120 @@ import io.github.novatv.play.ui.teamKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private enum class When(val label: String) { LIVE("Live now"), TODAY("Today"), UPCOMING("Upcoming"), MINE("My teams"), TABLES("Tables") }
+private enum class When(val label: String) { LIVE("Live"), UPCOMING("Upcoming"), TABLES("Tables") }
 
-/** Sports, in the iPhone's style: when (live, today...), which sport, then the matches as cards. */
+/**
+ * Sports, in the iPhone's style. Live (on now, or starting within the hour) and Upcoming (later), each in sections: a
+ * sport (its icon, title between lines, folded away with a tap) and under it each competition (its logo, a handshake
+ * for friendlies) with its matches. What is listed: the competitions followed (narrowed to their picked teams), with
+ * the games the TV guide names only by competition among them; with nothing followed, every match.
+ */
 @Composable
 fun PhoneSports(nav: Nav) {
     val sports by App.repo.sports.collectAsState()
     val st by App.repo.state.collectAsState()
     var whenTab by remember { mutableStateOf(When.LIVE) }
     var sport by remember { mutableStateOf<Sport?>(null) }
+    var collapsed by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(Unit) { while (true) { App.repo.refreshSports(55_000L); delay(60_000L) } }
     // The channel index is built ahead, so a match's channels open at once.
     LaunchedEffect(st.epgVersion, st.lib.channels.size) { withContext(IO) { App.repo.matcher() } }
     val t = now(60_000L)
-    val dayEnd = io.github.novatv.play.platform.Time.dayStart(t) + 24 * 3600_000L - 60_000L
-    val list = remember(sports, whenTab, sport, t) {
-        sports.events.asSequence().filter { Follow.shows(it) }.filter { sport == null || it.league.sport == sport }.filter { e ->
-            when (whenTab) {
-                When.LIVE -> e.state == State.LIVE
-                When.TODAY -> e.start in (t - 12 * 3600_000L)..dayEnd && (e.state != State.POST || e.start > t - 6 * 3600_000L)
-                When.UPCOMING -> e.state == State.PRE && e.start > t
-                When.MINE -> e.teams.any { isFavTeam(e, it) } && e.start > t - 24 * 3600_000L
-                When.TABLES -> false
-            }
-        }.sortedWith(compareBy({ it.state != State.LIVE }, { it.start })).toList()
+    val store = App.store
+    val pool = remember(sports, store.sportsLeagues, store.sportsComps, store.sportsLeagueTeams) {
+        val all = sports.events
+        if (Follow.followedCompetitions().isEmpty()) all.filter { Follow.shows(it) } else all.filter { Follow.followed(it) }
     }
-    val present = remember(sports) { sports.events.filter { Follow.shows(it) }.map { it.league.sport }.toSet() }
+    val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), sports.events.size, store.sportsLeagues, t / 600_000L) {
+        value = withContext(IO) {
+            try {
+                val m = App.repo.matcher()
+                Follow.competitions().flatMap { l -> m.unidentified(l, sports.events, t - 3 * 3600_000L, t + 7 * 86_400_000L) }
+            } catch (x: Exception) { emptyList() }
+        }
+    }
+    val all = remember(pool, unidentified, t) { pool + unidentified.map { it.asEvent(t) } }
+    val list = remember(all, whenTab, sport, t) {
+        val l = if (whenTab == When.LIVE) io.github.novatv.play.sports.MySports.live(all, t) else io.github.novatv.play.sports.MySports.upcoming(all, t)
+        l.filter { sport == null || it.league.sport == sport }
+    }
+    val groups = remember(list) { io.github.novatv.play.sports.MySports.grouped(list) }
+    val present = remember(all) { all.map { it.league.sport }.toSet() }
+    /** OK on a match: its page; a game the guide only names by competition has none, so its channel plays. */
+    fun open(e: SportEvent) {
+        if (e.id.startsWith("guide:")) unidentified.firstOrNull { "guide:${it.league.id}:${it.start}" == e.id }?.channels?.firstOrNull()?.let { playChannel(listOf(it), 0) }
+        else nav.push(Route.Match(e))
+    }
 
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
         TopBar(nav) { RoundIcon(Icons.Rounded.Tune, onClick = { nav.push(Route.Leagues) }) }
-        Chips(When.entries.map { it.name to it.label }, whenTab.name, { whenTab = When.valueOf(it) })
+        Chips(When.entries.map { w -> w.name to w.label + when (w) {
+            When.LIVE -> " · ${io.github.novatv.play.sports.MySports.live(all, t).size}"
+            When.UPCOMING -> " · ${io.github.novatv.play.sports.MySports.upcoming(all, t).size}"
+            else -> ""
+        } }, whenTab.name, { whenTab = When.valueOf(it) })
         Spacer(Modifier.height(8.dp))
-        Chips(listOf("ALL" to "All sports") + Sport.entries.filter { it in present }.map { it.name to it.label }, sport?.name ?: "ALL",
+        Chips(listOf("ALL" to "All sports") + Sport.entries.filter { it in present }.map { it.name to "${it.icon} ${it.label}" }, sport?.name ?: "ALL",
             { sport = if (it == "ALL") null else Sport.valueOf(it) })
         when (whenTab) {
             When.TABLES -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView() }
             else -> when {
                 sports.loading && sports.events.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
-                list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, when (whenTab) { When.LIVE -> "Nothing live right now"; When.MINE -> "No matches for your teams"; else -> "No matches" },
-                    when (whenTab) { When.MINE -> "Open a match and star a team to follow it."; When.LIVE -> "Try Today or Upcoming."; else -> null })
-                else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(list, key = { it.id }) { e -> MatchCard(e) { nav.push(Route.Match(e)) } }
+                list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, if (whenTab == When.LIVE) "Nothing live or about to start" else "Nothing coming up",
+                    if (Follow.followedCompetitions().isEmpty()) "Follow competitions (top right) to list only theirs." else null)
+                else -> LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    for (sg in groups) {
+                        val folded = sg.sport.name in collapsed
+                        item(key = "s:${sg.sport.name}") {
+                            SportHeader(sg, folded) { collapsed = if (folded) collapsed - sg.sport.name else collapsed + sg.sport.name }
+                        }
+                        if (!folded) for (cg in sg.comps) {
+                            item(key = "c:${sg.sport.name}:${cg.name}") { CompHeader(cg) }
+                            items(cg.games, key = { it.id }) { e -> MatchCard(e) { open(e) } }
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+/** A sport's heading: its icon and name, with its match count, centred between fine lines; a tap folds it away. */
+@Composable
+private fun SportHeader(sg: io.github.novatv.play.sports.MySports.SportGroup, folded: Boolean, onToggle: () -> Unit) {
+    val blue = Color(0xFF4DA3FF)
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp).tap(onToggle), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f).height(1.dp).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Transparent, blue.copy(alpha = 0.7f)))))
+        Row(Modifier.padding(horizontal = 10.dp).clip(RoundedCornerShape(50)).background(Color(0xFF0E1015))
+            .border(1.dp, blue.copy(alpha = 0.55f), RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(sg.sport.icon, style = P.small.copy(fontSize = 16.sp))
+            Spacer(Modifier.width(6.dp))
+            Text(sg.sport.label.uppercase(), style = P.head.copy(fontSize = 14.sp, letterSpacing = 1.4.sp))
+            Spacer(Modifier.width(8.dp))
+            Text("${sg.count}", style = P.small.copy(color = blue))
+            Spacer(Modifier.width(6.dp))
+            Text(if (folded) "▾" else "▴", style = P.small.copy(color = blue))
+        }
+        Box(Modifier.weight(1f).height(1.dp).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(blue.copy(alpha = 0.7f), Color.Transparent))))
+    }
+}
+
+/** A competition's heading: its logo (a handshake for friendlies, the sport's icon with no logo), name and count. */
+@Composable
+private fun CompHeader(cg: io.github.novatv.play.sports.MySports.CompGroup) {
+    val logo = if (cg.friendly) null else io.github.novatv.play.sports.Espn.leagueLogo(cg.league.id)
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(26.dp).clip(CircleShape).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
+            when {
+                cg.friendly -> Text("\uD83E\uDD1D", style = P.small.copy(fontSize = 15.sp))
+                logo != null -> AsyncImage(logo, cg.name, Modifier.size(20.dp), contentScale = ContentScale.Fit)
+                else -> Text(cg.league.sport.icon, style = P.small.copy(fontSize = 14.sp))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(cg.name, style = P.head.copy(fontSize = 16.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text("${cg.games.size}", style = P.small)
     }
 }
 
@@ -120,7 +192,7 @@ fun PhoneSports(nav: Nav) {
 private fun MatchCard(e: SportEvent, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(22.dp), strength = 0.75f).tap(onClick).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(listOfNotNull(e.league.name, e.subtitle?.takeIf { it != e.league.name }).joinToString(" · ").uppercase(), style = P.caps,
+            Text((e.subtitle ?: e.league.name).uppercase(), style = P.caps,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (e.teams.any { isFavTeam(e, it) }) { Icon(Icons.Rounded.Star, size = 16.dp, tint = P.gold); Spacer(Modifier.width(6.dp)) }
             StateTag(e)
@@ -143,7 +215,19 @@ private fun StateTag(e: SportEvent) {
         State.LIVE -> Text(if (e.detail.isBlank() || e.detail.equals("live", true)) "LIVE" else "LIVE · ${e.detail}", style = P.small.copy(color = Color.White, fontSize = 12.sp),
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFFF3B4E)).padding(horizontal = 8.dp, vertical = 3.dp))
         State.POST -> Text(e.detail.ifBlank { "Final" }, style = P.small)
-        State.PRE -> Text("${dayLabel(e.start)} ${clock(e.start)}", style = P.small.copy(color = P.blue))
+        // TOMORROW in yellow (as LIVE is red), otherwise the date; times from tomorrow on as AM/PM.
+        State.PRE -> {
+            val t = now(60_000L)
+            val tag = io.github.novatv.play.sports.MySports.tag(e, t)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (tag == io.github.novatv.play.sports.MySports.Tag.TOMORROW)
+                    Text("TOMORROW", style = P.small.copy(color = Color(0xFF14171E), fontSize = 12.sp),
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFFFD31A)).padding(horizontal = 8.dp, vertical = 3.dp))
+                else Text(io.github.novatv.play.sports.MySports.tagText(e, t), style = P.small.copy(color = P.blue))
+                Spacer(Modifier.width(6.dp))
+                Text(io.github.novatv.play.sports.MySports.timeText(e, t), style = P.small.copy(color = P.blue))
+            }
+        }
     }
 }
 
