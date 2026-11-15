@@ -76,13 +76,15 @@ fun SportsPickerScreen(nav: Nav) {
     val store = App.store
     var version by remember { mutableIntStateOf(0) }
     var selectedSport by remember { mutableStateOf(Sport.AMERICAN_FOOTBALL) }
-    val leagues = remember(selectedSport) { SportsCatalog.leaguesForSport(selectedSport) }
+    // Cricket's competitions come from the app's own list (ESPN has none); the rest from ESPN's catalogue.
+    fun leaguesOf(sp: Sport) = if (sp == Sport.CRICKET) io.github.novatv.play.sports.Follow.cricketCompetitions() else SportsCatalog.leaguesForSport(sp)
+    val leagues = remember(selectedSport) { leaguesOf(selectedSport) }
     var selectedLeague by remember(selectedSport) { mutableStateOf(leagues.firstOrNull()) }
     var searchQuery by remember { mutableStateOf("") }
 
     val rawTeams by produceState<List<TeamInfo>>(emptyList(), selectedLeague, version) {
         val l = selectedLeague
-        value = if (l != null) SportsCatalog.teams(l) else emptyList()
+        value = if (l != null) io.github.novatv.play.sports.Follow.cricketTeams(l) ?: SportsCatalog.teams(l) else emptyList()
     }
 
     val displayTeams = remember(rawTeams, searchQuery) {
@@ -95,11 +97,12 @@ fun SportsPickerScreen(nav: Nav) {
     }
 
     val followedTeams = remember(version) { store.sportsLeagueTeams }
-    val followedLeagues = remember(version) { store.sportsLeagues }
-    /** Stops following [leagueId] and the teams picked inside it. */
-    fun unfollowLeague(leagueId: String) {
+    val followedComps = remember(version) { io.github.novatv.play.sports.Follow.followedCompetitions() }
+    /** Stops following [l] and the teams picked inside it. */
+    fun unfollowLeague(l: League) {
+        val leagueId = l.id
         val picks = store.sportsLeagueTeams.filter { it.startsWith("$leagueId|") }.toSet()
-        store.sportsLeagues = store.sportsLeagues - leagueId
+        io.github.novatv.play.sports.Follow.follow(l, false)
         store.sportsLeagueTeams = store.sportsLeagueTeams - picks
         val names = picks.map { it.substringAfterLast('|') }.toSet()
         store.favouriteTeams = store.favouriteTeams.filterNot { f -> f.substringAfterLast('|') in names }.toSet()
@@ -135,7 +138,7 @@ fun SportsPickerScreen(nav: Nav) {
             Spacer(Modifier.height(14.dp))
 
             // ---- Following Bar ----
-            val totalFollows = followedLeagues.size
+            val totalFollows = followedComps.size
             Column(Modifier.fillMaxWidth()) {
                 Row(
                     Modifier.fillMaxWidth()
@@ -152,11 +155,10 @@ fun SportsPickerScreen(nav: Nav) {
                     } else {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             // Competitions only, A to Z; a competition narrowed to some teams says how many.
-                            items(followedLeagues.toList().sortedBy { (Catalog.league(it)?.name ?: it).lowercase() }, key = { "l_$it" }) { lId ->
-                                val l = Catalog.league(lId)
-                                val n = followedTeams.count { it.startsWith("$lId|") }
-                                FollowedChip((l?.name ?: lId) + if (n > 0) " · $n ${if (n == 1) "team" else "teams"}" else "") {
-                                    unfollowLeague(lId)
+                            items(followedComps, key = { "l_${it.id}" }) { l ->
+                                val n = followedTeams.count { it.startsWith("${l.id}|") }
+                                FollowedChip(l.name + if (n > 0) " · $n ${if (n == 1) "team" else "teams"}" else "") {
+                                    unfollowLeague(l)
                                     version++
                                 }
                             }
@@ -178,14 +180,14 @@ fun SportsPickerScreen(nav: Nav) {
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(Sport.entries.toList(), key = { it.name }) { sp ->
-                        val count = followedLeagues.count { Catalog.league(it)?.sport == sp }
+                        val count = followedComps.count { it.sport == sp }
                         SportSidebarItem(
                             sport = sp,
                             selected = sp == selectedSport && searchQuery.isBlank(),
                             count = count,
                             onClick = {
                                 selectedSport = sp
-                                selectedLeague = SportsCatalog.leaguesForSport(sp).firstOrNull()
+                                selectedLeague = leaguesOf(sp).firstOrNull()
                                 searchQuery = ""
                             }
                         )
@@ -201,7 +203,7 @@ fun SportsPickerScreen(nav: Nav) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             items(leagues, key = { it.id }) { l ->
                                 val sel = l.id == selectedLeague?.id
-                                val isPinned = l.id in followedLeagues
+                                val isPinned = remember(version, l.id) { io.github.novatv.play.sports.Follow.isFollowed(l) }
                                 Pill(
                                     text = l.name + if (isPinned) " ★" else "",
                                     selected = sel,
@@ -213,13 +215,13 @@ fun SportsPickerScreen(nav: Nav) {
                     }
 
                     selectedLeague?.let { league ->
-                        val isFollowed = league.id in followedLeagues
+                        val isFollowed = remember(version, league.id) { io.github.novatv.play.sports.Follow.isFollowed(league) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Pill(
                                 text = if (isFollowed) "★ Following ${league.name}" else "☆ Follow ${league.name}",
                                 selected = isFollowed,
                                 onClick = {
-                                    if (isFollowed) unfollowLeague(league.id) else store.sportsLeagues = store.sportsLeagues + league.id
+                                    if (isFollowed) unfollowLeague(league) else io.github.novatv.play.sports.Follow.follow(league, true)
                                     version++
                                 }
                             )
@@ -230,7 +232,8 @@ fun SportsPickerScreen(nav: Nav) {
                     // Alphabetical teams grid
                     if (displayTeams.isEmpty()) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Loading teams or none found...", style = T.body.copy(color = SportsLook.Dim))
+                            Text(if (selectedLeague?.id?.startsWith("cricket:leagues:") == true) "Follow it to list every match of this country's own competitions."
+                                else "Loading teams or none found...", style = T.body.copy(color = SportsLook.Dim))
                         }
                     } else {
                         val grouped = remember(displayTeams) {
@@ -272,7 +275,7 @@ fun SportsPickerScreen(nav: Nav) {
                                                     store.favouriteTeams = store.favouriteTeams.filterNot { it.endsWith("|${t.name}") }.toSet()
                                             } else {
                                                 store.sportsLeagueTeams = store.sportsLeagueTeams + pickKey
-                                                store.sportsLeagues = store.sportsLeagues + lid
+                                                selectedLeague?.let { io.github.novatv.play.sports.Follow.follow(it, true) }
                                                 store.favouriteTeams = store.favouriteTeams + teamFavKey
                                             }
                                             version++

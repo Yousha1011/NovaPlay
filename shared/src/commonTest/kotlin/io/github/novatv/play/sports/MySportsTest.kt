@@ -72,4 +72,30 @@ class MySportsTest {
         assertEquals(State.PRE, g.state)
         assertEquals(State.LIVE, UnidentifiedGame(ucl, now - hour, now + hour, "Champions League", emptyList()).asEvent(now).state)
     }
+
+    @Test fun liveTabIsOnNowAndWithinTheHour() {
+        val events = listOf(
+            game("on", pl, now - hour, "A", "B", State.LIVE),
+            game("soon", pl, now + 50 * 60_000L, "C", "D"),
+            game("later", pl, now + 2 * hour, "E", "F"),
+            game("done", pl, now - 3 * hour, "G", "H", State.POST),
+        )
+        assertEquals(listOf("on", "soon"), MySports.live(events, now).map { it.id })
+        assertEquals(listOf("later"), MySports.upcoming(events, now).map { it.id })
+    }
+
+    @Test fun sortedByTimeThenSportThenCompetition() {
+        val nba = Catalog.league("nba")!!
+        val cricket = Catalog.league("cricket")!!
+        val t = now + 3 * hour
+        val events = listOf(
+            game("nba", nba, t, "A", "B"),
+            game("pl", pl, t, "C", "D"),
+            game("cricket", cricket, t, "E", "F"),
+            game("ucl", ucl, t, "G", "H"),
+            game("early", nba, t - 30 * 60_000L, "I", "J"),
+        )
+        // Earliest first; at the same time Football (Champions League, then Premier League), Cricket, Basketball.
+        assertEquals(listOf("early", "ucl", "pl", "cricket", "nba"), MySports.upcoming(events, now).map { it.id })
+    }
 }

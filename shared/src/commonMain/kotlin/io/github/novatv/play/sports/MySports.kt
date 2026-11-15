@@ -33,6 +33,23 @@ object MySports {
         if (games.isEmpty()) null else CompetitionSection(l, logo(l), games)
     }
 
+    /** A match counts as Live from an hour before kick-off. */
+    const val SOON_MS = 3_600_000L
+
+    /**
+     * The order of every list: kick-off first, then the sport in the Follow screen's order (Football, Cricket,
+     * Basketball…), then the competition's name.
+     */
+    val order: Comparator<SportEvent> = compareBy<SportEvent>({ it.start }, { it.league.sport.ordinal }, { (it.subtitle ?: it.league.name).lowercase() })
+
+    /** The Live tab: matches on now, and those starting within the hour. */
+    fun live(events: List<SportEvent>, now: Long): List<SportEvent> =
+        events.filter { it.state == State.LIVE || (it.state == State.PRE && it.start - now <= SOON_MS) }.distinctBy { it.id }.sortedWith(order)
+
+    /** The Upcoming tab: every later match, up to [AHEAD_MS] ahead. */
+    fun upcoming(events: List<SportEvent>, now: Long): List<SportEvent> =
+        events.filter { it.state == State.PRE && it.start - now > SOON_MS && it.start < now + AHEAD_MS }.distinctBy { it.id }.sortedWith(order)
+
     /** The tag on a match: LIVE (red), TOMORROW (yellow), else its date. */
     enum class Tag { LIVE, TOMORROW, DATE, FINAL }
 

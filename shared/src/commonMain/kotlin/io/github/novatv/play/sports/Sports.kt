@@ -124,12 +124,51 @@ object Follow {
         if (!hasPicks(s)) return true
         if (s == Sport.CRICKET && e.teams.any { side -> Cricket.nation(side.name)?.let { Cricket.nationKey(it) in store.sportsComps } == true }) return true
         if (s == Sport.CRICKET) Cricket.tournament(e.subtitle, e.teams.map { it.name })?.let { tn ->
-            if (Cricket.ALL_INTERNATIONAL in store.sportsComps || Cricket.tournamentKey(tn.name) in store.sportsComps) return true
+            // National sides picked inside the tournament narrow it to their matches.
+            val picks = leagueTeams("cricket:intl:${tn.name}")
+            val narrowed = picks.isEmpty() || e.teams.any { side -> picks.any { (_, name) -> Cricket.nation(side.name) == name || side.name == name } }
+            if ((Cricket.ALL_INTERNATIONAL in store.sportsComps || Cricket.tournamentKey(tn.name) in store.sportsComps) && narrowed) return true
         }
         if (s == Sport.CRICKET) e.subtitle?.let { c -> Cricket.leagueHome(c, e.teams.map { it.name }) }?.let { home ->
             if (Cricket.leaguesKey(home) in store.sportsComps) return true
         }
         return (e.league.id in store.sportsLeagues && inCompetition(e, e.league.id)) || compKey(e) in store.sportsComps
+    }
+
+    /** [e] is in something followed (unlike [shows], a sport with nothing picked doesn't count as all of it). */
+    fun followed(e: SportEvent): Boolean = hasPicks(e.league.sport) && shows(e)
+
+    /**
+     * Cricket's competitions as the Follow screen lists them: the international tournaments, then each country's own
+     * leagues. ESPN lists no cricket competitions or teams of its own.
+     */
+    fun cricketCompetitions(): List<League> =
+        Cricket.tournaments.map { it.name }.distinct().map { League("cricket:intl:$it", Sport.CRICKET, it, country = "International") } +
+            Cricket.major.map { League("cricket:leagues:$it", Sport.CRICKET, "$it domestic leagues", country = it) }
+
+    /** What following [l] stores: a competition key for cricket's, else the catalogue id. */
+    fun followKey(l: League): String = when {
+        l.id.startsWith("cricket:intl:") -> Cricket.tournamentKey(l.id.removePrefix("cricket:intl:"))
+        l.id.startsWith("cricket:leagues:") -> Cricket.leaguesKey(l.id.removePrefix("cricket:leagues:"))
+        else -> l.id
+    }
+
+    fun isFollowed(l: League): Boolean = if (l.id.startsWith("cricket:")) followKey(l) in store.sportsComps else l.id in store.sportsLeagues
+
+    fun follow(l: League, on: Boolean) {
+        if (l.id.startsWith("cricket:")) store.sportsComps = if (on) store.sportsComps + followKey(l) else store.sportsComps - followKey(l)
+        else store.sportsLeagues = if (on) store.sportsLeagues + l.id else store.sportsLeagues - l.id
+    }
+
+    /** Every competition followed (catalogue and cricket), A to Z. */
+    fun followedCompetitions(): List<League> =
+        (store.sportsLeagues.mapNotNull { Catalog.league(it) } + cricketCompetitions().filter { isFollowed(it) }).sortedBy { it.name.lowercase() }
+
+    /** The teams the Follow screen offers inside [l]: cricket's national sides for its international tournaments. */
+    fun cricketTeams(l: League): List<TeamInfo>? = when {
+        l.id.startsWith("cricket:intl:") -> Cricket.nationsInOrder().map { n -> TeamInfo(l.id, n, n, n, n.take(3).uppercase(), null, null, null, null, null) }
+        l.id.startsWith("cricket:leagues:") -> emptyList()
+        else -> null
     }
 
     /** The feeds to load: every competition of the sports that are on. */
@@ -150,6 +189,8 @@ object Cricket {
         "Czech Republic", "Hungary", "Romania", "Bulgaria", "Serbia", "Croatia", "Estonia", "Cyprus", "Greece", "Turkey", "Israel",
         "Switzerland", "Luxembourg", "Peru", "Chile", "Panama", "Bahamas", "Belize", "Maldives", "Bhutan", "Myanmar", "Cambodia", "Iran")
     private val nations = (major + others).toSet()
+    /** Full members first, then the rest A to Z. */
+    fun nationsInOrder(): List<String> = major + others.sorted()
     private val tails = listOf(" Women", " A", " U19", " Under-19s", " Under 19s", " XI", " Emerging", " Development", " Legends", " Masters")
 
     /** The country a national side plays for, or null for a club or franchise. */

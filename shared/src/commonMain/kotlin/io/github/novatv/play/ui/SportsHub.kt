@@ -209,24 +209,18 @@ private fun MySportsView(
     val t = now(60_000L)
     val store = App.store
     val shown = remember(events) { events.filter { Follow.shows(it) } }
-    // Live & Upcoming: a section per followed competition, A to Z, each with its matches soonest first (only its picked
-    // teams' matches when some are picked). Competitions followed by name (cricket series, tournaments) too.
-    val sections = remember(events, t) {
-        val leagues = io.github.novatv.play.sports.MySports.sections(events, Follow.competitions(), Follow::leagueTeams,
-            { l -> io.github.novatv.play.sports.Espn.leagueLogo(l.id) }, t)
-        val named = shown.filter { Follow.compKey(it) in store.sportsComps && (it.state == State.LIVE || (it.state == State.PRE && it.start < t + io.github.novatv.play.sports.MySports.AHEAD_MS)) }
-            .groupBy { Follow.compKey(it) }.map { (k, list) ->
-                val first = list.first()
-                io.github.novatv.play.sports.CompetitionSection(io.github.novatv.play.sports.League("comp:$k", first.league.sport, first.subtitle ?: first.league.name),
-                    null, list.sortedBy { it.start })
-            }
-        (leagues + named).sortedBy { it.league.name.lowercase() }
+    // What is listed: the matches of the followed competitions (narrowed to their picked teams); with nothing followed,
+    // every match of the sports that are on.
+    val pool = remember(events, store.sportsLeagues, store.sportsComps, store.sportsLeagueTeams) {
+        if (Follow.followedCompetitions().isEmpty()) shown else events.filter { Follow.followed(it) }
     }
-    // Nothing followed: today's games, as before.
-    val upcoming = remember(shown, sections, t) {
-        if (sections.isNotEmpty()) sections.flatMap { it.games }.distinctBy { it.id }.sortedBy { it.start }
-        else shown.filter { e -> e.state == State.LIVE || (e.state == State.PRE && e.start < t + 86_400_000L) }.sortedBy { it.start }
-    }
+    // Two tabs: Live (on now, or starting within the hour) and Upcoming (the rest), each by kick-off, then sport, then
+    // competition.
+    val liveList = remember(pool, t) { io.github.novatv.play.sports.MySports.live(pool, t) }
+    val upList = remember(pool, t) { io.github.novatv.play.sports.MySports.upcoming(pool, t) }
+    var tab by remember { mutableIntStateOf(-1) }
+    val shownTab = if (tab >= 0) tab else if (liveList.isEmpty() && upList.isNotEmpty()) 1 else 0
+    val upcoming = remember(liveList, upList) { liveList + upList }
     // Games the guide lists by the competition's name alone, for the followed competitions.
     val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), events.size, store.sportsLeagues, t / 600_000L) {
         value = withContext(IO) {
@@ -249,8 +243,11 @@ private fun MySportsView(
     }
 
     Column(Modifier.fillMaxSize()) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {
+        // Match cards are 280 wide with 12 between: as many to a row as fit.
+        val cols = maxOf(1, ((maxWidth + 12.dp) / 292.dp).toInt())
         LazyColumn(
-            Modifier.weight(1f).rememberFocusInList(),
+            Modifier.fillMaxSize().rememberFocusInList(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
@@ -292,24 +289,32 @@ private fun MySportsView(
                 }
             }
 
-            // ● Live & Upcoming: a section per followed competition, with its title and logo.
-            item(key = "live_upcoming") {
+            // Two tabs under the scorecards: Live and Upcoming.
+            item(key = "tabs") {
                 Column(Modifier.fillMaxWidth()) {
-                    Text("● Live & Upcoming", style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp))
-                    Text(if (sections.isEmpty()) "Follow a competition (✎ Follow Teams & Leagues) to list its matches here. Today's games meanwhile."
-                        else "Your competitions, A to Z · each soonest first", style = T.tiny.copy(color = SportsLook.Dim))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Pill("● Live · ${liveList.size}", onClick = { tab = 0 }, selected = shownTab == 0)
+                        Pill("Upcoming · ${upList.size}", onClick = { tab = 1 }, selected = shownTab == 1)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text((if (shownTab == 0) "On now, and starting within the hour" else "Later, up to two weeks ahead") +
+                        " · by kick-off, then sport, then competition" +
+                        if (Follow.followedCompetitions().isEmpty()) " · follow competitions (✎ Follow Teams & Leagues) to list only theirs" else "",
+                        style = T.tiny.copy(color = SportsLook.Dim))
                 }
             }
-            if (sections.isEmpty()) item(key = "today") {
-                GameRowHeader(title = "Today", subtitle = "${upcoming.size} ${if (upcoming.size == 1) "game" else "games"}", events = upcoming,
-                    onOpen = onOpen, onHoldWatch = onWatchInWindow)
-            }
-            sections.forEach { sec ->
-                item(key = "comp_${sec.league.id}") {
-                    val n = sec.games.size
-                    val live = sec.games.count { it.state == State.LIVE }
-                    GameRowHeader(title = sec.league.name, subtitle = listOfNotNull(if (live > 0) "$live live" else null, "$n ${if (n == 1) "game" else "games"}").joinToString(" · "),
-                        events = sec.games, onOpen = onOpen, onHoldWatch = onWatchInWindow, logo = sec.logo)
+            val list = if (shownTab == 0) liveList else upList
+            if (list.isEmpty()) item(key = "empty_$shownTab") {
+                Text(if (shownTab == 0) "Nothing live or about to start." else "Nothing coming up.", style = T.small.copy(color = SportsLook.Faint))
+            } else list.chunked(cols).forEachIndexed { i, chunk ->
+                item(key = "g_${shownTab}_${chunk.first().id}") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        chunk.forEach { ev ->
+                            MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
+                                App.repo.matcher().airings(ev).firstOrNull()?.channel?.let(onWatchInWindow)
+                            })
+                        }
+                    }
                 }
             }
 
@@ -325,6 +330,7 @@ private fun MySportsView(
                     onOpen = { ev -> unidentified.firstOrNull { "guide:${it.league.id}:${it.start}" == ev.id }?.channels?.firstOrNull()?.let(onWatchInWindow) },
                     onHoldWatch = onWatchInWindow)
             }
+        }
         }
 
         // Bottom hint line
@@ -526,7 +532,8 @@ internal fun MatchCardItem(
         Column(Modifier.fillMaxSize()) {
             // League and Status
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(event.league.name, style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1)
+                // The competition: a cricket series or tennis tournament by its own name.
+                Text(event.subtitle ?: event.league.name, style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // LIVE in red, TOMORROW in yellow, otherwise the date.
                 val nowT = now(60_000L)
                 val tag = io.github.novatv.play.sports.MySports.tag(event, nowT)

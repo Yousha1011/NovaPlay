@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.novatv.play.App
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import io.github.novatv.play.data.Channel
 import io.github.novatv.play.platform.IO
 import io.github.novatv.play.platform.Time
@@ -88,7 +89,13 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
 
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-            Text("‹ Sports    " + listOfNotNull(e.subtitle ?: e.league.name, e.venue).joinToString(" · "),
+            // Windows has no remote Back: a button. The TV keeps the line (its remote's Back closes the page).
+            if (App.device == io.github.novatv.play.platform.Device.DESKTOP) androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Pill("Back", onClick = onClose, icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.ArrowBack)
+                Spacer(Modifier.width(14.dp))
+                Text(listOfNotNull(e.subtitle ?: e.league.name, e.venue).joinToString(" · "),
+                    style = T.small.copy(color = SportsLook.Dim), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else Text("‹ Sports    " + listOfNotNull(e.subtitle ?: e.league.name, e.venue).joinToString(" · "),
                 style = T.small.copy(color = SportsLook.Dim), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(10.dp))
             Scoreboard(e, homePage, awayPage, rowOf(home), rowOf(away), first) { card = it }
