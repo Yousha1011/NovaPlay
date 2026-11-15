@@ -86,7 +86,7 @@ fun GuideScreen(nav: Nav) {
             val now0 = nowMs()
             val progs = try { App.repo.epg.find(words, now0, now0 + 4 * 86_400_000L, limit = 400) } catch (x: Exception) { emptyList() }
             val firstAt = HashMap<String, Long>()
-            for (p in progs) firstAt.merge(p.channelKey, p.start) { a, b -> minOf(a, b) }
+            for (p in progs) { val was = firstAt[p.channelKey]; if (was == null || p.start < was) firstAt[p.channelKey] = p.start }
             val byName = all.filter { c -> words.all { c.name.contains(it, ignoreCase = true) } }
             val byProg = if (firstAt.isEmpty()) emptyList() else all.mapNotNull { c -> App.repo.epg.key(c)?.let { k -> firstAt[k]?.let { c to it } } }
                 .sortedBy { it.second }.map { it.first }
