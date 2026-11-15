@@ -220,12 +220,16 @@ private fun MySportsView(
     }
     // Games the guide lists by the competition's name alone, for the followed competitions: listed under their own
     // competition, in Live or Upcoming by their time, as "? Team 1 v ? Team 2".
-    val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), events.size, store.sportsLeagues, t / 600_000L) {
+    // Checked again as soon as the guide has (re)loaded, and every 10 minutes. Not after each part while it loads:
+    // each check searches the guide for every followed competition, which held up Sports' channel lookups on a TV.
+    val guideState = App.repo.state.collectAsState().value
+    val guideVersion = if (guideState.epgStatus == null) guideState.epgVersion else -1
+    val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), events.size, store.sportsLeagues, store.sportsComps, guideVersion, t / 600_000L) {
         value = withContext(IO) {
             try {
                 val m = App.repo.matcher()
-                Follow.competitions().flatMap { l -> m.unidentified(l, events, t - 3 * 3600_000L, t + 7 * 86_400_000L) }.sortedBy { it.start }
-            } catch (x: Exception) { emptyList() }
+                m.unidentifiedAll(Follow.competitions(), events, t - 3 * 3600_000L, t + 7 * 86_400_000L)
+            } catch (x: Exception) { io.github.novatv.play.platform.logW("unrecognised games: search failed", x); emptyList() }
         }
     }
     val unknownEvents = remember(unidentified, t) { unidentified.map { it.asEvent(t) } }
@@ -234,6 +238,7 @@ private fun MySportsView(
     // Live and Upcoming list identified matches only; the guide's unnamed games have their own tab, Uncategorized.
     val liveList = remember(pool, t) { io.github.novatv.play.sports.MySports.live(pool, t) }
     val upList = remember(pool, t) { io.github.novatv.play.sports.MySports.upcoming(pool, t) }
+    var sportsQuery by remember { mutableStateOf("") }
     val uncList = remember(unknownEvents, t) { io.github.novatv.play.sports.MySports.uncategorized(unknownEvents, t) }
     var tab by remember { mutableIntStateOf(-1) }
     /** Sports folded away (both tabs), by name. */
@@ -325,6 +330,7 @@ private fun MySportsView(
             item(key = "tabs") {
                 Column(Modifier.fillMaxWidth()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        InputField(sportsQuery, "Search team or competition", { sportsQuery = it }, Modifier.width(420.dp).height(44.dp))
                         Pill("● Live · ${liveList.size}", onClick = { tab = 0 }, selected = shownTab == 0)
                         Pill("Upcoming · ${upList.size}", onClick = { tab = 1 }, selected = shownTab == 1)
                         Pill("Uncategorized · ${uncList.size}", onClick = { tab = 2 }, selected = shownTab == 2)
@@ -337,8 +343,10 @@ private fun MySportsView(
                         style = T.tiny.copy(color = SportsLook.Dim))
                 }
             }
-            val list = when (shownTab) { 0 -> liveList; 1 -> upList; else -> uncList }
-            if (list.isEmpty()) item(key = "empty_$shownTab") {
+            val list = when (shownTab) { 0 -> liveList; 1 -> upList; else -> uncList }.filter { matchesSearch(it, sportsQuery) }
+            if (list.isEmpty() && sportsQuery.isNotBlank()) item(key = "nomatch_$shownTab") {
+                Text("No competition or team matches \"${sportsQuery.trim()}\" here.", style = T.small.copy(color = SportsLook.Faint))
+            } else if (list.isEmpty()) item(key = "empty_$shownTab") {
                 Text(when (shownTab) { 0 -> "Nothing live or about to start."; 1 -> "Nothing coming up."
                     else -> if (Follow.competitions().isEmpty()) "Follow a competition to look for its unnamed games in your TV guide." else "None: your TV guide names every game of your competitions." },
                     style = T.small.copy(color = SportsLook.Faint))
@@ -1033,4 +1041,14 @@ internal fun leadChannel(ev: SportEvent, then: (io.github.novatv.play.data.Chann
         val ch = withContext(IO) { try { App.repo.matcher().airings(ev).firstOrNull()?.channel } catch (x: Exception) { null } }
         if (ch != null) then(ch)
     }
+}
+
+
+/** A match for the Sports search: every word in its competition (or tour), sport or a side's name; blank matches all. */
+internal fun matchesSearch(e: SportEvent, query: String): Boolean {
+    val words = query.trim().split(' ').filter { it.isNotBlank() }
+    if (words.isEmpty()) return true
+    val text = listOfNotNull(e.league.name, e.subtitle, e.title, e.league.sport.label, e.home?.name, e.home?.short, e.away?.name, e.away?.short)
+        .joinToString(" ")
+    return words.all { text.contains(it, ignoreCase = true) }
 }

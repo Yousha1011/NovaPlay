@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -70,11 +71,18 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     val homePage by produceState<TeamPage?>(null, e.id) { value = home?.let { withContext(IO) { Teams.info(e.league, it.id) } } }
     val awayPage by produceState<TeamPage?>(null, e.id) { value = away?.let { withContext(IO) { Teams.info(e.league, it.id) } } }
     val table by produceState<Standings?>(null, e.league.id) { value = withContext(IO) { runCatching { StandingsRepository.forLeague(e.league) }.getOrNull() } }
-    val airings by produceState<List<Airing>?>(null, e.id) {
-        value = withContext(IO) {
-            val m = App.repo.matcher()
-            (m.airings(e, limit = 40) + m.airings(e, Broadcasters.forEvent(e), limit = 40)).distinctBy { it.channel.id }
+    // Your channels from the guide and channel names first (at once, offline), then the broadcasters found online
+    // added; looked up again when the guide (re)loads, so a game opened while it was loading still finds them.
+    val guideVersion = App.repo.state.collectAsState().value.epgVersion
+    val airings by produceState<List<Airing>?>(null, e.id, guideVersion) {
+        val local = withContext(IO) { try { App.repo.matcher().airings(e, limit = 40) } catch (x: Exception) { emptyList() } }
+        value = local
+        val online = withContext(IO) {
+            try {
+                kotlinx.coroutines.withTimeoutOrNull(15_000L) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 40) }.orEmpty()
+            } catch (x: Exception) { emptyList() }
         }
+        if (online.isNotEmpty()) value = (local + online).distinctBy { it.channel.id }
     }
     var card by remember { mutableStateOf<Side?>(null) }
     // Focus starts on the page (the first side, else the first button), never left in the menu.
@@ -103,7 +111,13 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
             Text("WATCH ON YOUR CHANNELS", style = T.eyebrow.copy(color = SportsLook.Dim))
             Spacer(Modifier.height(8.dp))
             when {
-                airings == null -> Spinner(size = 24.dp)
+                airings == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spinner(size = 24.dp)
+                    // A TV guide loading takes most of a TV's power: the lookup waits on it, so say so.
+                    App.repo.state.collectAsState().value.epgStatus?.let {
+                        Spacer(Modifier.width(10.dp)); Text("Finding channels · $it", style = T.small.copy(color = SportsLook.Dim))
+                    }
+                }
                 airings!!.isEmpty() -> Text("Not found in your channels' guide or names. Pick a channel to remember one for this game.", style = T.small)
                 else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // OK plays it in the TV window; hold OK opens it full screen.

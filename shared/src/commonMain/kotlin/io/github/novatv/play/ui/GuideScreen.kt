@@ -72,13 +72,36 @@ fun GuideScreen(nav: Nav) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { liveGroups(st.lib).filter { it.channels.isNotEmpty() } }
     }
     var sel by remember { mutableStateOf<String?>(null) }
-    val group = groups.firstOrNull { it.id == sel } ?: groups.firstOrNull { it.id == "fav" } ?: groups.firstOrNull()
+    val picked = groups.firstOrNull { it.id == sel } ?: groups.firstOrNull { it.id == "fav" } ?: groups.firstOrNull()
+    // Search: channels whose name has the words, or showing a programme whose title has them in the next 4 days,
+    // soonest first, across all channels; the grid moves to the first such programme.
+    var query by remember { mutableStateOf("") }
+    val q = query.trim()
+    val found by androidx.compose.runtime.produceState<Pair<List<Channel>, Long?>?>(null, q, groups, st.epgVersion) {
+        if (q.length < 2) { value = null; return@produceState }
+        kotlinx.coroutines.delay(300) // typing: search once it pauses
+        value = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) {
+            val all = groups.maxByOrNull { it.channels.size }?.channels.orEmpty()
+            val words = q.split(' ').filter { it.isNotBlank() }
+            val now0 = nowMs()
+            val progs = try { App.repo.epg.find(words, now0, now0 + 4 * 86_400_000L, limit = 400) } catch (x: Exception) { emptyList() }
+            val firstAt = HashMap<String, Long>()
+            for (p in progs) firstAt.merge(p.channelKey, p.start) { a, b -> minOf(a, b) }
+            val byName = all.filter { c -> words.all { c.name.contains(it, ignoreCase = true) } }
+            val byProg = if (firstAt.isEmpty()) emptyList() else all.mapNotNull { c -> App.repo.epg.key(c)?.let { k -> firstAt[k]?.let { c to it } } }
+                .sortedBy { it.second }.map { it.first }
+            val list = (byName + byProg).distinctBy { it.id }.take(300)
+            list to progs.minOfOrNull { it.start }?.takeIf { byName.isEmpty() }
+        }
+    }
+    val group = if (found != null) Group("search", "Search", found!!.first) else picked
     var start by remember { mutableLongStateOf(nowMs() / HALF_HOUR * HALF_HOUR) }
     var focused by remember { mutableStateOf<Pair<Channel, Programme?>?>(null) }
     val t = now()
     val earliest = { nowMs() / HALF_HOUR * HALF_HOUR }
     val pageLater = { by: Long -> if (start + by < nowMs() + 4 * 86_400_000L) start += by }
     val pageEarlier = { by: Long -> val n = maxOf(earliest(), start - by); val moved = n != start; start = n; moved }
+    androidx.compose.runtime.LaunchedEffect(found) { found?.second?.let { at -> start = maxOf(nowMs(), at) / HALF_HOUR * HALF_HOUR } }
     // The panel previews the highlighted channel where the device can (Android TV), as Live TV does: the shared
     // preview player, after the same pause. Only what is on now plays; the preview stops when the Guide is hidden,
     // the playlist changes or the screen goes away.
@@ -109,12 +132,15 @@ fun GuideScreen(nav: Nav) {
             Text("This playlist has no TV guide. Add one in Settings (XMLTV link) to fill the grid.", style = T.small, modifier = Modifier.padding(bottom = 10.dp))
         }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+            InputField(query, "Search channels or programmes", { query = it }, Modifier.width(420.dp).height(44.dp))
+            Spacer(Modifier.width(10.dp))
             Pill("Now", onClick = { start = earliest() }, selected = start == earliest())
             Spacer(Modifier.width(10.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(groups, key = { it.id }) { g -> Pill(g.name, onClick = { sel = g.id }, selected = g.id == group?.id) }
+                items(groups, key = { it.id }) { g -> Pill(g.name, onClick = { sel = g.id; query = "" }, selected = found == null && g.id == group?.id) }
             }
         }
+        if (found != null && found!!.first.isEmpty()) { Text("Nothing in your channels or guide matches \"$q\".", style = T.small); return@Column }
         if (group == null) return@Column
         BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(C.panel.copy(alpha = 0.5f))) {
             val chW = if (maxWidth < NARROW) 150.dp else 250.dp

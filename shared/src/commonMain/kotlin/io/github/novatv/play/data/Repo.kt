@@ -259,9 +259,16 @@ class Repo(val store: Store, val epg: Epg) {
     fun forgetMatches() { matcher = null; _state.update { it.copy(epgVersion = it.epgVersion + 1) } }
 
     fun matcher(): Matcher = matcherLock.locked {
-        val v = _state.value.epgVersion * 31 + state.value.lib.channels.size
-        matcher?.let { if (it.first == v) return@locked it.second }
-        Matcher(epg, state.value.lib.channels).also { matcher = v to it }
+        val st = _state.value
+        val v = st.epgVersion * 31 + st.lib.channels.size
+        matcher?.let { (version, m) ->
+            if (version == v) return@locked m
+            // While the guide loads (in parts, each bumping its version) the index built so far is kept: rebuilding it
+            // over every channel after each part kept Sports' channel lookups waiting for tens of seconds on a TV. It is
+            // built again once the guide has loaded, or at once if the playlist's channels change.
+            if (st.epgStatus != null && m.channelCount == st.lib.channels.size) return@locked m
+        }
+        Matcher(epg, st.lib.channels).also { matcher = v to it }
     }
 
     // ---------- Sports ----------

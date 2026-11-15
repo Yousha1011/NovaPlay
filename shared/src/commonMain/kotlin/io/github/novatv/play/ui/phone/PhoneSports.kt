@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.SportsSoccer
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Tune
@@ -84,6 +86,7 @@ fun PhoneSports(nav: Nav) {
     val st by App.repo.state.collectAsState()
     var whenTab by remember { mutableStateOf(When.LIVE) }
     var sport by remember { mutableStateOf<Sport?>(null) }
+    var query by remember { mutableStateOf("") }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(Unit) { while (true) { App.repo.refreshSports(55_000L); delay(60_000L) } }
     // The channel index is built ahead, so a match's channels open at once.
@@ -94,24 +97,28 @@ fun PhoneSports(nav: Nav) {
         val all = sports.events
         if (Follow.followedCompetitions().isEmpty()) all.filter { Follow.shows(it) } else all.filter { Follow.followed(it) }
     }
-    val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), sports.events.size, store.sportsLeagues, t / 600_000L) {
+    // Checked again as soon as the guide has (re)loaded, and every 10 minutes. Not after each part while it loads:
+    // each check searches the guide for every followed competition, which held up Sports' channel lookups on a TV.
+    val guideState = App.repo.state.collectAsState().value
+    val guideVersion = if (guideState.epgStatus == null) guideState.epgVersion else -1
+    val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), sports.events.size, store.sportsLeagues, store.sportsComps, guideVersion, t / 600_000L) {
         value = withContext(IO) {
             try {
                 val m = App.repo.matcher()
-                Follow.competitions().flatMap { l -> m.unidentified(l, sports.events, t - 3 * 3600_000L, t + 7 * 86_400_000L) }
+                m.unidentifiedAll(Follow.competitions(), sports.events, t - 3 * 3600_000L, t + 7 * 86_400_000L)
             } catch (x: Exception) { emptyList() }
         }
     }
     // Live and Upcoming list identified matches only; the guide's unnamed games are in Uncategorized.
     val unknown = remember(unidentified, t) { unidentified.map { it.asEvent(t) } }
     val all = remember(pool, unknown) { pool + unknown }
-    val list = remember(pool, unknown, whenTab, sport, t) {
+    val list = remember(pool, unknown, whenTab, sport, t, query) {
         val l = when (whenTab) {
             When.LIVE -> io.github.novatv.play.sports.MySports.live(pool, t)
             When.UNCATEGORIZED -> io.github.novatv.play.sports.MySports.uncategorized(unknown, t)
             else -> io.github.novatv.play.sports.MySports.upcoming(pool, t)
         }
-        l.filter { sport == null || it.league.sport == sport }
+        l.filter { (sport == null || it.league.sport == sport) && io.github.novatv.play.ui.matchesSearch(it, query) }
     }
     val groups = remember(list) { io.github.novatv.play.sports.MySports.grouped(list) }
     val present = remember(all) { all.map { it.league.sport }.toSet() }
@@ -129,13 +136,25 @@ fun PhoneSports(nav: Nav) {
             When.UNCATEGORIZED -> " · ${io.github.novatv.play.sports.MySports.uncategorized(unknown, t).size}"
             else -> ""
         } }, whenTab.name, { whenTab = When.valueOf(it) })
-        Spacer(Modifier.height(8.dp))
+        // Search: a competition (or tour) or a team, in the list shown.
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(44.dp).clip(RoundedCornerShape(22.dp)).background(P.card)
+            .border(1.dp, P.line, RoundedCornerShape(22.dp)).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Search, size = 20.dp, tint = P.dim)
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) Text("Search competition or team", style = P.body.copy(color = P.dim))
+                androidx.compose.foundation.text.BasicTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, textStyle = P.body,
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(P.blue))
+            }
+            if (query.isNotEmpty()) Icon(Icons.Rounded.Close, size = 20.dp, tint = P.dim, modifier = Modifier.tap { query = "" })
+        }
         Chips(listOf("ALL" to "All sports") + Sport.entries.filter { it in present }.map { it.name to "${it.icon} ${it.label}" }, sport?.name ?: "ALL",
             { sport = if (it == "ALL") null else Sport.valueOf(it) })
         when (whenTab) {
             When.TABLES -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView() }
             else -> when {
                 sports.loading && sports.events.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
+                list.isEmpty() && query.isNotBlank() -> Empty(Icons.Rounded.Search, "No competition or team matches \"${query.trim()}\"", null)
                 list.isEmpty() -> Empty(Icons.Rounded.SportsSoccer, when (whenTab) { When.LIVE -> "Nothing live or about to start"
                         When.UNCATEGORIZED -> "No uncategorized games"; else -> "Nothing coming up" },
                     if (Follow.followedCompetitions().isEmpty()) "Follow competitions (top right) to list only theirs." else null)

@@ -120,7 +120,14 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
         AndroidView(
             modifier = Modifier.fillMaxSize().focusProperties { canFocus = false },
             factory = { ctx ->
-                EditText(ctx).apply {
+                // Back while the keyboard shows goes to the keyboard, not this box: caught first, so typing ends with it.
+                // (Missed, the box stayed in typing mode and the keyboard came back for it later, even on another page.)
+                object : EditText(ctx) {
+                    override fun onKeyPreIme(keyCode: Int, event: android.view.KeyEvent): Boolean {
+                        if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP && ui.editing) ui.stop()
+                        return super.onKeyPreIme(keyCode, event)
+                    }
+                }.apply {
                     setText(value)
                     this.hint = hint
                     isSingleLine = true

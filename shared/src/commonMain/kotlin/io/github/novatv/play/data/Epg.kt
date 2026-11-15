@@ -28,6 +28,12 @@ class Epg {
     private val reader: SQLiteConnection = driver.open(path).also { it.execSQL("PRAGMA query_only=1") }
     private val wLock = Lock()
     private val rLock = Lock()
+    /**
+     * A second reader for long background scans (Sports' unrecognised games): with its own connection they never make
+     * the quick lookups (a match's channels, the guide grid) wait behind them. WAL lets both read at once.
+     */
+    private val bgReader: SQLiteConnection = driver.open(path).also { it.execSQL("PRAGMA query_only=1") }
+    private val bgLock = Lock()
 
     private fun setUp(db: SQLiteConnection) {
         db.execSQL("PRAGMA journal_mode=WAL")
@@ -250,6 +256,19 @@ class Epg {
     private fun shifted(list: List<Programme>, shift: Long) =
         if (shift == 0L) list else list.map { it.copy(start = it.start + shift, stop = it.stop + shift) }
 
+    /**
+     * Programmes between [from] and [to] lasting at least [minLengthMs] whose title has any of [names]: one pass over the
+     * guide for many names at once, on the background reader. (One search per name took ~12 s each on a Fire TV.)
+     */
+    fun findAnyLong(names: List<String>, from: Long, to: Long, minLengthMs: Long, limit: Int = 5000): List<Programme> {
+        if (names.isEmpty()) return emptyList()
+        val shift = timeShiftMs()
+        val where = names.joinToString(" OR ") { "title LIKE ?" }
+        val args = listOf<Any>(from - shift - 6 * 3600_000L, to - shift, from - shift, minLengthMs) + names.map { "%$it%" }
+        return shifted(query("SELECT ch, start, stop, title, descr, cat FROM prog WHERE start>? AND start<? AND stop>? AND stop-start>=? AND ($where) ORDER BY start LIMIT $limit",
+            args, background = true), shift)
+    }
+
     /** Sports programmes on now or starting soon, by guide category or by title. */
     fun sportsNow(from: Long, to: Long, limit: Int = 200): List<Programme> {
         val shift = timeShiftMs()
@@ -258,7 +277,10 @@ class Epg {
             listOf(from - shift, to - shift)), shift)
     }
 
-    private fun query(sql: String, args: List<Any>): List<Programme> = read { db ->
+    private fun query(sql: String, args: List<Any>, background: Boolean = false): List<Programme> =
+        if (background) bgLock.locked { run(bgReader, sql, args) } else read { db -> run(db, sql, args) }
+
+    private fun run(db: SQLiteConnection, sql: String, args: List<Any>): List<Programme> =
         db.prepare(sql).use { st ->
             args.forEachIndexed { i, a -> if (a is Long) st.bindLong(i + 1, a) else st.bindText(i + 1, a.toString()) }
             val out = ArrayList<Programme>()
@@ -266,7 +288,6 @@ class Epg {
                 if (st.isNull(4)) null else st.getText(4), if (st.isNull(5)) null else st.getText(5)))
             out
         }
-    }
 
     val hasData: Boolean get() = ids.isNotEmpty()
 

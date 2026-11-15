@@ -13,6 +13,9 @@ data class Airing(val channel: Channel, val programme: Programme?, val why: Stri
  * title names both sides, or the competition), then by the broadcasters ESPN lists against channel names.
  */
 class Matcher(private val epg: Epg, all: List<Channel>) {
+    /** How many channels the index was built over (the playlist changing means a new one). */
+    val channelCount = all.size
+
     /** Section headings playlists list as channels ("####### SKY SPORT AUSTRIA #######") play nothing: left out. */
     private val channels = all.filterNot { it.name.trimStart().startsWith("##") }
     /** Channels by guide key and by normalised name, built once per playlist. */
@@ -140,6 +143,31 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
             val p = same.minBy { it.start }
             val chans = same.flatMap { byKey[it.channelKey].orEmpty() }.distinctBy { it.id }
             if (chans.isEmpty()) null else UnidentifiedGame(league, p.start, same.maxOf { it.stop }, p.title, chans)
+        }.sortedBy { it.start }
+    }
+
+    /**
+     * [unidentified] for many competitions at once: one search of the guide for all their names (each competition used to
+     * search it twice, about 12 s a time on a Fire TV, so 30 competitions took minutes), then each takes its own.
+     */
+    fun unidentifiedAll(leagues: List<League>, known: List<SportEvent>, from: Long, to: Long): List<UnidentifiedGame> {
+        if (!epg.hasData || leagues.isEmpty()) return emptyList()
+        val namesOf = leagues.associateWith { league ->
+            listOfNotNull(league.name, league.name.split(' ').dropWhile { it in bodies }.joinToString(" ").takeIf { it.length >= 6 && it != league.name })
+        }
+        val all = epg.findAnyLong(namesOf.values.flatten().distinct(), from, to, 75 * 60_000L)
+        return leagues.flatMap { league ->
+            val own = (league.name.split(' ') + league.id.substringBefore('.').uppercase()).filter { it in bodies }
+            val names = namesOf.getValue(league)
+            val starts = known.filter { it.league.id == league.id }.map { it.start }
+            val progs = all.filter { p -> names.any { p.title.contains(it, ignoreCase = true) } }
+                .filter { p -> p.start >= from - 3 * 3600_000L && unnamed(p.title, own) }
+                .filter { p -> starts.none { kotlin.math.abs(it - p.start) <= 20 * 60_000L } }
+            progs.groupBy { it.start / (15 * 60_000L) }.values.mapNotNull { same ->
+                val p = same.minBy { it.start }
+                val chans = same.flatMap { byKey[it.channelKey].orEmpty() }.distinctBy { it.id }
+                if (chans.isEmpty()) null else UnidentifiedGame(league, p.start, same.maxOf { it.stop }, p.title, chans)
+            }
         }.sortedBy { it.start }
     }
 
