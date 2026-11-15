@@ -118,6 +118,28 @@ class Matcher(private val epg: Epg, all: List<Channel>) {
         return ordered.take(maxOf(limit, ordered.count { it.why == "Match feed" }))
     }
 
+    /**
+     * Games of [league] the guide lists by the competition's name alone ("UEFA Champions League", "Champions League"),
+     * between [from] and [to]: one per kick-off, with the channels showing it. Kick-offs where a match [known] for this
+     * competition starts (within 20 minutes) are left out: that programme is most likely that match.
+     */
+    fun unidentified(league: League, known: List<SportEvent>, from: Long, to: Long): List<UnidentifiedGame> {
+        if (!epg.hasData) return emptyList()
+        // The competition's own body, from its name or its id ("uefa.champions" is UEFA's), so "UEFA Champions League"
+        // counts while "AFC Champions League" doesn't.
+        val own = (league.name.split(' ') + league.id.substringBefore('.').uppercase()).filter { it in bodies }
+        val names = listOfNotNull(league.name, league.name.split(' ').dropWhile { it in bodies }.joinToString(" ").takeIf { it.length >= 6 && it != league.name })
+        val starts = known.filter { it.league.id == league.id }.map { it.start }
+        val progs = names.flatMap { n -> epg.find(listOf(n), from, to, limit = 300) }
+            .filter { p -> p.start >= from - 3 * 3600_000L && unnamed(p.title, own) }
+            .filter { p -> starts.none { kotlin.math.abs(it - p.start) <= 20 * 60_000L } }
+        return progs.groupBy { it.start / (5 * 60_000L) }.values.mapNotNull { same ->
+            val p = same.minBy { it.start }
+            val chans = same.flatMap { byKey[it.channelKey].orEmpty() }.distinctBy { it.id }
+            if (chans.isEmpty()) null else UnidentifiedGame(league, p.start, same.maxOf { it.stop }, p.title, chans)
+        }.sortedBy { it.start }
+    }
+
     private val byId: Map<String, Channel> by lazy { named.associate { it.second.id to it.second } }
 
     /**

@@ -87,7 +87,8 @@ data class SportEvent(
 
 /**
  * What the Sports centre follows. A sport is on when ticked (none ticked: all on). Within a sport, nothing picked
- * means all of it; otherwise a match shows when its competition or one of its clubs is picked.
+ * means all of it; otherwise a match shows when its competition is picked. Teams picked inside a competition narrow
+ * that competition to their matches; a team on its own adds nothing and is never a group of its own.
  */
 object Follow {
     private val store get() = io.github.novatv.play.App.store
@@ -95,7 +96,23 @@ object Follow {
     fun sportOn(s: Sport) = store.sportsEnabled.let { it.isEmpty() || s.name in it }
 
     fun hasPicks(s: Sport): Boolean = Catalog.leagues.any { it.sport == s && it.id in store.sportsLeagues } ||
-        store.sportsComps.any { it.startsWith(s.name + "|") } || store.favouriteTeams.any { it.startsWith(s.name + "|") }
+        store.sportsComps.any { it.startsWith(s.name + "|") }
+
+    /** Teams picked inside [leagueId], as (team id, name). */
+    fun leagueTeams(leagueId: String): List<Pair<String, String>> = store.sportsLeagueTeams.filter { it.startsWith("$leagueId|") }
+        .map { k -> k.split('|', limit = 3).let { it.getOrElse(1) { "" } to it.getOrElse(2) { "" } } }
+
+    /** [e] belongs under followed competition [leagueId]: its match, and one of its picked teams' when any are picked. */
+    fun inCompetition(e: SportEvent, leagueId: String): Boolean = inCompetition(e, leagueId, leagueTeams(leagueId))
+
+    /** As above, with the competition's picked teams given: a match of [leagueId], one of [picks]' when any are picked. */
+    fun inCompetition(e: SportEvent, leagueId: String, picks: List<Pair<String, String>>): Boolean {
+        if (e.league.id != leagueId) return false
+        return picks.isEmpty() || e.teams.any { side -> picks.any { (id, name) -> (id.isNotEmpty() && side.id == id) || side.name == name } }
+    }
+
+    /** The followed competitions of the sports that are on, A to Z. */
+    fun competitions(): List<League> = store.sportsLeagues.mapNotNull { Catalog.league(it) }.filter { sportOn(it.sport) }.sortedBy { it.name.lowercase() }
 
     fun compKey(e: SportEvent) = "${e.league.sport.name}|${e.subtitle ?: e.league.name}"
 
@@ -112,7 +129,7 @@ object Follow {
         if (s == Sport.CRICKET) e.subtitle?.let { c -> Cricket.leagueHome(c, e.teams.map { it.name }) }?.let { home ->
             if (Cricket.leaguesKey(home) in store.sportsComps) return true
         }
-        return e.league.id in store.sportsLeagues || compKey(e) in store.sportsComps || e.teams.any { teamPicked(e, it) }
+        return (e.league.id in store.sportsLeagues && inCompetition(e, e.league.id)) || compKey(e) in store.sportsComps
     }
 
     /** The feeds to load: every competition of the sports that are on. */

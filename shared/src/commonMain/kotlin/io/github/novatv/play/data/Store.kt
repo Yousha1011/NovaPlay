@@ -100,6 +100,11 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         set(v) = putSet("sportsEnabled", v)
 
     /** Competitions picked by name for sports ESPN lists as one feed (cricket, rugby): "SPORT|competition". */
+    /** Teams picked inside a followed competition ("leagueId|teamId|name"): that competition lists only their matches. */
+    var sportsLeagueTeams: Set<String>
+        get() = strSet("sportsLeagueTeams")
+        set(v) = putSet("sportsLeagueTeams", v)
+
     var sportsComps: Set<String>
         get() = strSet("sportsComps")
         set(v) = putSet("sportsComps", v)
@@ -416,7 +421,7 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
 
     /** Playlists (with their logins), guides, favourites, Sports picks and keys. */
     private val backedUp = setOf("sources", "active", "extraEpg", "favs.json", "favTeams.json", "fixMatch.json", "sportsComps.json", "sportsEnabled.json",
-        "sportsLeagues.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh", "phoneTheme")
+        "sportsLeagues.json", "sportsLeagueTeams.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh", "phoneTheme")
 
     fun snapshot(): String = JSONObject().also { o -> for (k in backedUp) sp.getString(k, null)?.let { o.put(k, it) } }.toString()
 

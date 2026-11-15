@@ -541,7 +541,12 @@ object AutoTest {
         val (priv, h) = withContext(Dispatchers.IO) { winStats() }
         val r = Res(priv, h, heap(), Thread.activeCount(), vlcLive(), relay?.streams() ?: -1)
         val line = "SAMPLE $tag: private=${r.priv} MB handles=${r.handles} heap=${r.heap} MB threads=${r.threads} vlc=${r.vlc} streams=${r.streams}"
-        samples += line; log(line); return r
+        samples += line; log(line)
+        // Which threads, grouped by name without their numbers ("DefaultDispatcher-worker-12" -> "DefaultDispatcher-worker"),
+        // so a pool growing can be told from one that only stays warm.
+        log("  threads: " + Thread.getAllStackTraces().keys.groupingBy { it.name.replace(Regex("""[-#\s]*\d+$"""), "").replace(Regex("""\d+"""), "#") }
+            .eachCount().entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
+        return r
     }
 
     // ---- what a picture is doing ----------------------------------------------------------------------------------
@@ -1062,7 +1067,14 @@ object AutoTest {
         check("F. preview plays after the drop (${pName()})", waitFor(30_000) { pPlaying() && pMoving() && r.streams() == 1 })
         check("F. one stream (${r.streams()})", r.streams() == 1)
 
-        // G. Leaving Live TV frees the preview.
+        // F2. Movies: the window's channel plays on in the corner, still one stream.
+        check("F2. reached Movies", goTab("MOVIES"))
+        delay(4000)
+        log("F2: Movies: ${pName()} surface=${App.preview.surface} moving=${pMoving()} streams=${r.streams()} vlc=${vlcLive()}")
+        check("F2. the window plays on in the corner of Movies (${pName()}, surface ${App.preview.surface})",
+            pPlaying() && pMoving() && App.preview.surface == "corner" && r.streams() <= 1 && vlcLive() == 1)
+
+        // G. Home frees the preview.
         check("G. reached Home", goTab("HOME"))
         delay(3000)
         log("G: preview ${pName()} hasPlayer=${DesktopPreviewEngine.hasPlayer} streams=${r.streams()} vlc=${vlcLive()}")

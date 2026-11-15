@@ -40,7 +40,14 @@ object Espn {
         }
     } catch (e: Exception) { emptyList() }
 
+    /** Each competition's logo (by catalogue id), as the scoreboard feed gives it. */
+    private val logos = SafeMap<String, String>()
+    fun leagueLogo(id: String): String? = logos[id]
+
     private fun scoreboard(league: League, o: JSONObject): List<SportEvent> {
+        o.optJSONArray("leagues")?.optJSONObject(0)?.let { lg ->
+            (lg.optJSONArray("logos")?.optJSONObject(0)?.optString("href") ?: lg.optString("logo")).ifBlank { null }?.let { logos[league.id] = it }
+        }
         val out = ArrayList<SportEvent>()
         val events = o.optJSONArray("events") ?: return out
         for (i in 0 until events.length()) {

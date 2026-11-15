@@ -273,9 +273,10 @@ private fun RootBody() {
                     // same group (only their placement changes), so they remember it while another tab is open too.
                     Box(Modifier.topExit(App.device == Device.TV, focusManager, nav.railFocus, nav.topExit).rememberFocus(nav.page(t))
                         .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
-                        // The TV window plays on across Live TV, the TV guide and Sports; any other tab lets it go.
+                        // The TV window plays on across Live TV, the TV guide and Sports, and in the corner of Movies,
+                        // Series, Recordings and Search; Home and Settings let it go.
                         androidx.compose.runtime.LaunchedEffect(nav.tab) {
-                            if (nav.tab != Tab.LIVE && nav.tab != Tab.GUIDE && nav.tab != Tab.SPORTS) App.preview.stop()
+                            if (nav.tab !in WINDOW_TABS) App.preview.stop()
                         }
                         when (t) {
                             Tab.HOME -> HomeScreen(nav)
@@ -290,6 +291,8 @@ private fun RootBody() {
                         }
                     }
                 }
+                // Movies, Series, Recordings and Search: the channel playing in the TV window carries on in the corner.
+                if (nav.tab in CORNER_TABS && top == null) io.github.novatv.play.ui.CornerWindow(Modifier.align(Alignment.TopEnd).padding(top = 18.dp, end = 24.dp))
             }
             Rail(nav) { nav.menuOpen = it }
         }
@@ -385,3 +388,8 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
 
 /** How many tabs stay built in memory (the one on screen included). */
 private const val KEEP_TABS = 4
+
+/** Tabs the TV window keeps playing on (see [CORNER_TABS] for those that show it in a corner). */
+internal val WINDOW_TABS = setOf(Tab.LIVE, Tab.GUIDE, Tab.SPORTS, Tab.MOVIES, Tab.SERIES, Tab.RECORDINGS, Tab.SEARCH)
+/** Tabs with no window of their own: the TV window's channel plays on in their top right corner. */
+internal val CORNER_TABS = setOf(Tab.MOVIES, Tab.SERIES, Tab.RECORDINGS, Tab.SEARCH)

@@ -207,13 +207,36 @@ private fun MySportsView(
     videoSlot: @Composable () -> Unit
 ) {
     val t = now(60_000L)
+    val store = App.store
     val shown = remember(events) { events.filter { Follow.shows(it) } }
-    val mine = remember(shown, t) { shown.filter { e -> e.teams.any { isFavTeam(e, it) } } }
-    val upcoming = remember(shown, mine, t) {
-        val soon = { e: SportEvent -> e.state == State.LIVE || (e.state == State.PRE && e.start < t + 7 * 86_400_000L) }
-        mine.filter(soon).ifEmpty { shown.filter(soon) }
-            .sortedWith(compareBy({ it.state != State.LIVE }, { it.start }))
+    // Live & Upcoming: a section per followed competition, A to Z, each with its matches soonest first (only its picked
+    // teams' matches when some are picked). Competitions followed by name (cricket series, tournaments) too.
+    val sections = remember(events, t) {
+        val leagues = io.github.novatv.play.sports.MySports.sections(events, Follow.competitions(), Follow::leagueTeams,
+            { l -> io.github.novatv.play.sports.Espn.leagueLogo(l.id) }, t)
+        val named = shown.filter { Follow.compKey(it) in store.sportsComps && (it.state == State.LIVE || (it.state == State.PRE && it.start < t + io.github.novatv.play.sports.MySports.AHEAD_MS)) }
+            .groupBy { Follow.compKey(it) }.map { (k, list) ->
+                val first = list.first()
+                io.github.novatv.play.sports.CompetitionSection(io.github.novatv.play.sports.League("comp:$k", first.league.sport, first.subtitle ?: first.league.name),
+                    null, list.sortedBy { it.start })
+            }
+        (leagues + named).sortedBy { it.league.name.lowercase() }
     }
+    // Nothing followed: today's games, as before.
+    val upcoming = remember(shown, sections, t) {
+        if (sections.isNotEmpty()) sections.flatMap { it.games }.distinctBy { it.id }.sortedBy { it.start }
+        else shown.filter { e -> e.state == State.LIVE || (e.state == State.PRE && e.start < t + 86_400_000L) }.sortedBy { it.start }
+    }
+    // Games the guide lists by the competition's name alone, for the followed competitions.
+    val unidentified by produceState(emptyList<io.github.novatv.play.sports.UnidentifiedGame>(), events.size, store.sportsLeagues, t / 600_000L) {
+        value = withContext(IO) {
+            try {
+                val m = App.repo.matcher()
+                Follow.competitions().flatMap { l -> m.unidentified(l, events, t - 3 * 3600_000L, t + 7 * 86_400_000L) }.sortedBy { it.start }
+            } catch (x: Exception) { emptyList() }
+        }
+    }
+    val unknownEvents = remember(unidentified, t) { unidentified.map { it.asEvent(t) } }
     val heroes = remember(upcoming, shown) { upcoming.take(8).ifEmpty { shown.filter { it.state == State.LIVE }.take(8) } }
     var heroIdx by remember { mutableIntStateOf(0) }
     LaunchedEffect(heroIdx, heroes.size) {
@@ -223,29 +246,6 @@ private fun MySportsView(
     if (loading && events.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner() }
         return
-    }
-
-    // A row for each followed team, from its own schedule (weeks ahead, every competition), its live match taken
-    // from the scoreboards so the score is current.
-    val store = App.store
-    val followedTeams = store.favouriteTeams
-    val teamInfos by produceState(emptyList<TeamPage>(), followedTeams, events.size > 0) {
-        value = withContext(IO) { followedTeams.mapNotNull { k -> try { Teams.followed(k, events) } catch (x: Exception) { null } } }
-    }
-    val teamRows = remember(teamInfos, events) {
-        teamInfos.map { ti ->
-            val live = events.filter { e -> e.state != State.POST && e.teams.any { it.id == ti.id && it.name == ti.name } }
-            val list = (live + ti.next).distinctBy { it.id }.distinctBy { it.title to it.start / 3_600_000L }.sortedWith(compareBy({ it.state != State.LIVE }, { it.start }))
-            ti to list
-        }.filter { it.second.isNotEmpty() }
-    }
-    // Then a row for each followed league, competition or sport, followed leagues first, soonest first.
-    val compRows = remember(shown) {
-        shown.filter { it.state != State.POST }
-            .groupBy { it.subtitle ?: it.league.name }
-            .map { (name, list) -> name to list.sortedWith(compareBy({ it.state != State.LIVE }, { it.start })) }
-            .sortedWith(compareBy({ (_, l) -> l.first().league.id !in store.sportsLeagues && Follow.compKey(l.first()) !in store.sportsComps }, { it.second.first().start }))
-            .take(14)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -292,30 +292,38 @@ private fun MySportsView(
                 }
             }
 
-            // Row 1: ● Live & Upcoming
+            // ● Live & Upcoming: a section per followed competition, with its title and logo.
             item(key = "live_upcoming") {
-                GameRowHeader(
-                    title = "● Live & Upcoming",
-                    subtitle = if (mine.isEmpty()) "Today's games, soonest first" else "Everything you follow, soonest first",
-                    events = upcoming,
-                    onOpen = onOpen,
-                    onHoldWatch = onWatchInWindow
-                )
+                Column(Modifier.fillMaxWidth()) {
+                    Text("● Live & Upcoming", style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp))
+                    Text(if (sections.isEmpty()) "Follow a competition (✎ Follow Teams & Leagues) to list its matches here. Today's games meanwhile."
+                        else "Your competitions, A to Z · each soonest first", style = T.tiny.copy(color = SportsLook.Dim))
+                }
+            }
+            if (sections.isEmpty()) item(key = "today") {
+                GameRowHeader(title = "Today", subtitle = "${upcoming.size} ${if (upcoming.size == 1) "game" else "games"}", events = upcoming,
+                    onOpen = onOpen, onHoldWatch = onWatchInWindow)
+            }
+            sections.forEach { sec ->
+                item(key = "comp_${sec.league.id}") {
+                    val n = sec.games.size
+                    val live = sec.games.count { it.state == State.LIVE }
+                    GameRowHeader(title = sec.league.name, subtitle = listOfNotNull(if (live > 0) "$live live" else null, "$n ${if (n == 1) "game" else "games"}").joinToString(" · "),
+                        events = sec.games, onOpen = onOpen, onHoldWatch = onWatchInWindow, logo = sec.logo)
+                }
             }
 
-            // Followed Team Rows (e.g. Arsenal · 3rd in Champions League · 9 games ahead)
-            teamRows.forEach { (ti, list) ->
-                item(key = "team_${ti.league.id}_${ti.id}") {
-                    val place = listOfNotNull(ti.standing, "${list.size} ${if (list.size == 1) "game" else "games"} ahead").joinToString(" · ")
-                    GameRowHeader(title = ti.name, subtitle = place, events = list, onOpen = onOpen, onHoldWatch = onWatchInWindow,
-                        favTeamName = ti.name, logo = ti.logo)
-                }
-            }
-            compRows.forEach { (name, list) ->
-                item(key = "comp_$name") {
-                    GameRowHeader(title = name, subtitle = "${list.size} ${if (list.size == 1) "game" else "games"} ahead", events = list, onOpen = onOpen,
-                        onHoldWatch = onWatchInWindow)
-                }
+            // Unidentified Games: always shown, from the TV guide.
+            item(key = "unidentified") {
+                if (unknownEvents.isEmpty()) Column(Modifier.fillMaxWidth()) {
+                    Text("? Unidentified Games", style = T.h2.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp))
+                    Text(if (Follow.competitions().isEmpty()) "Follow a competition to look for its unnamed games in your TV guide."
+                        else "None right now: your TV guide names every game of your competitions.", style = T.tiny.copy(color = SportsLook.Dim))
+                } else GameRowHeader(title = "? Unidentified Games",
+                    subtitle = "In your TV guide by competition name only · ${unknownEvents.size}", events = unknownEvents,
+                    // No match details to open: OK plays its channel in the window.
+                    onOpen = { ev -> unidentified.firstOrNull { "guide:${it.league.id}:${it.start}" == ev.id }?.channels?.firstOrNull()?.let(onWatchInWindow) },
+                    onHoldWatch = onWatchInWindow)
             }
         }
 
@@ -519,17 +527,20 @@ internal fun MatchCardItem(
             // League and Status
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(event.league.name, style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1)
-                val statusText = when (event.state) {
-                    State.LIVE -> "● LIVE"
-                    State.POST -> "FINAL"
-                    else -> dayLabel(event.start).uppercase()
-                }
+                // LIVE in red, TOMORROW in yellow, otherwise the date.
+                val nowT = now(60_000L)
+                val tag = io.github.novatv.play.sports.MySports.tag(event, nowT)
                 Box(
                     Modifier.clip(RoundedCornerShape(4.dp))
-                        .background(if (event.state == State.LIVE) SportsLook.Live else Color(0x33FFFFFF))
+                        .background(when (tag) {
+                            io.github.novatv.play.sports.MySports.Tag.LIVE -> SportsLook.Live
+                            io.github.novatv.play.sports.MySports.Tag.TOMORROW -> SportsLook.Tomorrow
+                            else -> Color(0x33FFFFFF)
+                        })
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
-                    Text(statusText, style = T.tiny.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 9.sp))
+                    Text(io.github.novatv.play.sports.MySports.tagText(event, nowT), style = T.tiny.copy(
+                        color = if (tag == io.github.novatv.play.sports.MySports.Tag.TOMORROW) SportsLook.Ink else Color.White, fontWeight = FontWeight.Bold, fontSize = 9.sp))
                 }
             }
 
@@ -576,7 +587,7 @@ internal fun MatchCardItem(
             Spacer(Modifier.weight(1f))
 
             // Subtitle
-            val sub = listOfNotNull(clock(event.start), event.broadcasts.firstOrNull()).joinToString(" · ")
+            val sub = listOfNotNull(io.github.novatv.play.sports.MySports.timeText(event, now(60_000L)), event.broadcasts.firstOrNull()).joinToString(" · ")
             Text(sub, style = T.tiny.copy(color = SportsLook.Faint), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

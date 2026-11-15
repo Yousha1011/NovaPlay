@@ -326,3 +326,17 @@ internal fun rememberPick(c: Channel?, watch: () -> Unit, pick: (Channel) -> Uni
         else { if (e.type == KeyEventType.KeyDown) watch(); true }
     }, watch)
 }
+
+/**
+ * The TV window in a page's top right corner (Movies, Series, Recordings, Search): the channel last playing in it
+ * carries on, muted. Nothing when no channel is playing there. Full screen from its button (Windows) or a double click.
+ */
+@Composable
+internal fun CornerWindow(modifier: Modifier) {
+    val ps by App.preview.state.collectAsState()
+    val c = App.preview.channel ?: return
+    if (ps is io.github.novatv.play.data.PreviewController.State.Idle || ps is io.github.novatv.play.data.PreviewController.State.Unsupported) return
+    androidx.compose.runtime.LaunchedEffect(Unit) { App.preview.surface = "corner" }
+    PreviewBox(c, modifier.width(320.dp).aspectRatio(16f / 9f), owner = "corner",
+        logoSize = androidx.compose.ui.unit.DpSize(96.dp, 56.dp), onFullScreen = { playFromPreview(c, emptyList()) })
+}

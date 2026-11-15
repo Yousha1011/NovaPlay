@@ -26,6 +26,9 @@ object Time {
     fun hm(hour: Int, minute: Int, h24: Boolean): String =
         if (h24) "${pad2(hour)}:${pad2(minute)}" else "${if (hour % 12 == 0) 12 else hour % 12}:${pad2(minute)} ${if (hour < 12) "AM" else "PM"}"
 
+    /** "2:05 PM" in local time, whatever the clock setting (Sports, for days ahead). */
+    fun hm12(t: Long): String = local(t).let { hm(it.hour, it.minute, false) }
+
     /** "Sun 25 Oct". */
     fun dayMonth(t: Long): String = local(t).let { "${days[it.dayOfWeek]} ${it.dayOfMonth} ${months[it.monthNumber - 1]}" }
 

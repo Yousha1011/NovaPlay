@@ -94,8 +94,16 @@ fun SportsPickerScreen(nav: Nav) {
         }
     }
 
-    val followedTeams = remember(version) { store.favouriteTeams }
+    val followedTeams = remember(version) { store.sportsLeagueTeams }
     val followedLeagues = remember(version) { store.sportsLeagues }
+    /** Stops following [leagueId] and the teams picked inside it. */
+    fun unfollowLeague(leagueId: String) {
+        val picks = store.sportsLeagueTeams.filter { it.startsWith("$leagueId|") }.toSet()
+        store.sportsLeagues = store.sportsLeagues - leagueId
+        store.sportsLeagueTeams = store.sportsLeagueTeams - picks
+        val names = picks.map { it.substringAfterLast('|') }.toSet()
+        store.favouriteTeams = store.favouriteTeams.filterNot { f -> f.substringAfterLast('|') in names }.toSet()
+    }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF0F1116))) {
         Column(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, top = 20.dp, bottom = 20.dp)) {
@@ -106,7 +114,7 @@ fun SportsPickerScreen(nav: Nav) {
                 Column(Modifier.weight(1f)) {
                     Text("Follow Teams & Leagues", style = T.h1.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold))
                     Text(
-                        "Teams: their games, reminders and scoring alerts. Leagues: their schedule on My Sports.",
+                        "Follow a competition to list its matches on My Sports. Pick teams inside it to list only their matches.",
                         style = T.small.copy(color = SportsLook.Dim)
                     )
                 }
@@ -127,7 +135,7 @@ fun SportsPickerScreen(nav: Nav) {
             Spacer(Modifier.height(14.dp))
 
             // ---- Following Bar ----
-            val totalFollows = followedTeams.size + followedLeagues.size
+            val totalFollows = followedLeagues.size
             Column(Modifier.fillMaxWidth()) {
                 Row(
                     Modifier.fillMaxWidth()
@@ -140,21 +148,15 @@ fun SportsPickerScreen(nav: Nav) {
                     Text("FOLLOWING · $totalFollows", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold))
                     Spacer(Modifier.width(12.dp))
                     if (totalFollows == 0) {
-                        Text("Nothing yet: pick a team or league below.", style = T.small.copy(color = SportsLook.Faint))
+                        Text("Nothing yet: follow a competition below.", style = T.small.copy(color = SportsLook.Faint))
                     } else {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                            items(followedTeams.toList(), key = { "t_$it" }) { item ->
-                                val parts = item.split("|")
-                                val tName = parts.lastOrNull() ?: item
-                                FollowedChip(tName) {
-                                    store.favouriteTeams = store.favouriteTeams - item
-                                    version++
-                                }
-                            }
-                            items(followedLeagues.toList(), key = { "l_$it" }) { lId ->
+                            // Competitions only, A to Z; a competition narrowed to some teams says how many.
+                            items(followedLeagues.toList().sortedBy { (Catalog.league(it)?.name ?: it).lowercase() }, key = { "l_$it" }) { lId ->
                                 val l = Catalog.league(lId)
-                                FollowedChip(l?.name ?: lId) {
-                                    store.sportsLeagues = store.sportsLeagues - lId
+                                val n = followedTeams.count { it.startsWith("$lId|") }
+                                FollowedChip((l?.name ?: lId) + if (n > 0) " · $n ${if (n == 1) "team" else "teams"}" else "") {
+                                    unfollowLeague(lId)
                                     version++
                                 }
                             }
@@ -176,8 +178,7 @@ fun SportsPickerScreen(nav: Nav) {
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(Sport.entries.toList(), key = { it.name }) { sp ->
-                        val count = followedTeams.count { it.startsWith("${sp.name}|") } +
-                                followedLeagues.count { Catalog.league(it)?.sport == sp }
+                        val count = followedLeagues.count { Catalog.league(it)?.sport == sp }
                         SportSidebarItem(
                             sport = sp,
                             selected = sp == selectedSport && searchQuery.isBlank(),
@@ -218,8 +219,7 @@ fun SportsPickerScreen(nav: Nav) {
                                 text = if (isFollowed) "★ Following ${league.name}" else "☆ Follow ${league.name}",
                                 selected = isFollowed,
                                 onClick = {
-                                    val now = store.sportsLeagues
-                                    store.sportsLeagues = if (isFollowed) now - league.id else now + league.id
+                                    if (isFollowed) unfollowLeague(league.id) else store.sportsLeagues = store.sportsLeagues + league.id
                                     version++
                                 }
                             )
@@ -255,19 +255,26 @@ fun SportsPickerScreen(nav: Nav) {
                                     )
                                 }
                                 items(teamsInGroup, key = { it.key }) { t ->
+                                    // A team is picked inside this competition: the competition is followed too, and lists
+                                    // only its picked teams' matches. It also stays a favourite (★, reminders, alerts).
+                                    val lid = selectedLeague?.id ?: ""
+                                    val pickKey = "$lid|${t.id}|${t.name}"
                                     val teamFavKey = "${selectedSport.name}|${t.id}|${t.name}"
-                                    val followed = teamFavKey in followedTeams || store.favouriteTeams.any { it.endsWith("|${t.name}") }
+                                    val followed = pickKey in followedTeams
                                     TeamPickerCard(
                                         team = t,
                                         followed = followed,
                                         onClick = {
-                                            val cur = store.favouriteTeams.toMutableSet()
+                                            if (lid.isEmpty()) return@TeamPickerCard
                                             if (followed) {
-                                                cur.removeAll { it.endsWith("|${t.name}") || it == teamFavKey }
+                                                store.sportsLeagueTeams = store.sportsLeagueTeams - pickKey
+                                                if (store.sportsLeagueTeams.none { it.substringAfterLast('|') == t.name })
+                                                    store.favouriteTeams = store.favouriteTeams.filterNot { it.endsWith("|${t.name}") }.toSet()
                                             } else {
-                                                cur.add(teamFavKey)
+                                                store.sportsLeagueTeams = store.sportsLeagueTeams + pickKey
+                                                store.sportsLeagues = store.sportsLeagues + lid
+                                                store.favouriteTeams = store.favouriteTeams + teamFavKey
                                             }
-                                            store.favouriteTeams = cur
                                             version++
                                         }
                                     )

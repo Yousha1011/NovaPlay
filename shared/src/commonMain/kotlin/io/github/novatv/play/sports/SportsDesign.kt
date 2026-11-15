@@ -26,6 +26,8 @@ internal object SportsLook {
     val Flash = Color(0xFFFFD54A)
     val Ink = Color(0xFF14171E)
     val Gold = Color(0xFFF5C400)
+    /** The TOMORROW tag: yellow, as LIVE is red. */
+    val Tomorrow = Color(0xFFFFD31A)
     val Shape = RoundedCornerShape(14.dp)
     val SmallShape = RoundedCornerShape(10.dp)
 }
