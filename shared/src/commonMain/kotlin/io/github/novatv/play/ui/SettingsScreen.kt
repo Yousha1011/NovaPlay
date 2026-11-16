@@ -717,8 +717,28 @@ private fun LazyListScope.addonsSection(changed: () -> Unit) {
     val added = io.github.novatv.play.data.Addons.list()
     if (added.isEmpty()) item { Text("No addons yet.", style = T.small) }
     for (a in added) item(key = "addon:${a.manifest}") {
-        Action(a.name, "${a.catalogs.size} live TV catalogs · ${a.manifest.substringAfter("://").substringBefore('/')}", "Remove") {
-            io.github.novatv.play.data.Addons.remove(a); changed()
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(a.name, style = T.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = androidx.compose.ui.graphics.Color.White), maxLines = 1)
+                Text(addonHealth[a.manifest] ?: "${a.catalogs.size} live TV catalogs · ${a.manifest.substringAfter("://").substringBefore('/')}",
+                    style = T.small, maxLines = 2)
+            }
+            Pill("Check", onClick = { checkAddon(a, scope) })
+            Pill("Remove", onClick = { io.github.novatv.play.data.Addons.remove(a); addonHealth.remove(a.manifest); changed() })
         }
+    }
+}
+
+/** Each addon's last check ("12 live events · 9 of 30 streams play"), by manifest; shown on TV, Windows and phone. */
+internal val addonHealth = androidx.compose.runtime.mutableStateMapOf<String, String>()
+
+/** Tries [a]'s streams now (Addons.check) and shows what it found under the addon. */
+internal fun checkAddon(a: io.github.novatv.play.data.Addons.Addon, scope: kotlinx.coroutines.CoroutineScope) {
+    if (addonHealth[a.manifest]?.startsWith("Checking") == true) return
+    addonHealth[a.manifest] = "Checking its live events and streams..."
+    scope.launch {
+        val h = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { io.github.novatv.play.data.Addons.check(a) }
+        addonHealth[a.manifest] = h.summary
     }
 }

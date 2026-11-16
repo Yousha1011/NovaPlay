@@ -67,7 +67,7 @@ object Addons {
      * Every match in the addons' live TV catalogs, read again after 5 minutes. Catalogs named for events ("Live
      * Events") are read; an addon with none has all its live TV catalogs read. One that fails is left out.
      */
-    fun events(): List<Event> = list().flatMap { a ->
+    fun events(addons: List<Addon> = list()): List<Event> = addons.flatMap { a ->
         val events = a.catalogs.filter { (id, n) -> "event" in id.lowercase() || "event" in n.lowercase() }
         (events.ifEmpty { a.catalogs }).flatMap { (id, name) ->
             val key = "${a.manifest}|$id"
@@ -136,6 +136,37 @@ object Addons {
             } }.mapNotNull { it.await() }
         }
         return live.take(limit)
+    }
+
+    /** What [check] found for an addon: its matches now, and of the streams tried how many play, are DRM-locked or down. */
+    data class Health(val events: Int, val tried: Int, val plays: Int, val drm: Int, val down: Int, val error: String? = null) {
+        val summary: String get() = when {
+            error != null -> error
+            events == 0 -> "No live events listed right now"
+            tried == 0 -> "$events live events, no streams listed"
+            else -> "$events live events · $plays of $tried streams play" +
+                (if (drm > 0) " · $drm DRM-locked" else "") + (if (down > 0) " · $down down" else "")
+        }
+    }
+
+    /**
+     * Tries [a]'s streams now: its live events read afresh, and up to [sample] of their streams checked at once
+     * (spread over the events), each as the match page checks them.
+     */
+    fun check(a: Addon, sample: Int = 30): Health {
+        cache.keys().filter { it.startsWith("${a.manifest}|") }.forEach { cache.remove(it) }
+        val evs = try { events(listOf(a)) } catch (e: Exception) { return Health(0, 0, 0, 0, 0, "Could not read the addon") }
+        if (evs.isEmpty()) return Health(0, 0, 0, 0, 0)
+        val streamsBy = kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
+            evs.take(15).map { ev -> async { runCatching { streams(ev) }.getOrElse { emptyList() } } }.map { it.await() }
+        }
+        val picked = (0 until (streamsBy.maxOfOrNull { it.size } ?: 0)).flatMap { i -> streamsBy.mapNotNull { it.getOrNull(i) } }
+            .distinctBy { it.url }.take(sample)
+        val results = kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
+            picked.map { s -> async { Http.probe(s.url, s.headers) } }.map { it.await() }
+        }
+        return Health(evs.size, picked.size, results.count { it == Http.Probe.PLAYS }, results.count { it == Http.Probe.DRM },
+            results.count { it == Http.Probe.DOWN })
     }
 
     /** A stream as a channel the players play: its address is its own; its headers are sent with every request. */

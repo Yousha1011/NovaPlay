@@ -186,8 +186,11 @@ fun PhoneConfigurations(nav: Nav) {
                     }
                     for (a in remember(v) { io.github.novatv.play.data.Addons.list() }) {
                         Text(a.name, style = P.head)
-                        Text("${a.catalogs.size} live TV catalogs", style = P.small)
-                        SmallButton("Remove", P.red) { io.github.novatv.play.data.Addons.remove(a); v++ }
+                        Text(io.github.novatv.play.ui.addonHealth[a.manifest] ?: "${a.catalogs.size} live TV catalogs", style = P.small)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SmallButton("Check") { io.github.novatv.play.ui.checkAddon(a, addonScope) }
+                            SmallButton("Remove", P.red) { io.github.novatv.play.data.Addons.remove(a); v++ }
+                        }
                     }
                 }
             }

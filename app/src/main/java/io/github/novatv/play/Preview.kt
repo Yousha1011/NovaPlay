@@ -28,7 +28,33 @@ fun mediaItem(url: String): MediaItem = MediaItem.Builder().setUri(Uri.parse(url
         path.endsWith(".mpd") -> setMimeType(MimeTypes.APPLICATION_MPD)
         path.endsWith(".ts") -> setMimeType(MimeTypes.VIDEO_MP2T)
     }
+    // A DRM licence the playlist gave for this channel (#KODIPROP): its server, or ClearKey keys handed over locally
+    // (see NovaDrm). Nothing is decrypted without one.
+    io.github.novatv.play.data.DrmLicences.forUrl(url)?.let { l ->
+        val uuid = if (l.type == io.github.novatv.play.data.DrmLicences.WIDEVINE) androidx.media3.common.C.WIDEVINE_UUID else androidx.media3.common.C.CLEARKEY_UUID
+        setDrmConfiguration(MediaItem.DrmConfiguration.Builder(uuid).apply {
+            if (!l.localKeys) setLicenseUri(l.key).setLicenseRequestHeaders(l.headers)
+        }.build())
+    }
 }.build()
+
+/** The players' media sources: over [http] (with [data] for local files), with playlist-given DRM licences. */
+@SuppressLint("UnsafeOptInUsageError")
+fun novaSources(http: androidx.media3.datasource.okhttp.OkHttpDataSource.Factory, data: androidx.media3.datasource.DataSource.Factory = http) =
+    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(data).setDrmSessionManagerProvider(NovaDrm(http))
+
+/** DRM sessions: ClearKey keys from the playlist given straight to the decoder; licence servers asked over [http]. */
+@SuppressLint("UnsafeOptInUsageError")
+private class NovaDrm(http: androidx.media3.datasource.okhttp.OkHttpDataSource.Factory) : androidx.media3.exoplayer.drm.DrmSessionManagerProvider {
+    private val servers = androidx.media3.exoplayer.drm.DefaultDrmSessionManagerProvider().apply { setDrmHttpDataSourceFactory(http) }
+    override fun get(item: MediaItem): androidx.media3.exoplayer.drm.DrmSessionManager {
+        val l = item.localConfiguration?.uri?.toString()?.let { io.github.novatv.play.data.DrmLicences.forUrl(it) }
+        if (l == null || !l.localKeys) return servers.get(item)
+        return androidx.media3.exoplayer.drm.DefaultDrmSessionManager.Builder()
+            .setUuidAndExoMediaDrmProvider(androidx.media3.common.C.CLEARKEY_UUID, androidx.media3.exoplayer.drm.FrameworkMediaDrm.DEFAULT_PROVIDER)
+            .build(androidx.media3.exoplayer.drm.LocalMediaDrmCallback(l.key.encodeToByteArray()))
+    }
+}
 
 /** A short reason for a playback error, as the full-screen player words it. */
 fun playbackMessage(e: PlaybackException): String = when (e.errorCode) {

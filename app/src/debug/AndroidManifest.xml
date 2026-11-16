@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: a test screen that plays a playlist's DRM-protected channels and logs whether each plays. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".DrmProbeActivity" android:exported="true" />
+    </application>
+</manifest>

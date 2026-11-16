@@ -38,6 +38,8 @@ class NovaApp : Application() {
                 startActivity(Intent(this@NovaApp, PlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), grow)
             }
             override fun toast(msg: String) { Toast.makeText(this@NovaApp, msg, Toast.LENGTH_SHORT).show() }
+            override fun openUrl(url: String) { openApp(emptyList(), url) }
+            override fun openApp(packages: List<String>, web: String, name: String) = openOfficialApp(this@NovaApp, packages, web, name, tv = !PHONE)
             override val backgroundSync = true
             override fun scheduleOvernight(enabled: Boolean, hour: Int) = Overnight.schedule(this@NovaApp, enabled, hour)
             override fun runOvernightNow() = SyncService.start(this@NovaApp)
@@ -88,4 +90,22 @@ object TvHttp {
             else chain.proceed(req.newBuilder().apply { extra.forEach { (k, v) -> header(k, v) } }.build())
         }
         .build()
+}
+
+/**
+ * Opens the first of [packages] installed (its TV entry first), else on a phone [web]. False when nothing opened (on a
+ * TV, an app that isn't installed): the caller then names [name] to install.
+ */
+fun openOfficialApp(ctx: android.content.Context, packages: List<String>, web: String, name: String, tv: Boolean): Boolean {
+    val pm = ctx.packageManager
+    for (p in packages) {
+        val i = pm.getLeanbackLaunchIntentForPackage(p) ?: pm.getLaunchIntentForPackage(p) ?: continue
+        if (runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return true
+    }
+    // Not installed. A TV says so (the caller names the app to install): a Fire TV has no browser (a web page opens
+    // blank) and its Appstore lacks many of these apps or drops back home. A phone opens the service's site.
+    if (tv) return false
+    val i = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(web)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (i.resolveActivity(pm) == null) return false
+    return runCatching { ctx.startActivity(i) }.isSuccess
 }

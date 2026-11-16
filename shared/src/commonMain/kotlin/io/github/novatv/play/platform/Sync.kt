@@ -16,5 +16,6 @@ class SafeMap<K, V> {
     operator fun set(k: K, v: V) { lock.locked { m[k] = v } }
     fun remove(k: K) { lock.locked { m.remove(k) } }
     fun clear() = lock.locked { m.clear() }
+    fun keys(): List<K> = lock.locked { m.keys.toList() }
     inline fun getOrPut(k: K, make: () -> V): V = get(k) ?: make().also { set(k, it) }
 }

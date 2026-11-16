@@ -56,7 +56,7 @@ class LivePlayerHolder(private val ctx: Context) {
         val p = ExoPlayer.Builder(ctx, DefaultRenderersFactory(ctx).setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER))
             .setLoadControl(l)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(data))
+            .setMediaSourceFactory(novaSources(data))
             .build()
         load = l
         player = p

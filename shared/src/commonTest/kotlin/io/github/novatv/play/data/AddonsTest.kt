@@ -36,4 +36,11 @@ class AddonsTest {
         assertTrue(Addons.same("Zimbabwe Women", side("Zimbabwe Women", "Zimbabwe W", "ZIM-W")))
         assertFalse(Addons.same("Pakistan U19", side("Pakistan", "Pakistan", "PAK")))
     }
+
+    @Test fun drmPlaylistsAreNotPlayable() {
+        assertTrue(Http.drm("#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI=\"skd://x\"\n#EXTINF:4,\na.ts"))
+        assertTrue(Http.drm("#EXTM3U\n#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES,URI=\"x\"\n"))
+        assertFalse(Http.drm("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:4,\na.ts"))
+        assertFalse(Http.drm("#EXTM3U\n#EXTINF:4,\na.ts"))
+    }
 }

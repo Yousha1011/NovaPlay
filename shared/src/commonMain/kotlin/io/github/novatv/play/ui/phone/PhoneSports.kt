@@ -2,6 +2,7 @@ package io.github.novatv.play.ui.phone
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -287,6 +288,9 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     val st by App.repo.state.collectAsState()
     var favs by remember { mutableIntStateOf(0) }
     val tv by produceState<List<Broadcast>?>(null, e.id) { value = withContext(IO) { Broadcasters.forEvent(e) } }
+    val apps by produceState(emptyList<io.github.novatv.play.sports.OfficialApps.Service>(), e.id) {
+        value = withContext(IO) { io.github.novatv.play.sports.OfficialApps.forEvent(e) }
+    }
     // What is known locally first, then the online broadcasters added below it.
     // The user's Stremio addons: their streams of this match, after your channels.
     val fromAddons by produceState(emptyList<Airing>(), e.id) {
@@ -347,6 +351,16 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            if (apps.isNotEmpty()) item {
+                Column(Modifier.padding(top = 14.dp)) {
+                    Text("Watch in the official app", style = P.title)
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        for (svc in apps) Text(svc.name, style = P.head.copy(fontSize = 14.sp), maxLines = 1,
+                            modifier = Modifier.glass(RoundedCornerShape(50)).tap { io.github.novatv.play.sports.OfficialApps.open(svc) }.padding(horizontal = 16.dp, vertical = 9.dp))
                     }
                 }
             }

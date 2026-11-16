@@ -88,6 +88,10 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     val fromAddons by produceState(emptyList<Airing>(), e.id) {
         value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
     }
+    // The broadcasters' own apps, for matches only they show (DRM-protected, so no stream here plays them).
+    val apps by produceState(emptyList<io.github.novatv.play.sports.OfficialApps.Service>(), e.id) {
+        value = withContext(IO) { io.github.novatv.play.sports.OfficialApps.forEvent(e) }
+    }
     var card by remember { mutableStateOf<Side?>(null) }
     // Focus starts on the page (the first side, else the first button), never left in the menu.
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -138,6 +142,14 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
                     fromAddons.forEachIndexed { i, a ->
                         AiringRow(a, onLongClick = { playChannel(fromAddons.map { it.channel }, i, switchOnFailure = true) }) { onWatch(a.channel) }
                     }
+                }
+            }
+            if (apps.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text("WATCH IN THE OFFICIAL APP", style = T.eyebrow.copy(color = SportsLook.Dim))
+                Spacer(Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (svc in apps) item(key = "app_${svc.name}") { Pill(svc.name, onClick = { io.github.novatv.play.sports.OfficialApps.open(svc) }) }
                 }
             }
             Spacer(Modifier.height(14.dp))

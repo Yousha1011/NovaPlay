@@ -255,7 +255,12 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
                 // Only once this stream (not the last one, still reporting while it stops) has played 10 s.
                 if (newTime >= 10_000 && liveEnds != 0 && System.currentTimeMillis() - openedAt >= 10_000) liveEnds = 0
             }
-            override fun error(mediaPlayer: MediaPlayer) { error = "This stream could not be played"; buffering = false }
+            override fun error(mediaPlayer: MediaPlayer) {
+                // A playlist's DRM-protected channel: Windows has no DRM to decrypt it with, Fire TV and Android do.
+                error = if (playingUrl?.let { io.github.novatv.play.data.DrmLicences.forUrl(it) } != null)
+                    "This channel is DRM-protected: it plays on Fire TV and Android, not on Windows" else "This stream could not be played"
+                buffering = false
+            }
             override fun finished(mediaPlayer: MediaPlayer) {
                 // A live stream never ends on its own: the server closed it. Open it again once, quietly; if it ends
                 // again, say so (instead of leaving the last picture, or black, with nothing on screen).

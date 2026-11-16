@@ -43,6 +43,11 @@ interface Host {
     fun toast(msg: String)
     /** Opens a web page outside the app; platforms without a browser to hand ignore it. */
     fun openUrl(url: String) {}
+    /**
+     * Opens the first of [packages] installed (an Android app), else [web]. False when neither could be opened (a TV
+     * with no browser): the caller then names the app to install.
+     */
+    fun openApp(packages: List<String>, web: String, name: String = ""): Boolean { openUrl(web); return true }
     /** Keeps a snapshot of the settings where it survives reinstalling the app (the iPhone's Keychain). */
     fun saveBackup(json: String) {}
     fun restoreBackup(): String? = null

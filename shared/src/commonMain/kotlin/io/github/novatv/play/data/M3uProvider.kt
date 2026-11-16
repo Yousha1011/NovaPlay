@@ -34,6 +34,8 @@ class M3uProvider(private val s: Source) : Provider {
         var epg: String? = null
         var attrs: Map<String, String> = emptyMap()
         var title = ""
+        // #KODIPROP lines (a DRM licence), before or after the entry's #EXTINF: they belong to the next address.
+        var props = HashMap<String, String>()
         var count = 0
         while (true) {
             val line = r.readUtf8Line() ?: break
@@ -47,6 +49,10 @@ class M3uProvider(private val s: Source) : Provider {
                     val comma = lastTitleComma(t)
                     attrs = attrRe.findAll(t.substring(0, comma)).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
                     title = t.substring(comma + 1).trim()
+                }
+                t.startsWith("#KODIPROP:", true) -> {
+                    val kv = t.substring(10)
+                    props[kv.substringBefore('=').trim().lowercase()] = kv.substringAfter('=', "").trim()
                 }
                 t.isEmpty() || t.startsWith("#") -> {}
                 else -> {
@@ -77,10 +83,11 @@ class M3uProvider(private val s: Source) : Provider {
                                 epgId = attrs["tvg-id"]?.ifBlank { null } ?: attrs["tvg-name"]?.ifBlank { null }, url = t,
                                 number = attrs["tvg-chno"]?.toIntOrNull() ?: (channels.size + 1),
                                 catchup = attrs["catchup"] != null || attrs["tvg-rec"]?.let { it != "0" } == true,
+                                cmd = DrmLicences.fromKodiProps(props)?.let(DrmLicences::encode),
                             ))
                         }
                     }
-                    attrs = emptyMap(); title = ""
+                    attrs = emptyMap(); title = ""; if (props.isNotEmpty()) props = HashMap()
                     if (++count % 5000 == 0) progress("Reading playlist: $count entries")
                 }
             }
@@ -103,7 +110,12 @@ class M3uProvider(private val s: Source) : Provider {
         return t.length - 1
     }
 
-    override fun liveUrl(ch: Channel) = ch.url ?: ch.id
+    override fun liveUrl(ch: Channel): String {
+        val url = ch.url ?: ch.id
+        // A DRM-protected channel's licence, for the player to find by the address it is given.
+        DrmLicences.decode(ch.cmd)?.let { DrmLicences.put(url, it) }
+        return url
+    }
     override fun movieUrl(m: Movie) = m.url ?: m.id
     override fun episodeUrl(s: Series, e: Episode) = e.url ?: e.id
     override fun movieDetails(m: Movie) = Details()

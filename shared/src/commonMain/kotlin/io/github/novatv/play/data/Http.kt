@@ -47,29 +47,42 @@ object Http {
      * Whether [url] opens: its status only (the body is never read, so a live stream doesn't keep it busy), within
      * [timeoutMs]. False on any error or a status of 400 and up.
      */
-    suspend fun opens(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 6_000L): Boolean = try {
+    suspend fun opens(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 6_000L): Boolean =
+        probe(url, headers, timeoutMs) == Probe.PLAYS
+
+    /** What a stream check found: it plays, it is DRM-locked (opens, but no player here decrypts it), or it is down. */
+    enum class Probe { PLAYS, DRM, DOWN }
+
+    /** [opens], saying why not: a DRM-locked stream apart from one that is down. */
+    suspend fun probe(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 6_000L): Probe = try {
         var variant: String? = null
         kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
             client.prepareGet(url) {
                 header("User-Agent", headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: UA)
                 headers.filterKeys { !it.equals("User-Agent", true) }.forEach { (k, v) -> header(k, v) }
             }.execute { r ->
-                if (r.status.value !in 200..399) return@execute false
+                if (r.status.value !in 200..399) return@execute Probe.DOWN
                 // An HLS playlist that lists others (qualities): those must open too. Some send players on to a
                 // second server that refuses (only in its own country) while the first still answers.
                 val type = r.headers["Content-Type"].orEmpty().lowercase()
                 // A playlist: by its type, its name, or plain text (a live video stream is never text, so reading it is safe).
                 val hls = "mpegurl" in type || type.startsWith("text/") || r.call.request.url.encodedPath.endsWith(".m3u8")
-                if (!hls) return@execute true
-                val text = r.bodyAsText().take(20_000)
-                if (!text.contains("#EXT-X-STREAM-INF")) return@execute true
-                val next = text.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: return@execute true
-                val nextUrl = if (next.startsWith("http")) next else r.call.request.url.toString().substringBeforeLast('/') + "/" + next
-                variant = nextUrl
-                true
+                if (!hls) return@execute Probe.PLAYS
+                val text = r.bodyAsText().take(200_000)
+                // DRM-locked video (FanCode's SAMPLE-AES-CTR): it downloads, but no player here can decrypt it.
+                // Plain AES-128 the players decrypt themselves.
+                if (drm(text)) return@execute Probe.DRM
+                if (!text.contains("#EXT-X-STREAM-INF")) return@execute Probe.PLAYS
+                val next = text.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: return@execute Probe.PLAYS
+                variant = if (next.startsWith("http")) next else r.call.request.url.toString().substringBeforeLast('/') + "/" + next
+                Probe.PLAYS
             }
-        }?.let { ok -> if (ok && variant != null) opens(variant!!, headers, timeoutMs) else ok } ?: false
-    } catch (e: Exception) { false }
+        }?.let { p -> if (p == Probe.PLAYS && variant != null) probe(variant!!, headers, timeoutMs) else p } ?: Probe.DOWN
+    } catch (e: Exception) { Probe.DOWN }
+
+    /** An HLS playlist whose video is DRM-encrypted (any key method but NONE or AES-128). */
+    internal fun drm(playlist: String): Boolean = Regex("""#EXT-X-(?:SESSION-)?KEY:[^\n]*METHOD=([A-Z0-9-]+)""").findAll(playlist)
+        .any { it.groupValues[1] != "NONE" && it.groupValues[1] != "AES-128" }
 
     /** Blocking: a request with a JSON [body] (GitHub's API); returns the status code and the reply. */
     fun send(method: String, url: String, headers: Map<String, String>, body: String? = null): Pair<Int, String> = runBlocking {
