@@ -297,6 +297,7 @@ private fun LazyListScope.vodPane(changed: () -> Unit) {
 
 private fun LazyListScope.sportsPane(nav: Nav, changed: () -> Unit) {
     val s = App.store
+    addonsSection(changed)
     section("What to follow")
     item { Action("Sports, competitions and clubs", "Choose what the Sports Hub shows", "Choose") { nav.push(Route.Leagues) } }
     item { Action("Favourite clubs", "Followed clubs get a star. OK clears them all.",
@@ -678,6 +679,46 @@ private fun CrashQr(text: String) {
             Spacer(Modifier.width(18.dp))
             coil3.compose.AsyncImage(io.github.novatv.play.data.AccountSync.serverUrl("/qr?data=" + io.github.novatv.play.platform.urlEncode(l)), "QR code",
                 Modifier.size(200.dp).clip(RoundedCornerShape(10.dp)))
+        }
+    }
+}
+
+
+/**
+ * Stremio addons (as in Stremio and Nuvio): added by their manifest link. Their live events show on a match's page,
+ * under "Watch on your channels", when they are that match.
+ */
+private fun LazyListScope.addonsSection(changed: () -> Unit) {
+    section("Addons")
+    item {
+        Column {
+            Text("Stremio addon links (manifest.json). Their live events show on a match's page when they're that match.", style = T.small,
+                modifier = Modifier.padding(bottom = 6.dp))
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            var url by remember { mutableStateOf("") }
+            var busy by remember { mutableStateOf(false) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                InputField(url, "https://example.com/manifest.json", { url = it }, Modifier.weight(1f), url = true)
+                Pill(if (busy) "Adding..." else "Add", onClick = {
+                    val u = url.trim()
+                    if (u.isNotEmpty() && !busy) {
+                        busy = true
+                        scope.launch {
+                            val r = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { runCatching { io.github.novatv.play.data.Addons.add(u) } }
+                            busy = false
+                            r.onSuccess { a -> url = ""; toast("Added ${a.name}: ${a.catalogs.size} live TV catalogs"); changed() }
+                                .onFailure { toast("That link isn't a Stremio addon (no manifest found)") }
+                        }
+                    }
+                }, primary = true)
+            }
+        }
+    }
+    val added = io.github.novatv.play.data.Addons.list()
+    if (added.isEmpty()) item { Text("No addons yet.", style = T.small) }
+    for (a in added) item(key = "addon:${a.manifest}") {
+        Action(a.name, "${a.catalogs.size} live TV catalogs · ${a.manifest.substringAfter("://").substringBefore('/')}", "Remove") {
+            io.github.novatv.play.data.Addons.remove(a); changed()
         }
     }
 }

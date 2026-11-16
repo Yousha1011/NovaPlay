@@ -165,6 +165,32 @@ fun PhoneConfigurations(nav: Nav) {
                     if (n > 0) SmallButton("Clear favourite clubs ($n)", P.red) { store.favouriteTeams = emptySet(); v++ }
                 }
             }
+            item { SectionLabel("Addons") }
+            item {
+                Card {
+                    Text("Stremio addon links (manifest.json). Their live events show on a match's page when they're that match.", style = P.small)
+                    var addonUrl by remember { mutableStateOf("") }
+                    var busy by remember { mutableStateOf(false) }
+                    val addonScope = androidx.compose.runtime.rememberCoroutineScope()
+                    Field("Addon link", addonUrl, "https://example.com/manifest.json") { addonUrl = it }
+                    SmallButton(if (busy) "Adding..." else "Add addon") {
+                        val u = addonUrl.trim()
+                        if (u.isNotEmpty() && !busy) {
+                            busy = true
+                            addonScope.launch {
+                                val r = kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) { runCatching { io.github.novatv.play.data.Addons.add(u) } }
+                                busy = false
+                                r.onSuccess { a -> addonUrl = ""; toast("Added ${a.name}"); v++ }.onFailure { toast("That link isn't a Stremio addon") }
+                            }
+                        }
+                    }
+                    for (a in remember(v) { io.github.novatv.play.data.Addons.list() }) {
+                        Text(a.name, style = P.head)
+                        Text("${a.catalogs.size} live TV catalogs", style = P.small)
+                        SmallButton("Remove", P.red) { io.github.novatv.play.data.Addons.remove(a); v++ }
+                    }
+                }
+            }
             item { SectionLabel("Online extras") }
             item { KeyCard("TMDB API key", "Ratings, cast, trailers and reviews on film and series pages (free at themoviedb.org).", store.tmdbKey,
                 { store.tmdbKey = it }, { io.github.novatv.play.data.Tmdb.test() }) }

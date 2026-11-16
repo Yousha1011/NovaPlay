@@ -97,6 +97,8 @@ class PlayRequest(
     val categoryId: String,
     val categoryName: String,
     val favourite: Boolean,
+    /** The Referer the stream needs (an addon's stream), or "" for none. */
+    val referer: String = "",
 )
 
 /** One programme in a channel's guide, for the Swift player's list. */
@@ -295,11 +297,11 @@ object IosPlayback {
                     val now = nowMs()
                     val cat = App.repo.state.value.lib.liveCategories.firstOrNull { k -> k.id == c.categoryId }?.name.orEmpty()
                     PlayRequest("${c.number}  ${c.name}", p?.let { q -> "${clock(q.start)} – ${clock(q.stop)}  ${q.title}" } ?: "No information",
-                        url, true, 0L, Http.UA, c.logo, App.store.bufferMs,
+                        url, true, 0L, streamUa(url), c.logo, App.store.bufferMs,
                         c.name, p?.title ?: "No information", n?.let { q -> "Next  ${clock(q.start)}  ${q.title}" } ?: "No information",
                         p?.let { q -> ((now - q.start).toFloat() / (q.stop - q.start).coerceAtLeast(1)).coerceIn(0f, 1f) } ?: -1f,
                         p?.let { q -> "${clock(q.start)} – ${clock(q.stop)}" }.orEmpty(),
-                        c.categoryId, cat, App.store.isFavourite(App.repo.channelKey(c)))
+                        c.categoryId, cat, App.store.isFavourite(App.repo.channelKey(c)), streamReferer(url))
                 }
                 is PlayItem.Vod -> PlayRequest(it.title, it.series?.name ?: "", url, false, App.store.progress(it.key)?.first ?: 0L,
                     Http.UA, it.movie?.poster ?: it.series?.poster, App.store.bufferMs,
@@ -309,3 +311,12 @@ object IosPlayback {
         }
     }
 }
+
+
+/** The User-Agent a stream is opened with: an addon stream's own if it names one, else the app's. */
+private fun streamUa(url: String): String =
+    io.github.novatv.play.data.StreamHeaders.forUrl(url)?.entries?.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: Http.UA
+
+/** The Referer an addon stream needs, or "". */
+private fun streamReferer(url: String): String =
+    io.github.novatv.play.data.StreamHeaders.forUrl(url)?.entries?.firstOrNull { it.key.equals("Referer", true) || it.key.equals("Referrer", true) }?.value.orEmpty()

@@ -188,7 +188,11 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
                 }
             },
             // The same box can be reused for another field (Xtream URL, then M3U URL): keep its hint current.
-            update = { it.hint = hint },
+            update = {
+                it.hint = hint
+                // The screen cleared or set the text (an addon added, a search reset): show it, unless typing just made it.
+                if (it.text.toString() != value) { it.setText(value); it.setSelection(value.length) }
+            },
         )
     }
 }

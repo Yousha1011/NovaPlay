@@ -43,6 +43,34 @@ object Http {
         }
     }
 
+    /**
+     * Whether [url] opens: its status only (the body is never read, so a live stream doesn't keep it busy), within
+     * [timeoutMs]. False on any error or a status of 400 and up.
+     */
+    suspend fun opens(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 6_000L): Boolean = try {
+        var variant: String? = null
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            client.prepareGet(url) {
+                header("User-Agent", headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: UA)
+                headers.filterKeys { !it.equals("User-Agent", true) }.forEach { (k, v) -> header(k, v) }
+            }.execute { r ->
+                if (r.status.value !in 200..399) return@execute false
+                // An HLS playlist that lists others (qualities): those must open too. Some send players on to a
+                // second server that refuses (only in its own country) while the first still answers.
+                val type = r.headers["Content-Type"].orEmpty().lowercase()
+                // A playlist: by its type, its name, or plain text (a live video stream is never text, so reading it is safe).
+                val hls = "mpegurl" in type || type.startsWith("text/") || r.call.request.url.encodedPath.endsWith(".m3u8")
+                if (!hls) return@execute true
+                val text = r.bodyAsText().take(20_000)
+                if (!text.contains("#EXT-X-STREAM-INF")) return@execute true
+                val next = text.lines().map { it.trim() }.firstOrNull { it.isNotEmpty() && !it.startsWith("#") } ?: return@execute true
+                val nextUrl = if (next.startsWith("http")) next else r.call.request.url.toString().substringBeforeLast('/') + "/" + next
+                variant = nextUrl
+                true
+            }
+        }?.let { ok -> if (ok && variant != null) opens(variant!!, headers, timeoutMs) else ok } ?: false
+    } catch (e: Exception) { false }
+
     /** Blocking: a request with a JSON [body] (GitHub's API); returns the status code and the reply. */
     fun send(method: String, url: String, headers: Map<String, String>, body: String? = null): Pair<Int, String> = runBlocking {
         client.prepareRequest(url) {

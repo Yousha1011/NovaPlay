@@ -489,6 +489,7 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
         guard let url = URL(string: request.url) else { showError("This stream address is not valid"); return }
         guard let media = VLCMedia(url: url) else { showError("This stream address is not valid"); return }
         media.addOption(":http-user-agent=\(request.userAgent)")
+        if !request.referer.isEmpty { media.addOption(":http-referrer=\(request.referer)") }
         media.addOption(":network-caching=\(max(1000, min(15000, Int(request.bufferMs))))")
         player.media = media
         if let a = aspect { player.videoAspectRatio = a }
@@ -500,7 +501,10 @@ final class PlayerViewController: UIViewController, VLCMediaPlayerDelegate, UICo
     private func startAV(_ url: URL) {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
-        let item = AVPlayerItem(asset: AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": request.userAgent]]))
+        // An addon's stream may need a Referer as well as its User-Agent: sent with every request of the stream.
+        var headers = ["User-Agent": request.userAgent]
+        if !request.referer.isEmpty { headers["Referer"] = request.referer }
+        let item = AVPlayerItem(asset: AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers]))
         item.preferredForwardBufferDuration = Double(max(1000, min(15000, Int(request.bufferMs)))) / 1000
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true

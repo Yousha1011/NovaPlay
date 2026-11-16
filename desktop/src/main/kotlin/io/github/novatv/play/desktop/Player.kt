@@ -321,7 +321,7 @@ fun PlayerScreen(start: PlayItem, window: WindowState, onClose: () -> Unit) {
         openedAt = System.currentTimeMillis()
         val opts = arrayOf(":http-user-agent=${io.github.novatv.play.data.Http.UA}", ":network-caching=${App.store.bufferMs.coerceIn(1000, 15000)}")
         if (AutoTest.scenario != null) AutoTest.log("PLAY idx=$index (${if (url.startsWith("http://127.0.0.1")) "relay" else "direct"})")
-        Vlc.later { player.media().play(url, *opts) }
+        Vlc.later { player.media().play(url, *opts, *vlcHeaders(url)) }
         if (it is PlayItem.Vod) App.store.progress(it.key)?.let { p -> delay(800); player.controls().setTime(p.first) }
         if (it is PlayItem.Live) {
             val c = it.channels[index]
@@ -493,4 +493,20 @@ private fun saveProgress(v: PlayItem.Vod, pos: Long, dur: Long) {
     // Recordings aren't kept in Continue Watching (as on Android).
     if (dur <= 0 || v.key.startsWith("rec:")) return
     App.store.saveProgress(v.key, v.title, v.movie?.poster ?: v.series?.poster, pos, dur)
+}
+
+
+/**
+ * VLC options for the headers an addon stream needs (see StreamHeaders): its Referer and User-Agent. Given after the
+ * app's own User-Agent, so they win. None for any other stream.
+ */
+internal fun vlcHeaders(url: String): Array<String> {
+    val h = io.github.novatv.play.data.StreamHeaders.forUrl(url) ?: return emptyArray()
+    return h.mapNotNull { (k, v) ->
+        when (k.lowercase()) {
+            "user-agent" -> ":http-user-agent=$v"
+            "referer", "referrer" -> ":http-referrer=$v"
+            else -> null
+        }
+    }.toTypedArray()
 }

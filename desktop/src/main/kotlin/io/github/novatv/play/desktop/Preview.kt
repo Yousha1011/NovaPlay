@@ -97,8 +97,8 @@ object DesktopPreviewEngine : PreviewEngine {
         val o = opts()
         p.audio().isMute = true
         testLog("PREVIEW play (${if (target.startsWith("http://127.0.0.1")) "relay" else "direct"})")
-        Vlc.later { p.controls().stop(); p.media().play(target, *o) }
-        watch(p, gen, onEvent, System.currentTimeMillis(), alreadyReady = false) { Vlc.later { p.controls().stop(); p.media().play(target, *o) } }
+        Vlc.later { p.controls().stop(); p.media().play(target, *o, *vlcHeaders(url)) }
+        watch(p, gen, onEvent, System.currentTimeMillis(), alreadyReady = false) { Vlc.later { p.controls().stop(); p.media().play(target, *o, *vlcHeaders(url)) } }
     }
 
     /**
@@ -190,7 +190,7 @@ object DesktopPreviewEngine : PreviewEngine {
         val gen = ++generation
         testLog("PREVIEW took the player back")
         val o = opts()
-        watch(h.player, gen, onEvent, frames.lastFrameAt.coerceAtLeast(1L) - 1, alreadyReady = true) { Vlc.later { h.player.controls().stop(); h.player.media().play(url, *o) } }
+        watch(h.player, gen, onEvent, frames.lastFrameAt.coerceAtLeast(1L) - 1, alreadyReady = true) { Vlc.later { h.player.controls().stop(); h.player.media().play(url, *o, *vlcHeaders(url)) } }
         return true
     }
 

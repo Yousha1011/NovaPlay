@@ -183,7 +183,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
             if (s !in screens) return@launch
             if (url == null) { s.current.dropped = true; return@launch }
             val v = s.current
-            Vlc.later { v.player.media().play(url, *opts) }
+            Vlc.later { v.player.media().play(url, *opts, *vlcHeaders(url)) }
         }
     }
     /** Opens [s]'s channel again in a paused standby player, ready to take over. */
@@ -195,7 +195,7 @@ fun MultiScreen(live: PlayItem.Live, first: Int, second: Int, onExit: (io.github
         scope.launch {
             val url = withContext(IO) { try { App.repo.provider?.liveUrl(streamFor(chans[s.channel]))?.let(AutoTest::stream) } catch (e: Exception) { null } }
             if (url == null || s.standby !== sb) return@launch
-            Vlc.later { sb.player.media().play(url, *opts, ":start-paused") }
+            Vlc.later { sb.player.media().play(url, *opts, *vlcHeaders(url), ":start-paused") }
         }
     }
     /** The standby takes over [s]: its picture carries on from the old one's last frame. */

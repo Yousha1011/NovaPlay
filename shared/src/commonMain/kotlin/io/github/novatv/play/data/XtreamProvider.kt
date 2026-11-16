@@ -107,7 +107,7 @@ class XtreamProvider(private val s: Source) : Provider {
         return Library(liveCats, channels, movieCats, movies, seriesCats, series, s.epgUrl.ifBlank { "$base/xmltv.php?username=$u&password=$p" })
     }
 
-    override fun liveUrl(ch: Channel) = "$base/live/$u/$p/${ch.id}.${if (io.github.novatv.play.App.store.xtreamHls) "m3u8" else "ts"}"
+    override fun liveUrl(ch: Channel) = if (ch.categoryId == Addons.CATEGORY && ch.url != null) ch.url else "$base/live/$u/$p/${ch.id}.${if (io.github.novatv.play.App.store.xtreamHls) "m3u8" else "ts"}"
     override fun movieUrl(m: Movie) = "$base/movie/$u/$p/${m.id}.${m.ext ?: "mp4"}"
     override fun episodeUrl(s: Series, e: Episode) = "$base/series/$u/$p/${e.id}.${e.ext ?: "mp4"}"
 

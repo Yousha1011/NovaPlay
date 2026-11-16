@@ -288,6 +288,10 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     var favs by remember { mutableIntStateOf(0) }
     val tv by produceState<List<Broadcast>?>(null, e.id) { value = withContext(IO) { Broadcasters.forEvent(e) } }
     // What is known locally first, then the online broadcasters added below it.
+    // The user's Stremio addons: their streams of this match, after your channels.
+    val fromAddons by produceState(emptyList<Airing>(), e.id) {
+        value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
+    }
     val airings by produceState<List<Airing>?>(null, e.id, st.epgVersion) {
         value = withContext(IO) { App.repo.matcher().airings(e, limit = 150) }
         val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 150) }
@@ -352,7 +356,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                     airings?.takeIf { it.isNotEmpty() }?.let { Text("${it.size} found", style = P.small) }
                 }
             }
-            val a = airings
+            val a = airings?.let { it + fromAddons }
             when {
                 a == null -> item { Box(Modifier.fillMaxWidth().padding(30.dp), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() } }
                 a.isEmpty() -> item { Empty(Icons.Rounded.SportsSoccer, "No channels found", "Not in your playlist's guide or channel names.") }

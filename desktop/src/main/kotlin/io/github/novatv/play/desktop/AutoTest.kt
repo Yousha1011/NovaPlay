@@ -143,6 +143,7 @@ object AutoTest {
                     "netpreview" -> netPreview()
                     "nethandover" -> netHandover()
                     "netclick" -> netClick()
+                    "addons" -> addons()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -913,6 +914,52 @@ object AutoTest {
         check("15 full-screen opens: none stopped, frozen or without frames (${opens.text()})", bad.isEmpty() && opens.values.sum() == 15)
         check("focus back on the Live TV list after every close ($focusOk/15)", focusOk == 15)
         check("one VLC player", vlcLive() == 1)
+    }
+
+    /**
+     * Stremio addons on Windows: CNCVerse added (removed again after if it wasn't there), a live match's addon streams
+     * found, and up to three played full screen in VLC, a stream needing its Referer among them if offered.
+     */
+    private suspend fun addons() {
+        check("playlist loaded", waitForLibrary()); delay(2000)
+        val m = "https://cncverse.dpdns.org/manifest.json"
+        val had = io.github.novatv.play.data.Addons.list().any { it.manifest == m }
+        val added = withContext(Dispatchers.IO) { runCatching { io.github.novatv.play.data.Addons.add(m) } }
+        check("addon added (${added.getOrNull()?.catalogs?.size} live TV catalogs)", added.isSuccess)
+        App.repo.refreshSports(0)
+        waitFor(60_000) { App.repo.sports.value.events.any { it.state == io.github.novatv.play.sports.State.LIVE } }
+        val live = App.repo.sports.value.events.filter { it.state == io.github.novatv.play.sports.State.LIVE && it.home != null && it.away != null }
+        log("live matches: ${live.joinToString { it.title }}")
+        var found: Pair<io.github.novatv.play.sports.SportEvent, List<io.github.novatv.play.sports.Airing>>? = null
+        for (e in live) {
+            val a = withContext(Dispatchers.IO) { io.github.novatv.play.data.Addons.airings(e) }
+            log("${e.title}: ${a.size} addon streams: ${a.joinToString { it.channel.name + " [" + it.why + "]" }}")
+            if (a.isNotEmpty() && found == null) found = e to a
+        }
+        check("a live match has working addon streams", found != null)
+        val (ev, airings) = found ?: return cleanup(had, m)
+        check("every row names its match", airings.all { r -> r.why.contains(" vs ", true) || r.why.contains(" v ", true) })
+        // A stream that needs its Referer first (proof the headers reach VLC), then others.
+        val withRef = airings.filter { io.github.novatv.play.data.StreamHeaders.forUrl(it.channel.url!!)?.keys?.any { k -> k.equals("Referer", true) } == true }
+        val pick = (withRef.take(1) + airings).distinctBy { it.channel.url }.take(3)
+        log("needing a Referer: ${withRef.joinToString { it.channel.name }}")
+        var ok = 0
+        for ((i, a) in pick.withIndex()) {
+            onUi { Desktop.playing = io.github.novatv.play.data.PlayItem.Live(listOf(a.channel), 0) }
+            val h = settleFull(null, 40_000)
+            val needsRef = a in withRef
+            log("play ${i + 1} ${a.channel.name} (referer ${if (needsRef) "yes" else "no"}): ${h?.first} | ${fullNow()?.detail}")
+            if (h != null && h.first !in failing && h.first != Health.STATUS) ok++
+            check("${a.channel.name} plays${if (needsRef) " (needs its Referer)" else ""}: ${h?.first}", h != null && h.first !in failing && h.first != Health.STATUS)
+            onUi { Desktop.playing = null }
+            waitFor(6000) { Desktop.playing == null }; delay(1500)
+        }
+        log("addon streams playing on Windows: $ok/${pick.size} (${ev.title})")
+        cleanup(had, m)
+    }
+
+    private fun cleanup(had: Boolean, m: String) {
+        if (!had) io.github.novatv.play.data.Addons.list().firstOrNull { it.manifest == m }?.let { io.github.novatv.play.data.Addons.remove(it); log("addon removed again (was not there before)") }
     }
 
     /** 10 multi-view entries and exits with 2 screens, each judged; sampled every 5; connections counted. */

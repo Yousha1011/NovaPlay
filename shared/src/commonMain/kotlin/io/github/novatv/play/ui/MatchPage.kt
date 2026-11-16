@@ -84,6 +84,10 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
         }
         if (online.isNotEmpty()) value = (local + online).distinctBy { it.channel.id }
     }
+    // The user's Stremio addons: their streams of this match, after your channels (read off the network, so later).
+    val fromAddons by produceState(emptyList<Airing>(), e.id) {
+        value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
+    }
     var card by remember { mutableStateOf<Side?>(null) }
     // Focus starts on the page (the first side, else the first button), never left in the menu.
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -123,6 +127,16 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
                     // OK plays it in the TV window; hold OK opens it full screen.
                     airings!!.take(3).forEachIndexed { i, a ->
                         AiringRow(a, onLongClick = { playChannel(airings!!.map { it.channel }, i, switchOnFailure = true) }) { onWatch(a.channel) }
+                    }
+                }
+            }
+            if (fromAddons.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text("FROM YOUR ADDONS", style = T.eyebrow.copy(color = SportsLook.Dim))
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    fromAddons.forEachIndexed { i, a ->
+                        AiringRow(a, onLongClick = { playChannel(fromAddons.map { it.channel }, i, switchOnFailure = true) }) { onWatch(a.channel) }
                     }
                 }
             }

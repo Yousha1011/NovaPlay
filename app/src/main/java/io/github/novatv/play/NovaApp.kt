@@ -79,5 +79,13 @@ object TvHttp {
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        // Addon streams that need their own Referer or User-Agent (see StreamHeaders): added to every request to
+        // their host, the playlist's segments included.
+        .addInterceptor { chain ->
+            val req = chain.request()
+            val extra = io.github.novatv.play.data.StreamHeaders.forUrl(req.url.toString())
+            if (extra.isNullOrEmpty()) chain.proceed(req)
+            else chain.proceed(req.newBuilder().apply { extra.forEach { (k, v) -> header(k, v) } }.build())
+        }
         .build()
 }

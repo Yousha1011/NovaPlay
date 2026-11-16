@@ -111,6 +111,7 @@ class StalkerProvider(private val s: Source) : Provider {
     }
 
     override fun liveUrl(ch: Channel): String {
+        if (ch.categoryId == Addons.CATEGORY && ch.url != null) return ch.url
         val cmd = ch.cmd.orEmpty()
         // Some portals hand out direct URLs in cmd; the rest need create_link.
         val direct = cmd.substringAfter("ffmpeg ").trim()

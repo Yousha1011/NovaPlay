@@ -142,6 +142,11 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         get() = sp.getString("liveViewMode", "GUIDE") ?: "GUIDE"
         set(v) { ps("liveViewMode", v) }
 
+    /** Stremio addons added in Settings (each as its saved JSON: manifest, name, live TV catalogs). */
+    var addons: List<String>
+        get() = strList("addons")
+        set(v) = put("addons", JSONArray(v))
+
     /** Extra XMLTV guides imported alongside the playlist's own. */
     var extraEpg: List<String>
         get() = strList("extraEpg")
@@ -425,7 +430,7 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
     var backup: ((String) -> Unit)? = null
 
     /** Playlists (with their logins), guides, favourites, Sports picks and keys. */
-    private val backedUp = setOf("sources", "active", "extraEpg", "favs.json", "favTeams.json", "fixMatch.json", "sportsComps.json", "sportsEnabled.json",
+    private val backedUp = setOf("sources", "active", "extraEpg", "addons", "favs.json", "favTeams.json", "fixMatch.json", "sportsComps.json", "sportsEnabled.json",
         "sportsLeagues.json", "sportsLeagueTeams.json", "tmdbKey", "sportsDbKey", "sportMonksKey", "sportsCountry", "searchHistory", "watched", "recentCh", "phoneTheme")
 
     fun snapshot(): String = JSONObject().also { o -> for (k in backedUp) sp.getString(k, null)?.let { o.put(k, it) } }.toString()
