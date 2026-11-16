@@ -195,7 +195,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier, list: List<Channel> = 
         Spacer(Modifier.height(14.dp))
         if (App.store.showHints) Text(when {
             onDesktop -> "Click  Preview      Double-click or Enter  Watch"
-            App.preview.available -> "OK  Preview / pause      Double OK  Watch      Hold OK  Favourite"
+            App.preview.available -> "OK  Play here      OK again  Full screen      ⏯  Pause      Hold OK  Favourite"
             else -> "OK  Play      Hold OK  Favourite"
         }, style = T.tiny)
     }
@@ -228,9 +228,9 @@ internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", 
         if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize))
         val note = when {
             unavailable != null -> unavailable
-            playing && App.preview.paused -> "Paused · OK to play on"
-            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK to pause · double OK to watch"
-            !mine -> if (onDesktop) "Click to preview" else if (App.preview.available) "Press OK to preview" else "Press OK to watch"
+            playing && App.preview.paused -> if (onDesktop) "Paused" else "Paused · ⏯ to play on"
+            playing -> if (onDesktop) "Muted preview" else "Muted preview · OK again for full screen"
+            !mine -> if (onDesktop) "Click to preview" else if (App.preview.available) "Press OK to play here" else "Press OK to watch"
             ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message
             else -> null
         }
@@ -319,29 +319,13 @@ internal fun rememberPick(watch: () -> Unit): Pick = rememberPick(null, watch)
 @Composable
 internal fun rememberPick(c: Channel?, watch: () -> Unit, pick: (Channel) -> Unit = {}): Pick {
     if (!onDesktop) {
-        // TV remote: a quick double OK watches full screen; one OK (once the double has had its chance) previews the
-        // channel, or pauses / plays on the one already playing in the window. See okAction.
-        val scope = androidx.compose.runtime.rememberCoroutineScope()
-        val last = remember { longArrayOf(0L) }
-        val pending = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
+        // TV remote: one OK plays the channel in the window at once; OK on the one already there watches it full
+        // screen (Back returns it to the window, still playing). The remote's play/pause pauses it. See okAction.
         return Pick({
-            val now = io.github.novatv.play.platform.nowMs()
             if (c == null) watch()
-            else if (now - last[0] < io.github.novatv.play.data.DOUBLE_OK_MS) {
-                pending[0]?.cancel(); pending[0] = null; last[0] = 0L
-                watch()
-            } else {
-                last[0] = now
-                pending[0]?.cancel()
-                pending[0] = scope.launch {
-                    kotlinx.coroutines.delay(io.github.novatv.play.data.DOUBLE_OK_MS)
-                    pending[0] = null
-                    when (io.github.novatv.play.data.okAction(c, App.preview.state.value, App.preview.available)) {
-                        io.github.novatv.play.data.OkAction.WATCH -> watch()
-                        io.github.novatv.play.data.OkAction.PAUSE -> App.preview.togglePause()
-                        io.github.novatv.play.data.OkAction.PREVIEW -> pick(c)
-                    }
-                }
+            else when (io.github.novatv.play.data.okAction(c, App.preview.state.value, App.preview.available)) {
+                io.github.novatv.play.data.OkAction.WATCH -> watch()
+                io.github.novatv.play.data.OkAction.PREVIEW -> pick(c)
             }
         }, Modifier, null)
     }

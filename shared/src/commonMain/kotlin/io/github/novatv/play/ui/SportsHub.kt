@@ -104,6 +104,9 @@ fun SportsScreen(nav: Nav) {
     // The match open on its own page (head to head, channels, table), or null for the tabs.
     var match by remember { mutableStateOf<SportEvent?>(null) }
     var tableLeague by remember { mutableStateOf<String?>(null) }
+    // The Windows test driver opens a match's page (App.testMatch); never set otherwise.
+    val testMatch by App.testMatch.collectAsState()
+    LaunchedEffect(testMatch) { testMatch?.let { match = it } }
     // The TV window shares Live TV's and the guide's preview: what plays keeps playing as you move between them.
     val previewChannel = sharedChannel()
     LaunchedEffect(nav.tab) { if (nav.tab == io.github.novatv.play.Tab.SPORTS) App.preview.surface = "sports" }
@@ -117,6 +120,11 @@ fun SportsScreen(nav: Nav) {
             App.repo.refreshSports(55_000L)
             delay(60_000L)
         }
+    }
+    // The addons' streams of the live matches, found and checked ahead, so a match's page lists them at once.
+    LaunchedEffect(sports.events.count { it.state == State.LIVE }) {
+        val live = sports.events.filter { it.state == State.LIVE }
+        withContext(IO) { runCatching { io.github.novatv.play.data.Addons.prefetch(live) } }
     }
 
     val liveCount = sports.events.count { it.state == State.LIVE && Follow.shows(it) }

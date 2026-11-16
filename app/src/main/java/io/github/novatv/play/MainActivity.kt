@@ -22,6 +22,20 @@ class MainActivity : ComponentActivity() {
         } else setContent { NovaTheme { Root() } }
     }
 
+    /** The remote's play/pause button pauses the TV window's channel, or plays it on (full screen has its own). */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val k = event.keyCode
+        if (!PHONE && (k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || k == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+            && App.preview.state.value is io.github.novatv.play.data.PreviewController.State.Playing) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val paused = App.preview.paused
+                if (k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || (k == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE) != paused) App.preview.togglePause()
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onStart() {
         super.onStart()
         started = true

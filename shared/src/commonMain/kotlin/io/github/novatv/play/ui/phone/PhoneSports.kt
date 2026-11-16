@@ -90,6 +90,11 @@ fun PhoneSports(nav: Nav) {
     var query by remember { mutableStateOf("") }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     LaunchedEffect(Unit) { while (true) { App.repo.refreshSports(55_000L); delay(60_000L) } }
+    // The addons' streams of the live matches, checked ahead, so a match's page lists them at once.
+    LaunchedEffect(sports.events.count { it.state == State.LIVE }) {
+        val live = sports.events.filter { it.state == State.LIVE }
+        withContext(IO) { runCatching { io.github.novatv.play.data.Addons.prefetch(live) } }
+    }
     // The channel index is built ahead, so a match's channels open at once.
     LaunchedEffect(st.epgVersion, st.lib.channels.size) { withContext(IO) { App.repo.matcher() } }
     val t = now(60_000L)
@@ -293,7 +298,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     }
     // What is known locally first, then the online broadcasters added below it.
     // The user's Stremio addons: their streams of this match, after your channels.
-    val fromAddons by produceState(emptyList<Airing>(), e.id) {
+    val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
         value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
     }
     val airings by produceState<List<Airing>?>(null, e.id, st.epgVersion) {

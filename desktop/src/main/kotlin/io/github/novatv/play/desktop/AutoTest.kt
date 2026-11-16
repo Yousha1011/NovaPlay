@@ -92,7 +92,7 @@ object AutoTest {
         log("BEGIN run=$runId scenario=$s pid=${ProcessHandle.current().pid()} maxPlayers=$maxPlayers maxHeapMb=$maxHeapMb timeoutS=$timeoutS screens=$mvScreens")
         // The Live TV preview runs only in the scenarios about it, so the others measure what they always have (their
         // player counts and connections). The test's own copy of the settings; the installed app's are never written.
-        val withPreview = s in setOf("netpreview", "nethandover", "netclick")
+        val withPreview = s in setOf("netpreview", "nethandover", "netclick", "matchwatch")
         if (App.store.livePreview != withPreview) App.store.livePreview = withPreview
         log("live preview ${if (withPreview) "on" else "off"} for this scenario")
         // How long the window stops responding: a tick on the UI thread every 50 ms; any gap over 250 ms is logged.
@@ -144,6 +144,7 @@ object AutoTest {
                     "nethandover" -> netHandover()
                     "netclick" -> netClick()
                     "addons" -> addons()
+                    "matchwatch" -> matchWatch()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -955,6 +956,54 @@ object AutoTest {
             waitFor(6000) { Desktop.playing == null }; delay(1500)
         }
         log("addon streams playing on Windows: $ok/${pick.size} (${ev.title})")
+        cleanup(had, m)
+    }
+
+    /**
+     * A match's page, as the user uses it: its addon streams listed the moment it opens (checked ahead); one click on
+     * a stream plays it in the TV window; a click on the one playing there opens full screen in that player; Esc
+     * (Back) returns it to the window, still playing.
+     */
+    private suspend fun matchWatch() {
+        check("playlist loaded", waitForLibrary()); delay(2000)
+        val m = "https://cncverse.dpdns.org/manifest.json"
+        val had = io.github.novatv.play.data.Addons.list().any { it.manifest == m }
+        check("addon added", withContext(Dispatchers.IO) { runCatching { io.github.novatv.play.data.Addons.add(m) } }.isSuccess)
+        check("reached Sports", goTab("SPORTS"))
+        waitFor(60_000) { App.repo.sports.value.events.any { it.state == io.github.novatv.play.sports.State.LIVE } }
+        // Sports checks the live matches' addon streams ahead: wait for that (as a user browsing Sports would).
+        val live = App.repo.sports.value.events.filter { it.state == io.github.novatv.play.sports.State.LIVE && it.home != null }
+        val ready = waitFor(120_000) { live.any { !io.github.novatv.play.data.Addons.known(it).isNullOrEmpty() } }
+        val ev = live.firstOrNull { !io.github.novatv.play.data.Addons.known(it).isNullOrEmpty() }
+        check("a live match's addon streams checked ahead (${ev?.title})", ready && ev != null)
+        if (ev == null) return cleanup(had, m)
+        val t0 = System.currentTimeMillis()
+        onUi { App.testMatch.value = ev }
+        val rowsUp = waitFor(10_000) { bounds.keys.any { it.startsWith("airing:addon-") } }
+        val ms = System.currentTimeMillis() - t0
+        check("match page lists its addon streams at once (${ms} ms)", rowsUp && ms < 3000)
+        val rowsList = bounds.keys.filter { it.startsWith("airing:addon-") }
+        log("addon rows: ${rowsList.size}")
+        var ok = false
+        for (row in rowsList.take(3)) {
+            // Addon rows are named by number, so no stream address reaches the log.
+            val num = row.removePrefix("airing:addon-").toInt()
+            click(row)
+            val inWindow = waitFor(3000) { App.preview.channel?.let { it.categoryId == io.github.novatv.play.data.Addons.CATEGORY && it.number == num } == true }
+            check("one click plays it in the window, not full screen", inWindow && Desktop.playing == null)
+            if (!waitFor(25_000) { pPlaying() && pMoving() }) { log("this stream doesn't play in the window: ${pName()}"); continue }
+            check("its picture moves in the window", true)
+            click(row)
+            val full = waitFor(4000) { Desktop.playing != null }
+            check("a click on the stream playing in the window opens full screen", full)
+            val h = settleFull(null, 30_000)
+            check("full screen plays (${h?.first})", h != null && h.first !in failing)
+            press(KeyEvent.VK_ESCAPE, after = 0)
+            check("Back: in the window again, still playing", waitFor(6000) { Desktop.playing == null } && waitFor(15_000) { pPlaying() && pMoving() })
+            ok = true; break
+        }
+        check("an addon stream went through window, full screen and back", ok)
+        onUi { App.testMatch.value = null }
         cleanup(had, m)
     }
 

@@ -275,19 +275,19 @@ class PagePreview(private val controller: PreviewController, private val owner: 
     }
 }
 
-/** What one OK on a channel does on the TV (a quick double OK always watches it full screen). */
-enum class OkAction { PREVIEW, PAUSE, WATCH }
-
-/** Two OKs this close together (ms) are a double OK: full screen. */
-const val DOUBLE_OK_MS = 350L
+/** What one OK (or click) on a channel does: plays it in the window, or watches it full screen. */
+enum class OkAction { PREVIEW, WATCH }
 
 /**
- * TV remote, one OK on [c]: previews it (moving through the list starts nothing); on the channel already playing in the
- * window, pauses it or plays it on. With no preview here (none on this device, or turned off) OK watches straight
- * away. A channel still starting, or whose preview failed, is asked for again.
+ * One OK (TV) or click on [c]: plays it in the TV window at once; on the channel already in the window (playing or
+ * starting) watches it full screen, where Back brings it back to the window still playing. The remote's play/pause
+ * button pauses the window. With no window here (none on this device, or turned off) OK watches straight away. A
+ * channel whose preview failed is asked for again.
  */
 fun okAction(c: Channel, state: PreviewController.State, previewAvailable: Boolean): OkAction = when {
     !previewAvailable -> OkAction.WATCH
-    state is PreviewController.State.Playing && state.channel.id == c.id -> OkAction.PAUSE
+    state is PreviewController.State.Playing && state.channel.id == c.id -> OkAction.WATCH
+    state is PreviewController.State.Loading && state.channel.id == c.id -> OkAction.WATCH
+    state is PreviewController.State.Waiting && state.channel.id == c.id -> OkAction.WATCH
     else -> OkAction.PREVIEW
 }

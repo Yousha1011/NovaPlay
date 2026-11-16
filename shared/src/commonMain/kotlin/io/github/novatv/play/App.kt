@@ -36,6 +36,8 @@ object App {
      * so it can click them with the mouse. Null otherwise, and then nothing reports.
      */
     @Volatile var testBounds: ((String, Float, Float, Float, Float) -> Unit)? = null
+    /** Windows test driver only: a match whose page Sports opens. */
+    val testMatch = kotlinx.coroutines.flow.MutableStateFlow<io.github.novatv.play.sports.SportEvent?>(null)
     @Volatile var openTab: String = "HOME"
     @Volatile var menuFocused: Boolean = false
 

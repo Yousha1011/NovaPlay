@@ -85,7 +85,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
         if (online.isNotEmpty()) value = (local + online).distinctBy { it.channel.id }
     }
     // The user's Stremio addons: their streams of this match, after your channels (read off the network, so later).
-    val fromAddons by produceState(emptyList<Airing>(), e.id) {
+    val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
         value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
     }
     // The broadcasters' own apps, for matches only they show (DRM-protected, so no stream here plays them).
@@ -130,7 +130,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
                 else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // OK plays it in the TV window; hold OK opens it full screen.
                     airings!!.take(3).forEachIndexed { i, a ->
-                        AiringRow(a, onLongClick = { playChannel(airings!!.map { it.channel }, i, switchOnFailure = true) }) { onWatch(a.channel) }
+                        AiringRow(a, onLongClick = { fullScreen(a.channel, airings!!.map { it.channel }, onWatch) }) { watchOrFull(a.channel, airings!!.map { it.channel }, onWatch) }
                     }
                 }
             }
@@ -140,7 +140,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
                 Spacer(Modifier.height(8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     fromAddons.forEachIndexed { i, a ->
-                        AiringRow(a, onLongClick = { playChannel(fromAddons.map { it.channel }, i, switchOnFailure = true) }) { onWatch(a.channel) }
+                        AiringRow(a, onLongClick = { fullScreen(a.channel, fromAddons.map { it.channel }, onWatch) }) { watchOrFull(a.channel, fromAddons.map { it.channel }, onWatch) }
                     }
                 }
             }
@@ -397,4 +397,21 @@ private fun untilText(ms: Long): String {
     if (ms <= 0) return "starting"
     val min = ms / 60_000; val h = min / 60; val d = h / 24
     return when { d > 0 -> "in $d days ${h % 24} h"; h > 0 -> "in $h h ${min % 60} min"; else -> "in $min min" }
+}
+
+/**
+ * A click (or OK) on a channel of the match, as in Live TV: it plays in the TV window at once; on the one already in
+ * the window it goes full screen in that same player, and Back brings it back to the window still playing.
+ */
+internal fun watchOrFull(c: Channel, list: List<Channel>, watch: (Channel) -> Unit) {
+    when (io.github.novatv.play.data.okAction(c, App.preview.state.value, App.preview.available)) {
+        io.github.novatv.play.data.OkAction.WATCH -> if (App.preview.available) playFromPreview(c, list) else playChannel(list, list.indexOfFirst { it.id == c.id }.coerceAtLeast(0), switchOnFailure = true)
+        io.github.novatv.play.data.OkAction.PREVIEW -> watch(c)
+    }
+}
+
+/** Full screen straight away (a hold, or double click): through the window, so Back returns to it still playing. */
+internal fun fullScreen(c: Channel, list: List<Channel>, watch: (Channel) -> Unit) {
+    if (App.preview.available && App.preview.channel?.id != c.id) watch(c)
+    if (App.preview.available) playFromPreview(c, list) else playChannel(list, list.indexOfFirst { it.id == c.id }.coerceAtLeast(0), switchOnFailure = true)
 }

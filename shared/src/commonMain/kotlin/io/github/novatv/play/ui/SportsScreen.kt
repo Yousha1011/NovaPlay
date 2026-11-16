@@ -283,7 +283,7 @@ internal fun AiringRow(a: Airing, modifier: Modifier = Modifier, onLongClick: ((
     val sure = picked || a.why == "Match feed" || a.why == "In your TV guide"
     // An addon's stream: the addon listed it for this match.
     val addon = a.channel.categoryId == io.github.novatv.play.data.Addons.CATEGORY
-    Tile(onClick, modifier.fillMaxWidth().height(64.dp), onLongClick = onLongClick, shape = RoundedCornerShape(10.dp), scale = 1.02f, color = C.panelHi) {
+    Tile(onClick, modifier.fillMaxWidth().height(64.dp).testBounds(if (addon) "airing:addon-${a.channel.number}" else "airing:${a.channel.id}"), onLongClick = onLongClick, shape = RoundedCornerShape(10.dp), scale = 1.02f, color = C.panelHi) {
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Logo(a.channel.logo, a.channel.name, Modifier.size(64.dp, 42.dp))
             Spacer(Modifier.width(12.dp))

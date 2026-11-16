@@ -42,11 +42,11 @@ object Addons {
             .map { it.optString("id") to it.optString("name").ifBlank { it.optString("id") } }
         val addon = Addon(manifest, o.optString("name").ifBlank { manifest.substringAfter("://").substringBefore('/') }, o.optString("logo").ifBlank { null }, tv)
         save(list().filterNot { it.manifest == manifest } + addon)
-        clearCache()
+        clearCache(); found.clear()
         return addon
     }
 
-    fun remove(a: Addon) { save(list().filterNot { it.manifest == a.manifest }); clearCache() }
+    fun remove(a: Addon) { save(list().filterNot { it.manifest == a.manifest }); clearCache(); found.clear() }
 
     private fun save(l: List<Addon>) { App().addons = l.map { toJson(it).toString() } }
 
@@ -117,6 +117,37 @@ object Addons {
      */
     fun airings(e: SportEvent, limit: Int = 20): List<io.github.novatv.play.sports.Airing> {
         if (list().isEmpty()) return emptyList()
+        found[e.id]?.takeIf { nowMs() - it.first < FRESH_MS }?.let { return it.second.take(limit) }
+        return verify(e, limit).also { found[e.id] = nowMs() to it }
+    }
+
+    /** [airings] already found for a match (checked within the last few minutes), or null: shown at once. */
+    fun known(e: SportEvent): List<io.github.novatv.play.sports.Airing>? =
+        if (list().isEmpty()) emptyList() else found[e.id]?.takeIf { nowMs() - it.first < FRESH_MS }?.second
+
+    /**
+     * Finds and checks the addon streams of [events] (the live matches) ahead of time, a few at once, so a match's
+     * page lists them the moment it opens. Matches no addon lists cost nothing past the catalogs' one read.
+     */
+    fun prefetch(events: List<SportEvent>) {
+        if (list().isEmpty()) return
+        val todo = events.filter { found[it.id]?.let { f -> nowMs() - f.first >= FRESH_MS } ?: true }
+        if (todo.isEmpty()) return
+        val t0 = nowMs()
+        val matching = runCatching { todo.filter { forMatch(it).isNotEmpty() } }.getOrElse { emptyList() }
+        val t1 = nowMs()
+        // All at once: each is a few requests and checks of a few seconds, mostly waiting on the network.
+        kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
+            matching.map { e -> async { runCatching { airings(e) } } }.forEach { it.await() }
+        }
+        io.github.novatv.play.platform.logW("addons: ${matching.size} of ${todo.size} live matches listed; catalogs ${t1 - t0} ms, streams checked ${nowMs() - t1} ms")
+    }
+
+    /** Addon streams found per match: (when checked, the streams that played). */
+    private val found = io.github.novatv.play.platform.SafeMap<String, Pair<Long, List<io.github.novatv.play.sports.Airing>>>()
+    private const val FRESH_MS = 4 * 60_000L
+
+    private fun verify(e: SportEvent, limit: Int): List<io.github.novatv.play.sports.Airing> {
         var n = 0
         // Each source's streams, then taken in turns (each source's first, then each one's second...), so one with
         // many streams doesn't hide the others.
@@ -132,7 +163,7 @@ object Addons {
         // All checked at once, a few seconds each at most.
         val live = kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
             turns.map { a -> async {
-                a.takeIf { Http.opens(a.channel.url!!, StreamHeaders.forUrl(a.channel.url!!).orEmpty()) }
+                a.takeIf { Http.opens(a.channel.url!!, StreamHeaders.forUrl(a.channel.url!!).orEmpty(), timeoutMs = 4_000L) }
             } }.mapNotNull { it.await() }
         }
         return live.take(limit)
