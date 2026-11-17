@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -142,10 +143,12 @@ fun SportsTablesView(
             Column(Modifier.width(520.dp).fillMaxHeight()) {
                 // Table Column Header
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                    Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(10.dp))
+                        .background(Brush.horizontalGradient(listOf(Color(0x24FFFFFF), Color(0x0AFFFFFF))))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("#", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.width(26.dp))
+                    Text("#", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.width(41.dp))
                     Text("TEAM", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
                     s.columns.forEach { col ->
                         Text(col.label, style = T.tiny.copy(color = SportsLook.Dim, fontWeight = if (col.key == "points") FontWeight.Bold else FontWeight.Normal, textAlign = TextAlign.Center), modifier = Modifier.width(colWidth(col)))
@@ -156,19 +159,19 @@ fun SportsTablesView(
                 LazyColumn(
                     Modifier.fillMaxSize().rememberFocusInList(),
                     contentPadding = PaddingValues(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     s.groups.forEach { group ->
                         if (group.name.isNotBlank() && s.groups.size > 1) {
                             item(key = "h_${group.name}") {
-                                Text(
-                                    group.name,
-                                    style = T.small.copy(fontWeight = FontWeight.Bold, color = SportsLook.Dim),
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp, start = 6.dp)
-                                )
+                                Row(Modifier.padding(top = 10.dp, bottom = 4.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.width(3.dp).height(14.dp).clip(RoundedCornerShape(2.dp)).background(SportsLook.Gold))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(group.name.uppercase(), style = T.tiny.copy(fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 1.2.sp))
+                                }
                             }
                         }
-                        items(group.rows, key = { it.id }) { row ->
+                        itemsIndexed(group.rows, key = { _, r -> r.id }) { index, row ->
                             val isFollowed = store.favouriteTeams.any { it.endsWith("|${row.name}") }
                             val isFocused = activeRow?.id == row.id
                             StandingsRowItem(
@@ -178,6 +181,7 @@ fun SportsTablesView(
                                 totalRows = allRows.size,
                                 isFollowed = isFollowed,
                                 isFocused = isFocused,
+                                zebra = index % 2 == 1,
                                 onFocus = { focusedRow = row }
                             )
                         }
@@ -273,6 +277,7 @@ private fun StandingsRowItem(
     totalRows: Int,
     isFollowed: Boolean,
     isFocused: Boolean,
+    zebra: Boolean = false,
     onFocus: () -> Unit
 ) {
     val stripColor = row.zone?.let { Color(it.color) } ?: Color.Transparent
@@ -283,13 +288,13 @@ private fun StandingsRowItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(38.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(SportsLook.Card)
+            .height(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (zebra) SportsLook.CardRaised else SportsLook.Card)
             .background(
                 Brush.horizontalGradient(
-                    0f to band.copy(alpha = if (isFocused) 0.90f else 0.65f),
-                    0.55f to band.copy(alpha = 0.20f),
+                    0f to band.copy(alpha = if (isFocused) 0.85f else 0.45f),
+                    0.45f to band.copy(alpha = 0.12f),
                     1f to Color.Transparent
                 )
             )
@@ -311,12 +316,15 @@ private fun StandingsRowItem(
         )
         Spacer(Modifier.width(6.dp))
 
-        // Rank
-        Text("${row.pos}", style = T.small.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.width(22.dp))
+        // Rank, tinted by its zone or medal place
+        RankChip(row, 24.dp)
+        Spacer(Modifier.width(8.dp))
 
-        // Logo
+        // Crest on a soft disc, so dark crests stay visible
         if (row.logo != null) {
-            AsyncImage(model = row.logo, contentDescription = null, modifier = Modifier.size(22.dp))
+            Box(Modifier.size(28.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(0x14FFFFFF)), contentAlignment = Alignment.Center) {
+                AsyncImage(model = row.logo, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
             Spacer(Modifier.width(8.dp))
         }
 
@@ -332,7 +340,7 @@ private fun StandingsRowItem(
         // Numbers: the league's own columns, so hockey, US leagues and racing show their real figures
         columns.forEach { col ->
             val bold = col.key == "points" || col.key == "winPercent"
-            Text(row.values[col.key] ?: "–", style = T.small.copy(fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, color = if (bold) Color.White else Color.White.copy(alpha = 0.78f), textAlign = TextAlign.Center), modifier = Modifier.width(colWidth(col)))
+            if (col.key == "points") PointsPill(row.values[col.key] ?: "–", colWidth(col)) else Text(row.values[col.key] ?: "–", style = T.small.copy(fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, color = if (bold) Color.White else Color.White.copy(alpha = 0.78f), textAlign = TextAlign.Center), modifier = Modifier.width(colWidth(col)))
         }
 
         // Last 5: only when ESPN sends a form guide
@@ -344,7 +352,7 @@ private fun StandingsRowItem(
                     'L' -> Color(0xFFE53935)
                     else -> Color(0xFF546E7A)
                 }
-                Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(c))
+                Box(Modifier.size(11.dp).clip(RoundedCornerShape(3.dp)).background(c))
             }
         }
     }

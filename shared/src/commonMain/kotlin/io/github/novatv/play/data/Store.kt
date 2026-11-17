@@ -148,6 +148,11 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         set(v) = put("addons", JSONArray(v))
 
     /** Extra XMLTV guides imported alongside the playlist's own. */
+    /** Competitions folded away on the Sports page ("FOOTBALL|Championship"), kept between visits. */
+    var foldedComps: List<String>
+        get() = strList("foldedComps")
+        set(v) = put("foldedComps", JSONArray(v))
+
     var extraEpg: List<String>
         get() = strList("extraEpg")
         set(v) = put("extraEpg", JSONArray(v.filter { it.isNotBlank() }))

@@ -58,10 +58,7 @@ fun Icon(v: ImageVector, size: Dp = 22.dp, tint: Color = C.text, modifier: Modif
 /** A channel's logo on a soft plate, or its initials when there is none. */
 @Composable
 fun Logo(url: String?, name: String, modifier: Modifier = Modifier) {
-    Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x14FFFFFF)), contentAlignment = Alignment.Center) {
-        Text(initials(name), style = T.h2.copy(color = C.dim))
-        if (!url.isNullOrBlank()) AsyncImage(url, null, Modifier.fillMaxSize().padding(6.dp), contentScale = ContentScale.Fit)
-    }
+    BareLogo(url, name, modifier, T.h2.copy(color = C.dim))
 }
 
 /** A poster (2:3) with title underneath and an optional watch-progress bar. */

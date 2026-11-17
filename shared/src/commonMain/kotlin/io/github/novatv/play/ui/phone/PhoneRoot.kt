@@ -339,7 +339,7 @@ private fun ChannelStrip(title: String, list: List<Channel>, clearable: Boolean 
             Column(Modifier.width(150.dp).dust(c.id in gone) { App.store.removeRecentChannel(App.repo.channelKey(c)); io.github.novatv.play.ui.History.rev++ }
                 .clip(RoundedCornerShape(16.dp)).background(P.card).tapHold(if (clearable) ({ ask = c }) else null) { playChannel(list, i) }.padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                ChannelLogo(c.logo, c.name, Modifier.size(84.dp, 56.dp))
+                ChannelLogo(c.logo, c.name, Modifier.size(96.dp, 64.dp))
                 Spacer(Modifier.height(8.dp))
                 Text(c.name, style = P.head.copy(fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(p?.title ?: "No information", style = P.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -442,7 +442,7 @@ fun PhoneChannelRow(c: Channel, onClick: () -> Unit) {
     val p: Programme? = nn.firstOrNull()
     val now = io.github.novatv.play.ui.now()
     Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap(onClick).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChannelLogo(c.logo, c.name, Modifier.size(72.dp, 50.dp))
+        ChannelLogo(c.logo, c.name, Modifier.size(84.dp, 56.dp))
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(c.name, style = P.head, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -89,6 +89,7 @@ fun PhoneSports(nav: Nav) {
     var sport by remember { mutableStateOf<Sport?>(null) }
     var query by remember { mutableStateOf("") }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
+    var foldedComps by remember { mutableStateOf(io.github.novatv.play.App.store.foldedComps.toSet()) }
     LaunchedEffect(Unit) { while (true) { App.repo.refreshSports(55_000L); delay(60_000L) } }
     // The addons' streams of the live matches, checked ahead, so a match's page lists them at once.
     LaunchedEffect(sports.events.count { it.state == State.LIVE }) {
@@ -171,8 +172,15 @@ fun PhoneSports(nav: Nav) {
                             SportHeader(sg, folded) { collapsed = if (folded) collapsed - sg.sport.name else collapsed + sg.sport.name }
                         }
                         if (!folded) for (cg in sg.comps) {
-                            item(key = "c:${sg.sport.name}:${cg.name}") { CompHeader(cg) }
-                            items(cg.games, key = { it.id }) { e -> MatchCard(e) { open(e) } }
+                            val foldKey = "${sg.sport.name}|${cg.name}"
+                            val compFolded = foldKey in foldedComps
+                            item(key = "c:${sg.sport.name}:${cg.name}") {
+                                CompHeader(cg, compFolded) {
+                                    foldedComps = if (compFolded) foldedComps - foldKey else foldedComps + foldKey
+                                    io.github.novatv.play.App.store.foldedComps = foldedComps.toList()
+                                }
+                            }
+                            if (!compFolded) items(cg.games, key = { it.id }) { e -> MatchCard(e) { open(e) } }
                         }
                     }
                 }
@@ -204,9 +212,10 @@ private fun SportHeader(sg: io.github.novatv.play.sports.MySports.SportGroup, fo
 
 /** A competition's heading: its logo (a handshake for friendlies, the sport's icon with no logo), name and count. */
 @Composable
-private fun CompHeader(cg: io.github.novatv.play.sports.MySports.CompGroup) {
+private fun CompHeader(cg: io.github.novatv.play.sports.MySports.CompGroup, folded: Boolean, onToggle: () -> Unit) {
     val logo = if (cg.friendly) null else io.github.novatv.play.sports.Espn.leagueLogo(cg.league.id)
-    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x0DFFFFFF)).tap(onToggle)
+        .padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(26.dp).clip(CircleShape).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
             when {
                 cg.friendly -> Text("\uD83E\uDD1D", style = P.small.copy(fontSize = 15.sp))
@@ -217,6 +226,8 @@ private fun CompHeader(cg: io.github.novatv.play.sports.MySports.CompGroup) {
         Spacer(Modifier.width(10.dp))
         Text(cg.name, style = P.head.copy(fontSize = 16.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Text("${cg.games.size}", style = P.small)
+        Spacer(Modifier.width(8.dp))
+        Text(if (folded) "▾" else "▴", style = P.small.copy(color = Color(0xFF4DA3FF)))
     }
 }
 
@@ -383,7 +394,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                     val air = a[i]
                     Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { playChannel(a.map { it.channel }, i) }.padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        ChannelLogo(air.channel.logo, air.channel.name, Modifier.size(72.dp, 50.dp))
+                        ChannelLogo(air.channel.logo, air.channel.name, Modifier.size(84.dp, 56.dp))
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text(air.channel.name, style = P.head, maxLines = 2, overflow = TextOverflow.Ellipsis)

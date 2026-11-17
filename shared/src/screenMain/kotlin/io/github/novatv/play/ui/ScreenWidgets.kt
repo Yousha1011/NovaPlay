@@ -96,11 +96,12 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
             .background(when { lit || primary -> C.accent; selected -> C.accent.copy(alpha = 0.22f); else -> C.panel })
             .hoverable(src)
             .combinedClickableCompat(src, onClick)
-            .padding(horizontal = 18.dp, vertical = 9.dp),
+            .then(if (LocalCompact.current) Modifier.padding(horizontal = 14.dp, vertical = 6.dp) else Modifier.padding(horizontal = 18.dp, vertical = 9.dp)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) { Icon(icon, size = 18.dp, tint = fg); Spacer(Modifier.width(8.dp)) }
-        Text(text, style = T.body.copy(color = fg), maxLines = 1)
+        val small = LocalCompact.current
+        if (icon != null) { Icon(icon, size = if (small) 15.dp else 18.dp, tint = fg); Spacer(Modifier.width(if (small) 6.dp else 8.dp)) }
+        Text(text, style = (if (small) T.small else T.body).copy(color = fg), maxLines = 1)
     }
 }
 
@@ -120,7 +121,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
         onValueChange = { val changed = it.text != field.text; field = it; if (changed) onChange(it.text) },
         // Keyboard: the field keeps Left and Right for its cursor, except at either end of the text, where they move on
         // like the arrows do everywhere else; Up and Down always move on (it's one line).
-        modifier = modifier.height(54.dp).onPreviewKeyEvent { e ->
+        modifier = modifier.height(if (LocalCompact.current) 44.dp else 54.dp).onPreviewKeyEvent { e ->
             if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown || e.isShiftPressed || e.isCtrlPressed || e.isAltPressed) return@onPreviewKeyEvent false
             val sel = field.selection
             when (e.key) {
@@ -141,7 +142,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
         keyboardActions = KeyboardActions(onDone = { onDone() }),
         decorationBox = { inner ->
             Box(
-                Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(27.dp))
+                Modifier.fillMaxWidth().height(if (LocalCompact.current) 44.dp else 54.dp).clip(RoundedCornerShape(50))
                     .background(if (focused) Color(0x40FFFFFF) else Color(0x1AFFFFFF))
                     .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color(0x40FFFFFF), RoundedCornerShape(27.dp))
                     .padding(horizontal = 20.dp),

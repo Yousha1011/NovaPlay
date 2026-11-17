@@ -183,13 +183,13 @@ fun LiveGuideScreen(nav: Nav) {
 private fun TopPanel(c: Channel, p: Programme?, t: Long, list: List<Channel> = emptyList()) {
     Row(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(22.dp)).background(C.panel).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(132.dp, 168.dp).clip(RoundedCornerShape(14.dp)).background(C.panelHi), contentAlignment = Alignment.Center) {
-            Logo(c.logo, c.name, Modifier.size(104.dp, 72.dp))
+        Box(Modifier.size(150.dp, 168.dp).arrive(c.id, shift = 10.dp), contentAlignment = Alignment.Center) {
+            Logo(c.logo, c.name, Modifier.size(150.dp, 100.dp))
         }
         Spacer(Modifier.width(22.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).arrive(c.id, shift = 14.dp, sideways = true)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Logo(c.logo, c.name, Modifier.size(36.dp, 26.dp)); Spacer(Modifier.width(12.dp))
+                Logo(c.logo, c.name, Modifier.size(48.dp, 32.dp)); Spacer(Modifier.width(12.dp))
                 Text("${if (c.number > 0) "${c.number}  " else ""}${c.name}", style = T.body.copy(color = C.dim), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false))
                 if (p?.isLive == true) { Spacer(Modifier.width(12.dp)); LiveMark() }
@@ -228,7 +228,7 @@ private fun GuideLine(c: Channel, list: List<Channel>, index: Int, start: Long, 
             onLongClick = onFavourite, shape = RoundedCornerShape(12.dp), scale = 1.0f, color = C.panel, onDoubleClick = pick.onDoubleClick) {
             Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (App.store.showChannelNumbers) Text(if (c.number > 0) "${c.number}" else "", style = T.body.copy(color = C.dim), maxLines = 1, modifier = Modifier.width(58.dp))
-                if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(40.dp, 30.dp)); Spacer(Modifier.width(12.dp)) }
+                if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(54.dp, 36.dp)); Spacer(Modifier.width(12.dp)) }
                 Text(c.name, style = T.body.copy(color = C.text, fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (fav) { Spacer(Modifier.width(6.dp)); Text("★", style = T.small.copy(color = C.gold)) }
                 if (c.catchup) { Spacer(Modifier.width(6.dp)); Badge("CATCH-UP", C.panelHi) }

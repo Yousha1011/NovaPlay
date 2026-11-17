@@ -68,7 +68,7 @@ import io.github.novatv.play.toast
 
 /** Settings' sections: a list on the left, the open one's options on the right. */
 private enum class Pane(val title: String, val about: String, val icon: ImageVector) {
-    PLAYLISTS("Playlists & guide", "Your playlists and their TV guide", Icons.Rounded.Tv),
+    PLAYLISTS("Sources & guide", "Playlists, addons and the TV guide", Icons.Rounded.Tv),
     LIVE("Live TV & guide", "Previews, the clock and the channel list", Icons.Rounded.LiveTv),
     VOD("Movies & series", "Episodes, subtitles and film details", Icons.Rounded.Movie),
     SPORTS("Sports", "Competitions, clubs and where to watch", Icons.Rounded.SportsSoccer),
@@ -119,11 +119,13 @@ fun SettingsScreen(nav: Nav) {
             Text(pane.about, style = T.small, modifier = Modifier.padding(bottom = 14.dp))
             SourceStatus()
             // Also rebuilt on coming back from a screen opened from here (the block lists), so counts are current.
-            key(pane, nav.stack.size) {
-                LazyColumn(Modifier.fillMaxSize().focusRequester(paneFocus).rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Buttons and text boxes a size smaller here, so the options don't look crowded.
+            androidx.compose.runtime.CompositionLocalProvider(LocalCompact provides true) { key(pane, nav.stack.size) {
+                LazyColumn(Modifier.fillMaxSize().arrive(pane, shift = 16.dp, sideways = true).focusRequester(paneFocus).rememberFocusInList(), contentPadding = PaddingValues(bottom = 60.dp)) {
                     // Read here so a change re-reads every row's value; the rows (and focus on them) stay put.
                     if (v < 0) return@LazyColumn
-                    when (pane) {
+                    // Each section sits in its own box under its heading.
+                    boxed { when (pane) {
                         Pane.PLAYLISTS -> playlistsPane(nav, st, syncing, changed)
                         Pane.LIVE -> livePane(nav, changed)
                         Pane.VOD -> vodPane(changed)
@@ -134,14 +136,14 @@ fun SettingsScreen(nav: Nav) {
                         Pane.PARENTAL -> parentalPane(nav, changed)
                         Pane.TIPS -> tipsPane()
                         Pane.ABOUT -> aboutPane(st, changed)
-                    }
+                    } }
                 }
-            }
+            } }
         }
     }
 }
 
-private fun LazyListScope.section(t: String) = item { SectionTitle(t, Modifier.padding(top = 10.dp)) }
+private fun LazyListScope.section(t: String) { if (this is SettingsBoxes) start(t) else item { SectionTitle(t, Modifier.padding(top = 10.dp)) } }
 
 private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: String?, changed: () -> Unit) {
     section("Playlists")
@@ -183,9 +185,9 @@ private fun LazyListScope.playlistsPane(nav: Nav, st: Repo.LibState, syncing: St
     }
     item { Toggle("Use only the universal guide", "Ignore each playlist's own guide (when it's poor or slow); needs a link above",
         App.store.universalGuideOnly) { App.store.universalGuideOnly = it; changed(); App.repo.reloadGuide() } }
+    addonsSection(changed)
 }
 
-/** Hiding countries, regions and single categories (no PIN; a tidier list). */
 private fun LazyListScope.categoriesSection(nav: Nav, changed: () -> Unit) {
     val st = App.repo.fullState.value
     val src = st.source?.id ?: "-"
@@ -297,7 +299,6 @@ private fun LazyListScope.vodPane(changed: () -> Unit) {
 
 private fun LazyListScope.sportsPane(nav: Nav, changed: () -> Unit) {
     val s = App.store
-    addonsSection(changed)
     section("What to follow")
     item { Action("Sports, competitions and clubs", "Choose what the Sports Hub shows", "Choose") { nav.push(Route.Leagues) } }
     item { Action("Favourite clubs", "Followed clubs get a star. OK clears them all.",
@@ -489,8 +490,8 @@ private fun LazyListScope.aboutPane(st: Repo.LibState, changed: () -> Unit) {
 /** One setting: its name and what it does on the left, its value on the right. */
 @Composable
 private fun SettingRow(title: String, desc: String?, value: String?, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
-    Tile(onClick, Modifier.fillMaxWidth().heightIn(min = 64.dp), shape = RoundedCornerShape(10.dp), scale = 1.0f) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Tile(onClick, Modifier.fillMaxWidth().heightIn(min = 64.dp), shape = RoundedCornerShape(50), scale = 1.0f, color = Color(0x12FFFFFF)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = T.body)
                 desc?.let { Text(it, style = T.small, maxLines = 2, overflow = TextOverflow.Ellipsis) }

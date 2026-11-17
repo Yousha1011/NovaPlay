@@ -251,6 +251,8 @@ private fun MySportsView(
     var tab by remember { mutableIntStateOf(-1) }
     /** Sports folded away (both tabs), by name. */
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
+    /** Competitions folded away, remembered between visits. */
+    var foldedComps by remember { mutableStateOf(App.store.foldedComps.toSet()) }
     val shownTab = if (tab >= 0) tab else if (liveList.isEmpty() && upList.isNotEmpty()) 1 else 0
     // The scorecards show real matches only (an unidentified game has no sides to show).
     val upcoming = remember(liveList, upList) { (liveList + upList).filterNot { it.id.startsWith("guide:") } }
@@ -364,7 +366,8 @@ private fun MySportsView(
                 item(key = "s_${shownTab}_${sg.sport.name}") {
                     val folded = sg.sport.name in collapsed
                     SportSection(sg, folded, cols, onToggle = { collapsed = if (folded) collapsed - sg.sport.name else collapsed + sg.sport.name },
-                        onOpen = open, onWatchInWindow = onWatchInWindow)
+                        onOpen = open, onWatchInWindow = onWatchInWindow, foldedComps = foldedComps,
+                        onToggleComp = { k -> foldedComps = if (k in foldedComps) foldedComps - k else foldedComps + k; App.store.foldedComps = foldedComps.toList() })
                 }
             }
 
@@ -981,6 +984,8 @@ private fun SportSection(
     onToggle: () -> Unit,
     onOpen: (SportEvent) -> Unit,
     onWatchInWindow: (Channel) -> Unit,
+    foldedComps: Set<String> = emptySet(),
+    onToggleComp: (String) -> Unit = {},
 ) {
     val shape = RoundedCornerShape(18.dp)
     Column(
@@ -1016,13 +1021,23 @@ private fun SportSection(
             Spacer(Modifier.height(12.dp))
             sg.comps.forEachIndexed { i, cg ->
                 if (i > 0) Box(Modifier.fillMaxWidth().padding(vertical = 12.dp).height(1.dp).background(SportsLook.Border.copy(alpha = 0.6f)))
-                Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CompetitionMark(cg)
-                    Spacer(Modifier.width(10.dp))
-                    Text(cg.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text("${cg.games.size}", style = T.tiny.copy(color = SportsLook.Dim))
+                // The competition's heading folds it away (OK or a click), so the next one is a step away.
+                val foldKey = "${sg.sport.name}|${cg.name}"
+                val compFolded = foldKey in foldedComps
+                Tile({ onToggleComp(foldKey) }, Modifier.fillMaxWidth().padding(bottom = if (compFolded) 0.dp else 10.dp),
+                    shape = RoundedCornerShape(10.dp), scale = 1.01f, color = Color(0x0AFFFFFF), focusedColor = Color(0x26FFFFFF)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CompetitionMark(cg)
+                        Spacer(Modifier.width(10.dp))
+                        Text(cg.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Box(Modifier.clip(RoundedCornerShape(50)).background(Color(0x1AFFFFFF)).padding(horizontal = 8.dp, vertical = 2.dp)) {
+                            Text("${cg.games.size}", style = T.tiny.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Icon(if (compFolded) androidx.compose.material.icons.Icons.Rounded.ExpandMore else androidx.compose.material.icons.Icons.Rounded.ExpandLess, size = 22.dp, tint = SportsLook.Dim)
+                    }
                 }
-                cg.games.chunked(cols).forEach { chunk ->
+                if (!compFolded) Column(Modifier.arrive(compFolded, shift = 10.dp)) { cg.games.chunked(cols).forEach { chunk ->
                     Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         chunk.forEach { ev ->
                             MatchCardItem(event = ev, favTeamName = null, onClick = { onOpen(ev) }, onHoldWatch = {
@@ -1032,7 +1047,7 @@ private fun SportSection(
                         // A short last row keeps its cards the same width.
                         repeat(cols - chunk.size) { Spacer(Modifier.weight(1f)) }
                     }
-                }
+                } }
             }
         }
     }

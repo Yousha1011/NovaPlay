@@ -163,7 +163,6 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
                         follows++
                     }, selected = on)
                 }
-                item { Pill("Pick a channel", onClick = { picking = true }) }
             }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -352,19 +351,17 @@ private fun StandingsExcerpt(t: Standings, mark: Set<String>, onFullTable: () ->
                 Text("FULL TABLE ›", style = T.tiny.copy(color = Color.White, fontWeight = FontWeight.Bold), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
             }
         }
-        Row(Modifier.padding(top = 6.dp)) {
-            Spacer(Modifier.weight(1f))
-            for (c in cols) Text(c.label, style = T.tiny.copy(color = SportsLook.Dim, textAlign = TextAlign.Center), modifier = Modifier.width(48.dp))
+        Row(Modifier.padding(top = 8.dp, bottom = 4.dp).fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0x14FFFFFF)).padding(vertical = 4.dp, horizontal = 6.dp)) {
+            Text("#", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.width(30.dp))
+            Text("TEAM", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
+            for (c in cols) Text(c.label, style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.width(48.dp))
         }
-        for (r in keep) {
-            val on = r.id in mark
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(if (on) Color(0x22FFFFFF) else Color.Transparent).padding(vertical = 3.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                val style = T.small.copy(color = Color.White, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
-                Text("${r.pos}", style = style.copy(color = SportsLook.Dim), modifier = Modifier.width(30.dp))
-                Text(r.name, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                for (c in cols) Text(r.values[c.key] ?: "–", style = style.copy(textAlign = TextAlign.Center), modifier = Modifier.width(48.dp))
-            }
+        var last = 0
+        for ((i, r) in keep.withIndex()) {
+            // Dots where the excerpt skips places.
+            if (i > 0 && r.pos > last + 1) Text("···", style = T.tiny.copy(color = SportsLook.Faint), modifier = Modifier.padding(start = 12.dp))
+            last = r.pos
+            TableLine(r, cols.map { r.values[it.key] ?: "–" }, highlighted = r.id in mark, zebra = i % 2 == 1, numWidth = 48.dp)
         }
     }
 }

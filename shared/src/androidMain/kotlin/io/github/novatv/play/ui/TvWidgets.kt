@@ -81,9 +81,10 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
             border = Border(BorderStroke(1.dp, if (primary) Color.Transparent else C.line), shape = RoundedCornerShape(50)),
             focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = if (primary) 0.95f else 0f)), inset = (-3).dp, shape = RoundedCornerShape(50))),
     ) {
-        Row(Modifier.padding(horizontal = 18.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) { Icon(icon, size = 18.dp, tint = LocalContentColor.current); Spacer(Modifier.width(8.dp)) }
-            Text(text, style = T.body.copy(color = LocalContentColor.current), maxLines = 1)
+        val small = LocalCompact.current
+        Row(Modifier.padding(horizontal = if (small) 14.dp else 18.dp, vertical = if (small) 6.dp else 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) { Icon(icon, size = if (small) 15.dp else 18.dp, tint = LocalContentColor.current); Spacer(Modifier.width(if (small) 6.dp else 8.dp)) }
+            Text(text, style = (if (small) T.small else T.body).copy(color = LocalContentColor.current), maxLines = 1)
         }
     }
 }
@@ -106,7 +107,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
     val boxFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
     val ui = androidx.compose.runtime.remember { FieldState() }
     androidx.compose.foundation.layout.Box(
-        modifier.height(54.dp)
+        modifier.height(if (LocalCompact.current) 44.dp else 54.dp)
             .focusRequester(boxFocus)
             .onFocusChanged { ui.boxFocused = it.isFocused; ui.paint() }
             .onKeyEvent { e ->

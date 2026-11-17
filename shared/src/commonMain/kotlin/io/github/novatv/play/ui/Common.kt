@@ -84,7 +84,7 @@ fun ChannelCard(c: Channel, onClick: () -> Unit, modifier: Modifier = Modifier, 
     Tile(onClick, modifier.width(240.dp).height(160.dp), onLongClick = onLongClick, shape = RoundedCornerShape(10.dp)) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth().height(78.dp).background(Color(0x0DFFFFFF))) {
-                Logo(c.logo, c.name, Modifier.align(Alignment.Center).size(96.dp, 54.dp))
+                Logo(c.logo, c.name, Modifier.align(Alignment.Center).padding(vertical = 8.dp).size(120.dp, 62.dp))
                 if (on) LiveMark(Modifier.align(Alignment.TopEnd).padding(8.dp))
             }
             Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 9.dp)) {

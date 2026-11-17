@@ -208,10 +208,7 @@ fun RowTitle(title: String, onSeeAll: (() -> Unit)?, action: String = "See All")
 /** A channel's logo on a light plate (logos are drawn for light backgrounds). */
 @Composable
 fun ChannelLogo(url: String?, name: String, modifier: Modifier) {
-    Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color(0x14FFFFFF)), contentAlignment = Alignment.Center) {
-        Text(initials(name), style = P.head.copy(color = P.dim))
-        if (!url.isNullOrBlank()) AsyncImage(url, name, Modifier.fillMaxSize().padding(4.dp), contentScale = ContentScale.Fit)
-    }
+    io.github.novatv.play.ui.BareLogo(url, name, modifier, P.head.copy(color = P.dim))
 }
 
 /** A centred empty state: icon, title, a line of help. */

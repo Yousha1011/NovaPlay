@@ -1,5 +1,7 @@
 package io.github.novatv.play.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -206,7 +208,7 @@ private fun ChannelPanel(c: Channel?, modifier: Modifier, list: List<Channel> = 
  * (waiting, loading, couldn't play, or "Press OK to watch" where there is no preview).
  */
 @Composable
-internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", unavailable: String? = null, logoSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(150.dp, 90.dp),
+internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", unavailable: String? = null, logoSize: androidx.compose.ui.unit.DpSize = androidx.compose.ui.unit.DpSize(240.dp, 140.dp),
     onFullScreen: (() -> Unit)? = null) {
     val ps by App.preview.state.collectAsState()
     // Only the page in front shows the picture ([owner] is the page): the player's one video view can't be in two places.
@@ -219,18 +221,33 @@ internal fun PreviewBox(c: Channel, modifier: Modifier, owner: String = "live", 
     }
     // Windows: the window itself goes full screen on a double click, or with its Full screen button.
     val open = onFullScreen ?: { playFromPreview(c, emptyList()) }
-    Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C))
-        .let { if (onDesktop && mine) it.pointerInput(c.id) { detectTapGestures(onDoubleTap = { open() }) } else it }.testBounds("preview"),
+    // TV: the window itself takes focus from every page that shows it; OK opens it full screen, and Back from the
+    // player comes back to it (the page remembers where focus was), so OK again goes full screen again.
+    var winFocused by remember { mutableStateOf(false) }
+    val tvWindow = !onDesktop && unavailable == null
+    Box(modifier
+        .let { if (tvWindow && winFocused) it.border(3.dp, Color.White, RoundedCornerShape(14.dp)).padding(3.dp) else it }
+        .clip(RoundedCornerShape(12.dp)).background(Color(0xFF07090C))
+        .let { if (onDesktop && mine) it.pointerInput(c.id) { detectTapGestures(onDoubleTap = { open() }) } else it }
+        .let { if (!tvWindow) it else it.onFocusChanged { f -> winFocused = f.isFocused }
+            .onPreviewKeyEvent { e ->
+                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                if (ok && e.type == KeyEventType.KeyUp) open()
+                ok
+            }
+            .focusable() }
+        .testBounds("preview"),
         contentAlignment = Alignment.Center) {
         val playing = mine && ps is io.github.novatv.play.data.PreviewController.State.Playing
         // The video surface stays in place while this channel loads, so the first picture appears without a jump.
         if (mine && (playing || ps is io.github.novatv.play.data.PreviewController.State.Loading)) App.preview.Video(Modifier.fillMaxSize())
-        if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize))
+        if (!playing) Logo(c.logo, c.name, Modifier.size(logoSize).arrive(c.id, shift = 12.dp))
         val note = when {
             unavailable != null -> unavailable
             playing && App.preview.paused -> if (onDesktop) "Paused" else "Paused · ⏯ to play on"
             playing -> if (onDesktop) "Muted preview" else "Muted preview · OK again for full screen"
-            !mine -> if (onDesktop) "Click to preview" else if (App.preview.available) "Press OK to play here" else "Press OK to watch"
+            // Nothing playing: the logo alone, without a label over it.
+            !mine -> null
             ps is io.github.novatv.play.data.PreviewController.State.Failed -> (ps as io.github.novatv.play.data.PreviewController.State.Failed).message
             else -> null
         }
@@ -258,7 +275,7 @@ fun ChannelLine(c: Channel, onClick: () -> Unit, onLongClick: () -> Unit, onFocu
         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             // Numbers and logos can be turned off in Settings.
             if (App.store.showChannelNumbers) Text(if (c.number > 0) "${c.number}" else "", style = T.small.copy(color = C.faint), modifier = Modifier.width(52.dp), maxLines = 1)
-            if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(52.dp, 34.dp)); Spacer(Modifier.width(12.dp)) }
+            if (App.store.showChannelLogos) { Logo(c.logo, c.name, Modifier.size(60.dp, 40.dp)); Spacer(Modifier.width(12.dp)) }
             // Shares, rather than fixed widths, so the row also fits a phone.
             Row(Modifier.weight(0.42f), verticalAlignment = Alignment.CenterVertically) {
                 Text(c.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
@@ -356,7 +373,7 @@ internal fun CornerWindow(modifier: Modifier, owner: String = "corner") {
         return
     }
     PreviewBox(c!!, modifier.width(320.dp).aspectRatio(16f / 9f), owner = owner,
-        logoSize = androidx.compose.ui.unit.DpSize(96.dp, 56.dp), onFullScreen = { playFromPreview(c, emptyList()) })
+        logoSize = androidx.compose.ui.unit.DpSize(150.dp, 90.dp), onFullScreen = { playFromPreview(c, emptyList()) })
 }
 
 /**

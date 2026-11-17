@@ -57,3 +57,7 @@ fun Text(text: String, modifier: Modifier = Modifier, style: TextStyle = T.body,
          overflow: TextOverflow = TextOverflow.Clip, textAlign: TextAlign? = null) {
     BasicText(text, modifier, style = if (textAlign != null) style.copy(textAlign = textAlign) else style, maxLines = maxLines, overflow = overflow)
 }
+
+
+/** True inside Settings: buttons and text boxes there are drawn a size smaller. */
+val LocalCompact = androidx.compose.runtime.staticCompositionLocalOf { false }

@@ -154,6 +154,7 @@ object AutoTest {
                     "netclick" -> netClick()
                     "addons" -> addons()
                     "matchwatch" -> matchWatch()
+                    "tour" -> tour()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -975,6 +976,25 @@ object AutoTest {
      * a stream plays it in the TV window; a click on the one playing there opens full screen in that player; Esc
      * (Back) returns it to the window, still playing.
      */
+    /** Opens Live TV, the guide, Sports and Settings and saves a picture of each, to look at the design. */
+    private suspend fun tour() {
+        check("playlist loaded", waitForLibrary()); delay(3000)
+        val dir = file.parentFile
+        for (t in listOf("LIVE", "GUIDE", "SPORTS", "SETTINGS")) {
+            check("reached $t", goTab(t)); delay(6000)
+            shot(File(dir, "tour-${t.lowercase()}.png"))
+            if (t == "SETTINGS") { press(KeyEvent.VK_RIGHT, after = 2500); shot(File(dir, "tour-settings-rows.png")) }
+        }
+    }
+
+    /** A picture of the window as it is on screen. */
+    private suspend fun shot(f: File) {
+        val w = window ?: return
+        onUi { w.toFront() }; delay(500)
+        val img = java.awt.Robot().createScreenCapture(w.bounds)
+        javax.imageio.ImageIO.write(img, "png", f); log("saved ${f.name}")
+    }
+
     private suspend fun matchWatch() {
         check("playlist loaded", waitForLibrary()); delay(2000)
         val m = "https://cncverse.dpdns.org/manifest.json"

@@ -99,7 +99,7 @@ fun OverlayGuide(playing: List<Channel>, playingIndex: Int, onPlay: (List<Channe
                         shape = RoundedCornerShape(12.dp), scale = 1.0f, color = if (current) C.accent.copy(alpha = 0.22f) else Color(0x661A2028)) {
                         Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(if (c.number > 0) "${c.number}" else "", style = T.small.copy(color = C.dim), modifier = Modifier.width(52.dp), maxLines = 1)
-                            Logo(c.logo, c.name, Modifier.size(48.dp, 34.dp))
+                            Logo(c.logo, c.name, Modifier.size(57.dp, 38.dp))
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(c.name, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)

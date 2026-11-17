@@ -1,5 +1,6 @@
 package io.github.novatv.play
 
+import io.github.novatv.play.ui.arrive
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -272,6 +273,7 @@ private fun RootBody() {
                     // detail page, lands on the item last used instead of the page's first one. Hidden pages keep the
                     // same group (only their placement changes), so they remember it while another tab is open too.
                     Box(Modifier.topExit(App.device == Device.TV, focusManager, nav.page(t), nav.topExit).rememberFocus(nav.page(t))
+                        .then(Modifier.arrive(nav.tab, active = t == nav.tab, shift = 22.dp, sideways = true))
                         .then(if (t == nav.tab) Modifier.fillMaxSize() else Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} })) {
                         // The TV window plays on across Live TV, the TV guide and Sports, and in the corner of Movies,
                         // Series, Recordings and Search; Home and Settings let it go.
@@ -294,7 +296,7 @@ private fun RootBody() {
             }
             Rail(nav) { nav.menuOpen = it }
         }
-        if (top != null) {
+        if (top != null) Box(Modifier.fillMaxSize().arrive(top, shift = 28.dp)) {
             when (top) {
                 is Route.MovieDetail -> DetailScreen(nav, movie = top.movie)
                 is Route.SeriesDetail -> DetailScreen(nav, series = top.series)
@@ -360,7 +362,9 @@ private fun Rail(nav: Nav, onFocus: (Boolean) -> Unit) {
                             // Opens the tab once focus rests on it, so moving through the menu doesn't build every screen on the way.
                             if (it.isFocused) { pendingTab = t; scope.launch { delay(150); if (pendingTab == t && nav.tab != t) nav.tab = t } }
                         }
-                        .clickable { nav.tab = t }
+                        // A click wins over the focus landing first on the open tab's item (focus entering the menu is sent
+                        // there), whose delayed switch would otherwise take the page straight back: the second-click bug.
+                        .clickable { pendingTab = t; nav.tab = t }
                         .background(if (itemFocused) C.accent else Color.Transparent, RoundedCornerShape(10.dp)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
