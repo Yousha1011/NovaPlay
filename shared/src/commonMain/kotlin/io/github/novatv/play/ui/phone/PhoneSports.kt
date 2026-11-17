@@ -72,6 +72,7 @@ import io.github.novatv.play.ui.playChannel
 import io.github.novatv.play.ui.teamKey
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.flowOn
 
 private enum class When(val label: String) { LIVE("Live"), UPCOMING("Upcoming"), UNCATEGORIZED("Uncategorized"), TABLES("Tables") }
 
@@ -308,10 +309,27 @@ fun MatchPage(nav: Nav, start: SportEvent) {
         value = withContext(IO) { io.github.novatv.play.sports.OfficialApps.forEvent(e) }
     }
     // What is known locally first, then the online broadcasters added below it.
-    // The user's Stremio addons: their streams of this match, after your channels.
+    // The user's Stremio addons: their streams of this match, in their own section, each listed as its check passes
+    // (the streams themselves are stored by the background update), without waiting for your channels.
     val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
-        value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l: List<Airing> -> if (l.isNotEmpty() || value.isEmpty()) value = l }
+            }
+        } catch (x: Exception) { }
     }
+    // Both sides' form and the league table around them, as on the TV's match page.
+    val homePage by produceState<io.github.novatv.play.sports.TeamPage?>(null, e.id) {
+        value = e.home?.let { s -> withContext(IO) { runCatching { io.github.novatv.play.sports.Teams.info(e.league, s.id) }.getOrNull() } }
+    }
+    val awayPage by produceState<io.github.novatv.play.sports.TeamPage?>(null, e.id) {
+        value = e.away?.let { s -> withContext(IO) { runCatching { io.github.novatv.play.sports.Teams.info(e.league, s.id) }.getOrNull() } }
+    }
+    val table by produceState<io.github.novatv.play.sports.Standings?>(null, e.league.id) {
+        value = withContext(IO) { runCatching { io.github.novatv.play.sports.StandingsRepository.forLeague(e.league) }.getOrNull() }
+    }
+    val rows = remember(table) { table?.groups?.flatMap { it.rows }.orEmpty() }
+    fun rowOf(s: Side?) = s?.let { side -> rows.firstOrNull { it.id == side.id } ?: rows.firstOrNull { it.name.equals(side.name, true) } }
     val airings by produceState<List<Airing>?>(null, e.id, st.epgVersion) {
         value = withContext(IO) { App.repo.matcher().airings(e, limit = 150) }
         val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 150) }
@@ -386,23 +404,59 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                     airings?.takeIf { it.isNotEmpty() }?.let { Text("${it.size} found", style = P.small) }
                 }
             }
-            val a = airings?.let { it + fromAddons }
+            val a = airings
             when {
                 a == null -> item { Box(Modifier.fillMaxWidth().padding(30.dp), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() } }
                 a.isEmpty() -> item { Empty(Icons.Rounded.SportsSoccer, "No channels found", "Not in your playlist's guide or channel names.") }
-                else -> items(a.size, key = { a[it].channel.id }) { i ->
-                    val air = a[i]
-                    Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { playChannel(a.map { it.channel }, i) }.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        ChannelLogo(air.channel.logo, air.channel.name, Modifier.size(84.dp, 56.dp))
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(air.channel.name, style = P.head, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(air.programme?.let { "${clock(it.start)}  ${it.title}" } ?: air.why, style = P.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                else -> items(a.size, key = { a[it].channel.id }) { i -> AiringCard(a, i) }
+            }
+            if (fromAddons.isNotEmpty()) {
+                item {
+                    Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.Bottom) {
+                        Text("From your addons", style = P.title, modifier = Modifier.weight(1f))
+                        Text("${fromAddons.size} found", style = P.small)
                     }
                 }
+                items(fromAddons.size, key = { "addon:" + fromAddons[it].channel.id }) { i -> AiringCard(fromAddons, i) }
             }
+            if (e.home != null && e.away != null) item {
+                Column(Modifier.padding(top = 14.dp).fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).padding(16.dp)) {
+                    Text("Form · last five", style = P.head)
+                    Spacer(Modifier.height(8.dp))
+                    for ((s, p) in listOf(e.home to homePage, e.away to awayPage)) Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(s.short + (rowOf(s)?.let { "  · ${it.pos}." } ?: ""), style = P.body, modifier = Modifier.weight(1f), maxLines = 1)
+                        io.github.novatv.play.ui.FormBoxes(p?.form.orEmpty(), lettered = true)
+                    }
+                    if (homePage == null && awayPage == null) Text("No recent results for this competition.", style = P.small)
+                }
+            }
+            val info = listOfNotNull(e.venue, e.subtitle ?: e.league.name, e.detail.takeIf { e.state != State.PRE && it.isNotBlank() }, e.summary)
+            if (info.isNotEmpty()) item {
+                Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).padding(16.dp)) {
+                    Text("Match info", style = P.head)
+                    Spacer(Modifier.height(6.dp))
+                    for (line in info) Text(line, style = P.small, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 2.dp))
+                }
+            }
+            val t = table
+            if (t != null && rows.isNotEmpty()) item {
+                io.github.novatv.play.ui.StandingsExcerpt(t, setOfNotNull(rowOf(e.home)?.id, rowOf(e.away)?.id)) { nav.push(Route.Table(e.league.id)) }
+            }
+        }
+    }
+}
+
+/** A channel (or addon stream) showing the match: a tap plays it, with the rest of [list] to zap through. */
+@Composable
+private fun AiringCard(list: List<Airing>, i: Int) {
+    val air = list[i]
+    Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).tap { playChannel(list.map { it.channel }, i) }.padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        ChannelLogo(air.channel.logo, air.channel.name, Modifier.size(84.dp, 56.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(air.channel.name, style = P.head, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(air.programme?.let { "${clock(it.start)}  ${it.title}" } ?: air.why, style = P.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

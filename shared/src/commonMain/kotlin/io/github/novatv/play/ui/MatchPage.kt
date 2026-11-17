@@ -343,7 +343,7 @@ private fun ResultLine(p: TeamPage, g: SportEvent) {
 
 /** The league table around both teams: the top three, each team and its neighbours, the two teams highlighted. */
 @Composable
-private fun StandingsExcerpt(t: Standings, mark: Set<String>, onFullTable: () -> Unit) {
+internal fun StandingsExcerpt(t: Standings, mark: Set<String>, onFullTable: () -> Unit) {
     val rows = t.groups.flatMap { it.rows }.distinctBy { it.id }.sortedBy { it.pos }
     val keep = rows.filter { r -> r.pos <= 3 || mark.any { id -> rows.firstOrNull { it.id == id }?.let { kotlin.math.abs(it.pos - r.pos) <= 1 } == true } }.take(10)
     // Played, goal (or points) difference and points where the league has them, as on a football table.
@@ -382,7 +382,7 @@ private fun Panel(title: String?, modifier: Modifier, content: @Composable () ->
 
 /** Last five as coloured squares, oldest first; with letters in the form panel, plain on the scoreboard. */
 @Composable
-private fun FormBoxes(form: List<Char>, lettered: Boolean) {
+internal fun FormBoxes(form: List<Char>, lettered: Boolean) {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for (f in form) Box(Modifier.size(if (lettered) 22.dp else 11.dp).clip(RoundedCornerShape(if (lettered) 5.dp else 3.dp)).background(formColor(f)),
             contentAlignment = Alignment.Center) {

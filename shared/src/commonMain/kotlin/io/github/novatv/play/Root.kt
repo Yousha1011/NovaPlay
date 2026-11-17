@@ -127,6 +127,8 @@ sealed class Route {
     data object SearchSettings : Route()
     data object Appearance : Route()
     data class Match(val event: io.github.novatv.play.sports.SportEvent) : Route()
+    /** Phone: a league's full table, from a match page. */
+    data class Table(val leagueId: String) : Route()
     data class ChannelGroup(val id: String, val name: String) : Route()
     data object Playlists : Route()
     data class Find(val scope: String) : Route()
@@ -185,12 +187,12 @@ enum class Back { POP, TO_RAIL, TO_HOME, EXIT }
  */
 enum class PageVisibility { VISIBLE, HIDDEN, COVERED, MENU_OPEN, BEHIND_PLAYER }
 
-/** The whole app: the menu, the tabs and the screens opened over them. */
+/**
+ * The addons' matches and streams, read in the background and kept on the device (like the guide), so a match's page
+ * lists them at once. Every 15 minutes while the app is open, behind the screen. On every device's root.
+ */
 @Composable
-fun Root() {
-    ImageLoaderSetup()
-    // The addons' matches and streams, read in the background and kept on the device (like the guide), so a match's
-    // page lists them at once. Every 15 minutes while the app is open, behind the screen.
+fun AddonUpdates() {
     androidx.compose.runtime.LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(20_000L)   // after start-up's own loading
         while (true) {
@@ -200,6 +202,13 @@ fun Root() {
             kotlinx.coroutines.delay(io.github.novatv.play.data.Addons.REFRESH_MS)
         }
     }
+}
+
+/** The whole app: the menu, the tabs and the screens opened over them. */
+@Composable
+fun Root() {
+    ImageLoaderSetup()
+    AddonUpdates()
     if (Look.modern) androidx.compose.runtime.LaunchedEffect(Unit) {
         io.github.novatv.play.ui.phone.P.themes.firstOrNull { it.id == App.store.phoneTheme }?.let { io.github.novatv.play.ui.phone.P.theme = it }
     }

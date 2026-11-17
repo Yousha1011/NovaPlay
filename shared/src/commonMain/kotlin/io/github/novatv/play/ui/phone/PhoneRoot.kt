@@ -90,6 +90,7 @@ private fun label(t: Tab) = when (t) { Tab.SERIES -> "TV Shows"; else -> t.label
 @Composable
 fun PhoneRoot() {
     io.github.novatv.play.ImageLoaderSetup()
+    io.github.novatv.play.AddonUpdates()
     PhoneStyle()
     Box(Modifier.fillMaxSize()) {
         PhoneBody()
@@ -120,7 +121,11 @@ private fun PhoneBody() {
         // The visited tabs stay built so switching back is instant.
         val visited = remember { mutableStateListOf<Tab>() }
         if (nav.tab !in phoneTabs.map { it.first }) nav.tab = Tab.HOME
-        if (visited.lastOrNull() != nav.tab) { visited.remove(nav.tab); visited.add(nav.tab); while (visited.size > 4) visited.removeAt(0) }
+        // Fewer on a phone with little memory; only the open one when the phone runs short (as on the TV).
+        val keep = if (App.host.lowMemory) 2 else 4
+        val pressure by App.memoryPressure.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(pressure) { if (pressure > 0) visited.retainAll(listOf(nav.tab)) }
+        if (visited.lastOrNull() != nav.tab) { visited.remove(nav.tab); visited.add(nav.tab); while (visited.size > keep) visited.removeAt(0) }
         val hide = Modifier.layout { m, c -> m.measure(c); layout(0, 0) {} }
         Box(if (top != null) hide else Modifier.fillMaxSize()) {
             for (t in visited) key(t) {
@@ -158,6 +163,7 @@ private fun PhoneBody() {
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> PhoneLeagues(nav)
                 is Route.Match -> MatchPage(nav, top.event)
+                is Route.Table -> Pushed(nav) { Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView(top.leagueId) } }
                 is Route.ChannelGroup -> ChannelGroupPage(nav, top.id, top.name)
             } } }
         }
