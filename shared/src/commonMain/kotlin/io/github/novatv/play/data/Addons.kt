@@ -6,6 +6,8 @@ import io.github.novatv.play.platform.nowMs
 import io.github.novatv.play.sports.Side
 import io.github.novatv.play.sports.SportEvent
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import io.github.novatv.play.platform.locked
 
 /**
  * Stremio addons (the format Stremio and Nuvio use): added by their manifest address. NovaPlay reads their live TV
@@ -60,20 +62,126 @@ object Addons {
 
     // ---------- matches ----------
 
+    /** Each catalog's matches as last read ("manifest|catalog" -> (when, matches)): kept on the device, like the guide. */
     private val cache = io.github.novatv.play.platform.SafeMap<String, Pair<Long, List<Event>>>()
-    private fun clearCache() = cache.clear()
+    /** Each match's streams as last read ("manifest|event id" -> (when, streams)): kept on the device too. */
+    private val streamCache = io.github.novatv.play.platform.SafeMap<String, Pair<Long, List<Stream>>>()
+    private fun clearCache() { cache.clear(); streamCache.clear(); runCatching { save() } }
+
+    /** How long stored lists are used: the background update ([refresh]) renews them long before. */
+    private const val KEEP_MS = 6 * 3_600_000L
+    /** How often [refresh] reads the addons again while the app is open. */
+    const val REFRESH_MS = 15 * 60_000L
+
+    private fun catalogsOf(a: Addon) =
+        a.catalogs.filter { (id, n) -> "event" in id.lowercase() || "event" in n.lowercase() }.ifEmpty { a.catalogs }
 
     /**
-     * Every match in the addons' live TV catalogs, read again after 5 minutes. Catalogs named for events ("Live
-     * Events") are read; an addon with none has all its live TV catalogs read. One that fails is left out.
+     * Every match in the addons' live TV catalogs, from the stored lists ([refresh] keeps them current); a catalog
+     * never read, or not for hours, is read now. Catalogs named for events ("Live Events") are read; an addon with none
+     * has all its live TV catalogs read. One that fails is left out.
      */
-    fun events(addons: List<Addon> = list()): List<Event> = addons.flatMap { a ->
-        val events = a.catalogs.filter { (id, n) -> "event" in id.lowercase() || "event" in n.lowercase() }
-        (events.ifEmpty { a.catalogs }).flatMap { (id, name) ->
-            val key = "${a.manifest}|$id"
-            cache[key]?.takeIf { nowMs() - it.first < 5 * 60_000L }?.second ?: runCatching { catalog(a, id, name) }.getOrElse { emptyList() }
-                .also { cache[key] = nowMs() to it }
+    fun events(addons: List<Addon> = list()): List<Event> {
+        load()
+        return addons.flatMap { a ->
+            catalogsOf(a).flatMap { (id, name) ->
+                val key = "${a.manifest}|$id"
+                cache[key]?.takeIf { nowMs() - it.first < KEEP_MS }?.second ?: runCatching { catalog(a, id, name) }.getOrElse { emptyList() }
+                    .also { cache[key] = nowMs() to it }
+            }
         }
+    }
+
+    /** [ev]'s streams: stored ones when read in the last hour, else read now (and stored). */
+    private fun storedStreams(ev: Event): List<Stream> {
+        val key = "${ev.addon.manifest}|${ev.id}"
+        streamCache[key]?.takeIf { nowMs() - it.first < 3_600_000L }?.let { return it.second }
+        return streams(ev).also { streamCache[key] = nowMs() to it }
+    }
+
+    /**
+     * The background update, like the guide's: every addon's matches and their streams read again and stored on the
+     * device, so a match's page has them the moment it opens. Each catalog that fails keeps what it had.
+     */
+    fun refresh() {
+        val addons = list()
+        if (addons.isEmpty()) return
+        load()
+        val t0 = nowMs()
+        val evs = addons.flatMap { a ->
+            catalogsOf(a).flatMap { (id, name) ->
+                val key = "${a.manifest}|$id"
+                runCatching { catalog(a, id, name) }.onSuccess { cache[key] = nowMs() to it }.getOrNull() ?: cache[key]?.second.orEmpty()
+            }
+        }
+        // Only matches with both sides named can be matched to a game; their streams read a few at a time.
+        val named = evs.filter { it.home != null && it.away != null }
+        kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
+            named.chunked(8).forEach { batch ->
+                batch.map { ev -> async { runCatching { streams(ev) }.onSuccess { streamCache["${ev.addon.manifest}|${ev.id}"] = nowMs() to it } } }
+                    .forEach { it.await() }
+            }
+        }
+        // Old matches go: what no catalog lists any more.
+        val keep = evs.map { "${it.addon.manifest}|${it.id}" }.toSet()
+        streamCache.keys().filter { it !in keep }.forEach { streamCache.remove(it) }
+        runCatching { save() }
+        io.github.novatv.play.platform.logW("addons: refreshed ${evs.size} matches, ${named.size} with streams, in ${nowMs() - t0} ms")
+    }
+
+    // ---------- kept on the device ----------
+
+    private val diskLock = io.github.novatv.play.platform.Lock()
+    private var loaded = false
+    private fun file() = io.github.novatv.play.platform.cacheDir() / "addon-events.json"
+
+    private fun load() {
+        diskLock.locked {
+            if (loaded) return
+            loaded = true
+            runCatching {
+                val fs = okio.FileSystem.SYSTEM
+                if (!fs.exists(file())) return
+                val o = JSONObject(fs.read(file()) { readUtf8() })
+                val byManifest = list().associateBy { it.manifest }
+                o.optJSONArray("c")?.let { arr -> for (i in 0 until arr.length()) {
+                    val c = arr.optJSONObject(i) ?: continue
+                    val a = byManifest[c.optString("m")] ?: continue
+                    val evs = c.optJSONArray("e")?.let { ea -> (0 until ea.length()).mapNotNull { ea.optJSONObject(it) } }.orEmpty().map { e ->
+                        Event(a, e.optString("c"), e.optString("i"), e.optString("t"), e.optString("h").ifBlank { null }, e.optString("a").ifBlank { null })
+                    }
+                    if (cache[c.optString("k")] == null) cache[c.optString("k")] = c.optLong("w") to evs
+                } }
+                o.optJSONArray("s")?.let { arr -> for (i in 0 until arr.length()) {
+                    val s = arr.optJSONObject(i) ?: continue
+                    if (byManifest[s.optString("k").substringBefore('|')] == null) continue
+                    val list = s.optJSONArray("l")?.let { la -> (0 until la.length()).mapNotNull { la.optJSONObject(it) } }.orEmpty().map { x ->
+                        val h = LinkedHashMap<String, String>()
+                        x.optJSONObject("h")?.let { ho -> for (k in ho.keys()) h[k] = ho.optString(k) }
+                        Stream(x.optString("b"), x.optString("d"), x.optString("u"), h)
+                    }
+                    if (streamCache[s.optString("k")] == null) streamCache[s.optString("k")] = s.optLong("w") to list
+                } }
+            }
+        }
+    }
+
+    private fun save() {
+        val c = JSONArray()
+        cache.keys().forEach { k -> val (w, evs) = cache[k] ?: return@forEach
+            c.put(JSONObject().put("k", k).put("m", k.substringBefore('|')).put("w", w).put("e", JSONArray().also { arr ->
+                evs.forEach { e -> arr.put(JSONObject().put("c", e.catalog).put("i", e.id).put("t", e.title).put("h", e.home ?: "").put("a", e.away ?: "")) }
+            }))
+        }
+        val s = JSONArray()
+        streamCache.keys().forEach { k -> val (w, l) = streamCache[k] ?: return@forEach
+            s.put(JSONObject().put("k", k).put("w", w).put("l", JSONArray().also { arr ->
+                l.forEach { x -> arr.put(JSONObject().put("b", x.label).put("d", x.detail).put("u", x.url)
+                    .put("h", JSONObject().also { h -> x.headers.forEach { (hk, hv) -> h.put(hk, hv) } })) }
+            }))
+        }
+        val text = JSONObject().put("c", c).put("s", s).toString()
+        diskLock.locked { okio.FileSystem.SYSTEM.write(file()) { writeUtf8(text) } }
     }
 
     private fun catalog(a: Addon, id: String, name: String): List<Event> {
@@ -147,12 +255,47 @@ object Addons {
     private val found = io.github.novatv.play.platform.SafeMap<String, Pair<Long, List<io.github.novatv.play.sports.Airing>>>()
     private const val FRESH_MS = 4 * 60_000L
 
+    /**
+     * [e]'s addon streams as they're checked: each one that plays is added the moment its check passes (in the
+     * sources' order), so the page lists the first within a second or so instead of after the slowest check.
+     */
+    fun airingsFlow(e: SportEvent, limit: Int = 20): kotlinx.coroutines.flow.Flow<List<io.github.novatv.play.sports.Airing>> =
+        kotlinx.coroutines.flow.channelFlow {
+            if (list().isEmpty()) { send(emptyList()); return@channelFlow }
+            found[e.id]?.takeIf { nowMs() - it.first < FRESH_MS }?.let { send(it.second.take(limit)); return@channelFlow }
+            val turns = candidates(e)
+            val ok = arrayOfNulls<io.github.novatv.play.sports.Airing>(turns.size)
+            val lock = kotlinx.coroutines.sync.Mutex()
+            kotlinx.coroutines.coroutineScope {
+                turns.forEachIndexed { i, a -> launch {
+                    if (Http.opens(a.channel.url!!, StreamHeaders.forUrl(a.channel.url!!).orEmpty(), timeoutMs = 4_000L)) {
+                        lock.lock(); try { ok[i] = a; send(ok.filterNotNull().take(limit)) } finally { lock.unlock() }
+                    }
+                } }
+            }
+            val all = ok.filterNotNull().take(limit)
+            found[e.id] = nowMs() to all
+            send(all)
+        }
+
+    /** [e]'s streams from every source, unchecked, taken in turns (each source's first, then each one's second...). */
+    private fun candidates(e: SportEvent): List<io.github.novatv.play.sports.Airing> {
+        var n = 0
+        val bySource = forMatch(e).map { ev ->
+            runCatching { storedStreams(ev) }.getOrElse { emptyList() }.map { s ->
+                io.github.novatv.play.sports.Airing(channel(ev, s, n++), null, "${ev.title} · ${ev.catalog}")
+            }
+        }
+        return (0 until (bySource.maxOfOrNull { it.size } ?: 0)).flatMap { i -> bySource.mapNotNull { it.getOrNull(i) } }
+            .distinctBy { it.channel.url }
+    }
+
     private fun verify(e: SportEvent, limit: Int): List<io.github.novatv.play.sports.Airing> {
         var n = 0
         // Each source's streams, then taken in turns (each source's first, then each one's second...), so one with
         // many streams doesn't hide the others.
         val bySource = forMatch(e).map { ev ->
-            runCatching { streams(ev) }.getOrElse { emptyList() }.map { s ->
+            runCatching { storedStreams(ev) }.getOrElse { emptyList() }.map { s ->
                 // The match as the addon names it first ("AFG vs ZIM"), then where it's from.
                 io.github.novatv.play.sports.Airing(channel(ev, s, n++), null, "${ev.title} · ${ev.catalog}")
             }

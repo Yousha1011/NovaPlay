@@ -58,6 +58,7 @@ import io.github.novatv.play.sports.Teams
 import io.github.novatv.play.sports.bandColor
 import io.github.novatv.play.sports.teamShades
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.flowOn
 
 /**
  * A match, head to head: both sides with their record, place and last five; where it airs on your channels; their
@@ -86,7 +87,12 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     }
     // The user's Stremio addons: their streams of this match, after your channels (read off the network, so later).
     val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
-        value = withContext(IO) { try { kotlinx.coroutines.withTimeoutOrNull(30_000L) { io.github.novatv.play.data.Addons.airings(e) }.orEmpty() } catch (x: Exception) { emptyList() } }
+        // Listed as each stream's check passes (the streams themselves are stored by the background update).
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l -> if (l.isNotEmpty() || value.isEmpty()) value = l }
+            }
+        } catch (x: Exception) { }
     }
     // The broadcasters' own apps, for matches only they show (DRM-protected, so no stream here plays them).
     val apps by produceState(emptyList<io.github.novatv.play.sports.OfficialApps.Service>(), e.id) {

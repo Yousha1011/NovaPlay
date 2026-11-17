@@ -189,6 +189,17 @@ enum class PageVisibility { VISIBLE, HIDDEN, COVERED, MENU_OPEN, BEHIND_PLAYER }
 @Composable
 fun Root() {
     ImageLoaderSetup()
+    // The addons' matches and streams, read in the background and kept on the device (like the guide), so a match's
+    // page lists them at once. Every 15 minutes while the app is open, behind the screen.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(20_000L)   // after start-up's own loading
+        while (true) {
+            kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) {
+                runCatching { io.github.novatv.play.platform.lowPriority { io.github.novatv.play.data.Addons.refresh() } }
+            }
+            kotlinx.coroutines.delay(io.github.novatv.play.data.Addons.REFRESH_MS)
+        }
+    }
     if (Look.modern) androidx.compose.runtime.LaunchedEffect(Unit) {
         io.github.novatv.play.ui.phone.P.themes.firstOrNull { it.id == App.store.phoneTheme }?.let { io.github.novatv.play.ui.phone.P.theme = it }
     }
