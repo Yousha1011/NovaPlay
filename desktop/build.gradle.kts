@@ -31,13 +31,13 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "NovaPlay"
-            packageVersion = "1.9.3"
+            packageVersion = "1.9.4"
             description = "NovaPlay IPTV player"
             vendor = "NovaPlay"
             copyright = "NovaPlay"
             // libvlc and its plugins, shipped beside the app (resources/windows/vlc).
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
-            modules("java.sql", "jdk.unsupported", "java.naming", "java.management")
+            modules("java.sql", "jdk.unsupported", "java.naming", "java.management", "jdk.management")
             windows {
                 iconFile.set(project.file("icon.ico"))
                 menu = true

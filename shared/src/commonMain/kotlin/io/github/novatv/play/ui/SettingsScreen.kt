@@ -469,6 +469,8 @@ private fun LazyListScope.aboutPane(st: Repo.LibState, changed: () -> Unit) {
         else Action("Check for updates now", "You have the latest version unless this finds a newer one", null) { Updates.check() }
     }
     item { Toggle("Check for updates automatically", "When NovaPlay opens; a new version is offered straight away, and stays here to install later", s.checkUpdates) { s.checkUpdates = it; changed() } }
+    item { Toggle("Send problem reports", "Crashes, freezes and slow loading are reported so they can be fixed. Without playlist addresses or logins.",
+        s.problemReports) { s.problemReports = it; changed() } }
     // The last time NovaPlay closed on an error (CrashLog): readable here on devices that can't be debugged.
     io.github.novatv.play.data.CrashLog.last()?.let { crash ->
         section("Last problem")

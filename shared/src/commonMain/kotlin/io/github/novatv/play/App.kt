@@ -74,6 +74,9 @@ object App {
         if (store.sources.isNotEmpty()) host.saveBackup(store.snapshot())
         io.github.novatv.play.platform.Time.use24h = store.clock24
         io.github.novatv.play.data.AccountSync.watch()
+        io.github.novatv.play.data.Diag.note("Started ${io.github.novatv.play.data.Updates.CURRENT}, ${store.sources.size} playlists")
+        io.github.novatv.play.data.Diag.sendPendingCrash()
+        io.github.novatv.play.data.Storage.cleanUp()
         repo = Repo(store, Epg())
         repo.start()
         io.github.novatv.play.data.AccountSync.start()

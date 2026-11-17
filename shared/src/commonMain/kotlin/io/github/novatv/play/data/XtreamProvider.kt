@@ -59,27 +59,34 @@ class XtreamProvider(private val s: Source) : Provider {
     override fun maxConnections(): Int? =
         JSONObject(Http.get(api)).optJSONObject("user_info")?.optString("max_connections")?.toIntOrNull()?.takeIf { it > 0 }
 
-    override fun load(progress: (String) -> Unit): Library {
+    override fun load(progress: (String) -> Unit): Library = loadStaged(progress, null) { _, _ -> }
+
+    override fun loadStaged(progress: (String) -> Unit, resume: Library?, saved: (Library, Int) -> Unit): Library {
+        // Repeated texts are shared as each item is read, not after: the peak stays lower on a Fire TV.
+        val d = Dedupe()
         progress("Signing in")
         val info = JSONObject(Http.get(api))
         val user = info.optJSONObject("user_info")
         if (user == null || user.optInt("auth", 0) == 0) throw IllegalStateException("The server did not accept this username and password")
         if (user.optString("status").let { it.isNotEmpty() && !it.equals("Active", true) }) throw IllegalStateException("This account is ${user.optString("status")}")
 
+        val epgUrl = s.epgUrl.ifBlank { "$base/xmltv.php?username=$u&password=$p" }
+        val haveChannels = resume != null && resume.channels.isNotEmpty()
         progress("Loading live channels")
-        val liveCats = cats("get_live_categories")
+        val liveCats = if (haveChannels) resume!!.liveCategories else cats("get_live_categories")
         var n = 0
-        val channels = list("get_live_streams", setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id", "num", "tv_archive")) { o ->
+        val channels = if (haveChannels) resume!!.channels.map(d::channel) else list("get_live_streams", setOf("stream_id", "name", "stream_icon", "category_id", "epg_channel_id", "num", "tv_archive")) { o ->
             n++
             Channel(
                 id = o["stream_id"] ?: return@list null, name = o["name"].orEmpty().trim(), logo = o["stream_icon"]?.ifBlank { null },
                 categoryId = id(o["category_id"]), epgId = o["epg_channel_id"]?.ifBlank { null }, url = null,
                 number = o["num"]?.toDoubleOrNull()?.toInt() ?: n, catchup = o["tv_archive"] == "1",
-            )
-        }
+            ).let(d::channel)
+        }.also { if (!haveChannels) saved(Library(liveCats, it, epgUrl = epgUrl), 1) }
+        val haveMovies = haveChannels && resume!!.movies.isNotEmpty()
         progress("Loading movies (${grouped(channels.size)} channels)")
-        val movieCats = try { cats("get_vod_categories") } catch (e: Exception) { emptyList() }
-        val movies = try {
+        val movieCats = if (haveMovies) resume!!.movieCategories else try { cats("get_vod_categories") } catch (e: Exception) { emptyList() }
+        val movies = if (haveMovies) resume!!.movies.map(d::movie) else try {
             list("get_vod_streams", setOf("stream_id", "name", "stream_icon", "category_id", "rating", "year", "container_extension", "added")) { o ->
                 val name = o["name"].orEmpty().trim()
                 Movie(
@@ -87,8 +94,8 @@ class XtreamProvider(private val s: Source) : Provider {
                     categoryId = id(o["category_id"]), rating = o["rating"]?.ifBlank { null }?.takeIf { it != "0" && it != "0.0" },
                     year = o["year"]?.ifBlank { null } ?: Names.year(name), url = null,
                     ext = o["container_extension"]?.ifBlank { null }?.let { id(it) } ?: "mp4", added = o["added"]?.toLongOrNull() ?: 0L,
-                )
-            }
+                ).let(d::movie)
+            }.also { saved(Library(liveCats, channels, movieCats, it, epgUrl = epgUrl), 2) }
         } catch (e: Exception) { emptyList() }
         progress("Loading series (${grouped(movies.size)} movies)")
         val seriesCats = try { cats("get_series_categories") } catch (e: Exception) { emptyList() }
@@ -101,10 +108,10 @@ class XtreamProvider(private val s: Source) : Provider {
                     categoryId = id(o["category_id"]), rating = o["rating"]?.ifBlank { null }?.takeIf { it != "0" && it != "0.0" },
                     plot = null, year = o["releaseDate"]?.take(4)?.ifBlank { null } ?: Names.year(name),
                     added = o["last_modified"]?.toLongOrNull() ?: 0L,
-                )
+                ).let(d::series)
             }
         } catch (e: Exception) { emptyList() }
-        return Library(liveCats, channels, movieCats, movies, seriesCats, series, s.epgUrl.ifBlank { "$base/xmltv.php?username=$u&password=$p" })
+        return Library(liveCats, channels, movieCats, movies, seriesCats, series, epgUrl)
     }
 
     override fun liveUrl(ch: Channel) = if (ch.categoryId == Addons.CATEGORY && ch.url != null) ch.url else "$base/live/$u/$p/${ch.id}.${if (io.github.novatv.play.App.store.xtreamHls) "m3u8" else "ts"}"

@@ -211,7 +211,7 @@ fun ImageLoaderSetup() {
                 App.host.imageCacheBytes?.let { b.maxSizeBytes(it) } ?: b.maxSizePercent(ctx, if (App.host.lowMemory) 0.10 else 0.20)
                 b.build()
             }
-            .diskCache { DiskCache.Builder().directory(cacheDir() / "images").maxSizeBytes(250L * 1024 * 1024).build() }
+            .diskCache { DiskCache.Builder().directory(cacheDir() / "images").maxSizeBytes(if (App.host.lowMemory) 100L * 1024 * 1024 else 250L * 1024 * 1024).build() }
             .build()
     }
 }

@@ -6,6 +6,14 @@ import io.github.novatv.play.platform.IO
 interface Provider {
     /** Loads categories, channels, movies and series. [progress] gets short status lines for the UI. */
     fun load(progress: (String) -> Unit): Library
+
+    /**
+     * [load] in stages for big playlists: [saved] gets the library so far after each stage (1 channels, 2 films), so
+     * a load the device cuts short (a Fire TV closing the app for memory) keeps what it had; [resume] is such a
+     * part-loaded library, whose finished stages are not read again. Returns the whole library, its texts shared
+     * ([Dedupe]). Formats without stages load as usual.
+     */
+    fun loadStaged(progress: (String) -> Unit, resume: Library?, saved: (Library, Int) -> Unit): Library = Dedupe.library(load(progress))
     fun liveUrl(ch: Channel): String
     fun movieUrl(m: Movie): String
     fun episodeUrl(s: Series, e: Episode): String

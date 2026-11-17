@@ -23,6 +23,8 @@ interface LibraryStore {
     fun read(sourceId: String): Pair<Library, Long>?
     fun write(sourceId: String, lib: Library)
     fun delete(sourceId: String)
+    /** Saves a part-loaded library ([Provider.loadStaged]); its time is the negative stage. */
+    fun writePartial(sourceId: String, lib: Library, stage: Int) {}
 }
 
 /** [LibraryCache] files in the app's data folder. */
@@ -30,6 +32,7 @@ object FileLibraryStore : LibraryStore {
     override fun read(sourceId: String) = LibraryCache.read(LibraryCache.file(dataDir(), sourceId))
     override fun write(sourceId: String, lib: Library) = LibraryCache.write(LibraryCache.file(dataDir(), sourceId), lib)
     override fun delete(sourceId: String) = LibraryCache.delete(LibraryCache.file(dataDir(), sourceId))
+    override fun writePartial(sourceId: String, lib: Library, stage: Int) = LibraryCache.writePartial(LibraryCache.file(dataDir(), sourceId), lib, stage)
 }
 
 /**
@@ -75,21 +78,33 @@ class CatalogRepository(
         state.update { Repo.LibState(source = src, epgVersion = it.epgVersion) }
         return scope.launch {
             val cached = cache.read(src.id)
-            if (cached != null) { onCached(src.id, cached.second); state.update { it.copy(lib = cached.first, index = LibIndex(cached.first)) } }
-            if (force || cached == null || cached.second < clock() - maxAgeMs) {
+            // A part-loaded copy (the last load was cut short) shows at once, and the load carries on from it.
+            val partial = cached?.takeIf { it.second < 0 }?.first
+            if (cached != null) { onCached(src.id, maxOf(0L, cached.second)); state.update { it.copy(lib = cached.first, index = LibIndex(cached.first)) } }
+            if (force || cached == null || partial != null || cached.second < clock() - maxAgeMs) {
                 state.update { it.copy(loading = true, status = "Loading ${src.name}", error = null) }
+                val t0 = clock()
+                Diag.note("Loading playlist (${src.type}, cache ${if (cached == null) "none" else "old"})")
                 try {
-                    val lib = Dedupe.library(p.load { msg -> state.update { s -> s.copy(status = msg) } })
+                    val lib = p.loadStaged({ msg -> state.update { s -> s.copy(status = msg) } }, partial) { part, stage ->
+                        cache.writePartial(src.id, part, stage)
+                        Diag.note("Saved stage $stage (${part.channels.size} channels, ${part.movies.size} movies)")
+                        // Channels can be watched while films and series still load.
+                        if (stage == 1 && state.value.lib.channels.isEmpty()) state.update { it.copy(lib = part, index = LibIndex(part)) }
+                    }
                     cache.write(src.id, lib)
                     onSynced(src.id, clock(), null)
                     onLibraryChanged()
                     val idx = LibIndex(lib)
+                    Diag.slow("Playlist load (${lib.channels.size} channels, ${lib.movies.size} movies, ${lib.series.size} series)", clock() - t0, 60_000)
                     state.update { it.copy(lib = lib, index = idx, loading = false, status = "", error = null) }
                 } catch (e: OutOfMemoryError) {
+                    Diag.failed("Playlist load (out of memory)", e)
                     state.update { it.copy(loading = false, status = "", error = "This playlist is too large for the memory of this device") }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     logW("load failed", e)
+                    Diag.failed("Playlist load (${src.type})", e)
                     val msg = e.message ?: e::class.simpleName.orEmpty()
                     onSynced(src.id, clock(), msg)
                     state.update { it.copy(loading = false, status = "", error = msg) }
@@ -106,7 +121,7 @@ class CatalogRepository(
     suspend fun sync(src: Source): String? {
         val p = if (state.value.source?.id == src.id) provider ?: providerOf(src) else providerOf(src)
         return try {
-            val lib = Dedupe.library(p.load { })
+            val lib = p.loadStaged({ }, null) { part, stage -> cache.writePartial(src.id, part, stage) }
             cache.write(src.id, lib)
             onSynced(src.id, clock(), null)
             if (state.value.source?.id == src.id) {

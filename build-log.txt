@@ -1,0 +1,17 @@
+﻿.\gradlew.bat : 
+At line:1 char:518
++ ... droid-sdk"; .\gradlew.bat :app:assembleTvRelease :app:assemblePhoneRe ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+java.io.IOException: Unable to establish loopback connection
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.

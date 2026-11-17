@@ -82,6 +82,9 @@ object AutoTest {
     }
 
     /** Before anything is drawn (test runs only): where clickable things are, for [click]. */
+    /** Puts back the settings a scenario changed (see start). */
+    @Volatile private var restoreSettings: (() -> Unit)? = null
+
     fun installHooks() { if (scenario != null) App.testBounds = { name, l, t, r, b -> bounds[name] = floatArrayOf(l, t, r, b) } }
 
     /** Called once the window exists. */
@@ -93,6 +96,12 @@ object AutoTest {
         // The Live TV preview runs only in the scenarios about it, so the others measure what they always have (their
         // player counts and connections). The test's own copy of the settings; the installed app's are never written.
         val withPreview = s in setOf("netpreview", "nethandover", "netclick", "matchwatch")
+        // Test runs share the installed app's settings file: what a scenario changes is put back when it ends (or the
+        // process exits), so the user's own app never keeps a test's choice (a preview left off, say).
+        val keepPreview = App.store.livePreview; val keepSeamless = App.store.seamlessFullscreen
+        val restore = { App.store.livePreview = keepPreview; App.store.seamlessFullscreen = keepSeamless }
+        Runtime.getRuntime().addShutdownHook(Thread { runCatching { restore() } })
+        restoreSettings = restore
         if (App.store.livePreview != withPreview) App.store.livePreview = withPreview
         log("live preview ${if (withPreview) "on" else "off"} for this scenario")
         // How long the window stops responding: a tick on the UI thread every 50 ms; any gap over 250 ms is logged.
@@ -151,6 +160,7 @@ object AutoTest {
             if (ended) return@launch
             ended = true
             log(if (failures == 0) "RESULT PASS" else "RESULT FAIL ($failures)")
+            runCatching { restoreSettings?.invoke() }; log("settings put back (preview ${App.store.livePreview})")
             log("END run=$runId status=${if (failures == 0) "PASS" else "FAIL"} failures=$failures vlcLive=${vlcLive()}")
             if (System.getenv("NOVAPLAY_AUTOTEST_STAY") == null) { delay(1500); Vlc.release(); kotlin.system.exitProcess(if (failures == 0) 0 else 3) }
         }
@@ -162,6 +172,7 @@ object AutoTest {
         ended = true
         log("STOP $why")
         log("RESULT ABORTED")
+        runCatching { restoreSettings?.invoke() }; log("settings put back (preview ${App.store.livePreview})")
         log("END run=$runId status=ABORTED failures=${failures + 1} vlcLive=${vlcLive()}")
         Runtime.getRuntime().halt(4)
     }

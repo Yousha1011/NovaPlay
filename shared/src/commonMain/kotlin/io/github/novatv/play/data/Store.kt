@@ -242,6 +242,16 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
      * Settings › Live TV › Previews (Android TV): hands the preview's player to full screen and back instead of opening the stream again. Off,
      * full screen always builds its own player and the preview starts afresh, as before the shared player.
      */
+    /** Crashes, freezes and slow loading are reported to the accounts server (Diag). */
+    var problemReports: Boolean
+        get() = sp.getBoolean("problemReports", true)
+        set(v) { sp.putBoolean("problemReports", v) }
+
+    /** A random name for this install in problem reports (Diag). */
+    var diagId: String
+        get() = sp.getString("diagId", "") ?: ""
+        set(v) { sp.putString("diagId", v) }
+
     var seamlessFullscreen: Boolean
         get() = sp.getBoolean("seamlessFullscreen", true)
         set(v) { sp.putBoolean("seamlessFullscreen", v) }

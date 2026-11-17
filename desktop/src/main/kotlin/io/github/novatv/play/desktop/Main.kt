@@ -99,6 +99,7 @@ fun main() {
         previous?.uncaughtException(t, e)
     }
     App.start(Desktop)
+    Diagnostics.start()
     AutoTest.installHooks()
     // VLC's engine takes most of a second to load: done now, off the window's thread, not on the first channel.
     Thread({ runCatching { Vlc.factory } }, "vlc-warmup").apply { isDaemon = true }.start()

@@ -116,12 +116,16 @@ class Repo(val store: Store, val epg: Epg) {
             if (!force && epg.fresh(urls, Refresh.maxAgeMs(store.guideRefreshHours))) epg.loadIndex()
             else {
                 _state.update { it.copy(epgStatus = "Loading TV guide") }
+                val t0 = io.github.novatv.play.platform.nowMs()
+                Diag.note("Loading ${urls.size} guides")
                 try {
                     epg.import(urls) { msg -> _state.update { it.copy(epgStatus = msg) } }
+                    Diag.slow("Guide import (${urls.size} guides)", io.github.novatv.play.platform.nowMs() - t0, 180_000)
                     // Done: the progress line goes away.
                     _state.update { it.copy(epgStatus = null) }
                 } catch (e: Throwable) {
                     logW("guide import failed", e)
+                    Diag.failed("Guide import (${urls.size} guides)", e)
                     _state.update { it.copy(epgStatus = "The TV guide could not be loaded (${e.message ?: e::class.simpleName.orEmpty()})") }
                 }
             }

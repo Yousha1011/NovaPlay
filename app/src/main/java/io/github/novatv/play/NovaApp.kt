@@ -49,6 +49,7 @@ class NovaApp : Application() {
             }.totalMem < 2048L * 1024 * 1024
             override fun installUpdate(file: String) = Installer.install(this@NovaApp, java.io.File(file))
         })
+        Diagnostics.start(this)
         // Re-armed at every start: alarms don't survive an update or a restart (the boot receiver starts the app).
         Overnight.schedule(this, App.store.overnightSync, App.store.overnightHour)
         // Alarms are lost when the app is updated or the device restarts.
@@ -58,6 +59,7 @@ class NovaApp : Application() {
     /** Android asks apps to give memory back: the preview's idle player goes (nothing playing is touched). */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        io.github.novatv.play.data.Diag.note("Android asked for memory back (level $level)")
         if (level < TRIM_MEMORY_RUNNING_LOW) return
         val released = (App.host.previewEngine as? ExoPreviewEngine)?.holder?.releaseIfIdle() ?: false
         if (released) android.util.Log.i("NovaPreview", "memory trim (level $level): idle preview player released")

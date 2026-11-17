@@ -25,6 +25,42 @@ class CatalogRepositoryTest {
         override fun read(sourceId: String) = saved[sourceId]
         override fun write(sourceId: String, lib: Library) { saved[sourceId] = lib to 0L }
         override fun delete(sourceId: String) { deleted += sourceId; saved.remove(sourceId) }
+        override fun writePartial(sourceId: String, lib: Library, stage: Int) { saved[sourceId] = lib to -stage.toLong() }
+    }
+
+    /** A big playlist loaded in stages: channels, then a cut-short load (the device closing the app) or the films. */
+    private class StagedProvider(var cutShort: Boolean) : Provider {
+        val resumedFrom = mutableListOf<Int>()
+        override fun load(progress: (String) -> Unit) = error("staged only")
+        override fun loadStaged(progress: (String) -> Unit, resume: Library?, saved: (Library, Int) -> Unit): Library {
+            resumedFrom += resume?.channels?.size ?: 0
+            val channels = resume?.channels ?: listOf(Channel("1", "One", null, "c", null, null, 1)).also { saved(Library(channels = it), 1) }
+            if (cutShort) throw IllegalStateException("closed for memory")
+            return Library(channels = channels, movies = listOf(Movie("m", "Film", null, "c", null, null, null, "mp4")))
+        }
+        override fun liveUrl(ch: Channel) = ""
+        override fun movieUrl(m: Movie) = ""
+        override fun episodeUrl(s: Series, e: Episode) = ""
+        override fun movieDetails(m: Movie) = Details()
+        override fun seriesDetails(s: Series) = Details()
+    }
+
+    @Test fun aCutShortLoadKeepsItsChannelsAndCarriesOn() = runTest {
+        val p = StagedProvider(cutShort = true)
+        val cache = MemoryStore()
+        val list = Sources(listOf(src("a")))
+        val state = MutableStateFlow(Repo.LibState())
+        val repo = CatalogRepository(this, state, list, cache, providerOf = { p }, clock = { now })
+        repo.open(src("a"), force = false); advanceUntilIdle()
+        assertEquals(-1L, cache.saved["a"]?.second, "the channels were kept as a part-loaded copy")
+        assertEquals(listOf("One"), state.value.lib.channels.map { it.name }, "channels show before the films load")
+        p.cutShort = false
+        repo.open(src("a"), force = false); runCurrent()
+        assertEquals(listOf("One"), state.value.lib.channels.map { it.name }, "the part-loaded copy shows at once")
+        advanceUntilIdle()
+        assertEquals(listOf(0, 1), p.resumedFrom, "the second load starts from the saved channels")
+        assertEquals(1, state.value.lib.movies.size)
+        assertEquals(0L, cache.saved["a"]?.second, "the whole library replaced the part-loaded copy")
     }
 
     /** A playlist that returns [lib] (reporting progress first), or throws [fail]. */
@@ -99,6 +135,7 @@ class CatalogRepositoryTest {
                 seen += state.value.loading to state.value.status
                 return lib("X")
             }
+            override fun loadStaged(progress: (String) -> Unit, resume: Library?, saved: (Library, Int) -> Unit) = Dedupe.library(load(progress))
         }
         val list = Sources(listOf(src("a")))
         val repo = CatalogRepository(this, state, list, MemoryStore(), providerOf = { p }, clock = { now })

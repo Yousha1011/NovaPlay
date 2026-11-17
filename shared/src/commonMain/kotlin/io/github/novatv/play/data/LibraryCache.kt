@@ -18,11 +18,14 @@ object LibraryCache {
 
     fun file(dir: Path, sourceId: String): Path = dir / "lib_${sourceId.filter { it.isLetterOrDigit() }}.bin"
 
-    fun write(f: Path, lib: Library) {
+    /** A part-loaded library ([Provider.loadStaged]): saved with its stage in place of a time, so it is never fresh. */
+    fun writePartial(f: Path, lib: Library, stage: Int) = write(f, lib, -stage.toLong())
+
+    fun write(f: Path, lib: Library, at: Long = nowMs()) {
         val tmp = f.parent!! / (f.name + ".tmp")
         fs.sink(tmp).buffer().use { o ->
             o.writeInt(VERSION)
-            o.writeLong(nowMs())
+            o.writeLong(at)
             o.str(lib.epgUrl)
             o.cats(lib.liveCategories); o.cats(lib.movieCategories); o.cats(lib.seriesCategories)
             o.writeInt(lib.channels.size)

@@ -120,7 +120,7 @@ object Http {
                 }
             }
             val gz = fs.source(raw).buffer().use { s -> s.request(2) && s.buffer[0] == 0x1f.toByte() && s.buffer[1] == 0x8b.toByte() }
-            val file = if (gz) { gunzip(raw, plain); plain } else raw
+            val file = if (gz) { gunzip(raw, plain); fs.delete(raw, mustExist = false); plain } else raw
             return fs.source(file).buffer().use { read(it) }
         } finally {
             fs.delete(raw, mustExist = false)

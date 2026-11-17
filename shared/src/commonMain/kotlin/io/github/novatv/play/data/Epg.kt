@@ -38,6 +38,9 @@ class Epg {
     private fun setUp(db: SQLiteConnection) {
         db.execSQL("PRAGMA journal_mode=WAL")
         db.execSQL("PRAGMA synchronous=NORMAL")
+        // The journal holds a whole new guide while it imports (hundreds of MB): emptied after, and kept small.
+        db.execSQL("PRAGMA journal_size_limit=16777216")
+        runCatching { db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").use { it.step() } }
         val version = db.prepare("PRAGMA user_version").use { if (it.step()) it.getLong(0).toInt() else 0 }
         if (version != VERSION) {
             listOf("prog", "chan", "meta").forEach { db.execSQL("DROP TABLE IF EXISTS $it") }
@@ -50,6 +53,11 @@ class Epg {
             db.execSQL("CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT)")
             db.execSQL("PRAGMA user_version=$VERSION")
         }
+    }
+
+    /** Gives the import's journal back to the device (it would otherwise keep the size of a whole guide). */
+    private fun compact() = wLock.locked {
+        runCatching { writer.prepare("PRAGMA wal_checkpoint(TRUNCATE)").use { it.step() } }
     }
 
     private fun <T> read(block: (SQLiteConnection) -> T): T = rLock.locked { block(reader) }
@@ -80,20 +88,37 @@ class Epg {
      * skipped; the import fails only when none of them loads.
      */
     fun import(urls: List<String>, progress: (String) -> Unit) {
-        write { db ->
+        // Each guide is saved as soon as it's read, so an import the device cuts short (a Fire TV closing the app for
+        // memory part-way through 20 guides) carries on from the next guide instead of starting again. A round left
+        // unfinished within [RESUME_MS] is carried on; an older one starts over.
+        val key = urls.joinToString("|")
+        val resume = meta("partKey") == key && (meta("partAt")?.toLongOrNull() ?: 0L) > nowMs() - RESUME_MS
+        val done = if (resume) meta("partDone").orEmpty().split('\n').filter { it.isNotEmpty() }.toMutableSet() else mutableSetOf()
+        if (!resume) write { db ->
             db.execSQL("DELETE FROM prog"); db.execSQL("DELETE FROM chan")
-            var loaded = 0
-            var last: Throwable? = null
-            for ((i, url) in urls.withIndex()) {
-                try {
-                    if (urls.size > 1) progress("Loading TV guide ${i + 1} of ${urls.size}")
-                    importOne(db, url, progress); loaded++
-                } catch (e: Exception) { last = e }
-            }
-            if (loaded == 0) throw last ?: IllegalStateException("No guide")
-            setMeta(db, "url", urls.joinToString("|"))
-            setMeta(db, "at", nowMs().toString())
+            // Not "fresh" until the round finishes: a cut-short round is carried on at the next start.
+            db.execSQL("DELETE FROM meta WHERE k IN ('url', 'at')")
+            setMeta(db, "partKey", key); setMeta(db, "partAt", nowMs().toString()); setMeta(db, "partDone", "")
         }
+        var loaded = done.size
+        var last: Throwable? = null
+        for ((i, url) in urls.withIndex()) {
+            if (url in done) continue
+            try {
+                if (urls.size > 1) progress("Loading TV guide ${i + 1} of ${urls.size}")
+                write { db -> importOne(db, url, progress); done += url; setMeta(db, "partDone", done.joinToString("\n")) }
+                loaded++
+            } catch (e: Exception) { last = e }
+            // The journal holds the guide just saved: given back before the next one.
+            compact()
+        }
+        if (loaded == 0) throw last ?: IllegalStateException("No guide")
+        write { db ->
+            setMeta(db, "url", key)
+            setMeta(db, "at", nowMs().toString())
+            db.execSQL("DELETE FROM meta WHERE k IN ('partKey', 'partAt', 'partDone')")
+        }
+        compact()
         loadIndex()
     }
 
@@ -302,6 +327,8 @@ class Epg {
     companion object {
         /** Bumped when the tables change; the guide is then imported again. */
         private const val VERSION = 6
+        /** An unfinished guide import younger than this is carried on (see import). */
+        private const val RESUME_MS = 6 * 3600_000L
 
         fun time(v: String?): Long = Time.parseXmltv(v)
 

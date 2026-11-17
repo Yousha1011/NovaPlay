@@ -28,8 +28,9 @@ object CrashLog {
                     depth++
                 }
             }
+            val withSteps = text + "--- last steps\n" + Diag.steps() + "\n"
             FileSystem.SYSTEM.createDirectories(cacheDir())
-            FileSystem.SYSTEM.sink(file).buffer().use { it.writeUtf8(text) }
+            FileSystem.SYSTEM.sink(file).buffer().use { it.writeUtf8(withSteps) }
         } catch (_: Throwable) { }
     }
 
