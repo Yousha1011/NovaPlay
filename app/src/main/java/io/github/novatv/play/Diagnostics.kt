@@ -75,8 +75,9 @@ object Diagnostics {
             }
             val trace = if (e.reason == ApplicationExitInfo.REASON_ANR || e.reason == ApplicationExitInfo.REASON_CRASH_NATIVE)
                 runCatching { e.traceInputStream?.bufferedReader()?.use { r -> r.readText().take(20_000) } }.getOrNull().orEmpty() else ""
-            Diag.report("exit", "The app $why at ${java.util.Date(e.timestamp)}\n" +
-                "memory then: ${e.pss / 1024} MB (pss), ${e.rss / 1024} MB (rss); ${e.description.orEmpty()}\n$trace")
+            val where = if (e.importance <= 100) "on screen" else if (e.importance <= 230) "visible or playing" else "in the background"
+            Diag.report("exit", "The app $why at ${java.util.Date(e.timestamp)} ($where)\n" +
+                "memory then: ${e.pss / 1024} MB (pss), ${e.rss / 1024} MB (rss); ${e.description.orEmpty()}\n$trace", earlierRun = true)
         }
     }
 }

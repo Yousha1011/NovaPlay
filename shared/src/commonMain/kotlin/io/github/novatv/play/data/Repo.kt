@@ -119,7 +119,8 @@ class Repo(val store: Store, val epg: Epg) {
                 val t0 = io.github.novatv.play.platform.nowMs()
                 Diag.note("Loading ${urls.size} guides")
                 try {
-                    epg.import(urls) { msg -> _state.update { it.copy(epgStatus = msg) } }
+                    // Behind the screen: a guide import takes minutes, and at normal priority it made the TV lag.
+                    io.github.novatv.play.platform.lowPriority { epg.import(urls) { msg -> _state.update { it.copy(epgStatus = msg) } } }
                     Diag.slow("Guide import (${urls.size} guides)", io.github.novatv.play.platform.nowMs() - t0, 180_000)
                     // Done: the progress line goes away.
                     _state.update { it.copy(epgStatus = null) }

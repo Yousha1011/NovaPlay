@@ -199,6 +199,9 @@ fun Root() {
     io.github.novatv.play.ui.UpdateCheck()
 }
 
+/** Lets go of the pictures held in memory (they come back from the disk cache when shown again). */
+fun clearImageMemory(ctx: coil3.PlatformContext) { runCatching { coil3.SingletonImageLoader.get(ctx).memoryCache?.clear() } }
+
 /** Logos and posters: a memory cache sized for a TV and a 250 MB disk cache. */
 @Composable
 fun ImageLoaderSetup() {
@@ -262,9 +265,13 @@ private fun RootBody() {
             // show without laying out their rows again, which took ~90 ms) but are not placed: not drawn, not focusable;
             // only [KEEP_TABS] are kept, to stay well inside the Fire TV's memory.
             val visited = remember { mutableStateListOf<Tab>() }
+            // Fewer on a device with little memory; only the open one when the device runs short.
+            val keep = if (App.host.lowMemory) 2 else KEEP_TABS
+            val pressure by App.memoryPressure.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(pressure) { if (pressure > 0) visited.retainAll(listOf(nav.tab)) }
             if (visited.lastOrNull() != nav.tab) {
                 visited.remove(nav.tab); visited.add(nav.tab)
-                while (visited.size > KEEP_TABS) visited.removeAt(0)
+                while (visited.size > keep) visited.removeAt(0)
             }
             // Separate drawing layers for the page and the menu: the menu's focus animation then repaints only the menu.
             Box(Modifier.fillMaxSize().padding(start = S.rail).graphicsLayer()) {

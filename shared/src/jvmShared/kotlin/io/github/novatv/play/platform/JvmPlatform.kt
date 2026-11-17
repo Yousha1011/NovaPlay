@@ -21,3 +21,9 @@ actual fun gunzip(src: Path, dst: Path) {
 }
 
 internal fun ensure(p: Path): Path = p.also { FileSystem.SYSTEM.createDirectories(it) }
+
+actual fun <T> lowPriority(block: () -> T): T {
+    val t = Thread.currentThread(); val was = t.priority
+    t.priority = Thread.MIN_PRIORITY
+    try { return block() } finally { t.priority = was }
+}

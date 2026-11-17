@@ -34,8 +34,19 @@ object Diag {
     /** One of the app's steps ("Opening playlist X"), kept (the last 40) to show what led to a problem. */
     fun note(step: String) {
         val line = io.github.novatv.play.platform.Time.dateTime(nowMs()).takeLast(8) + " " + scrub(step).take(200)
-        stepsLock.locked { steps.addLast(line); while (steps.size > 40) steps.removeFirst() }
+        stepsLock.locked {
+            if (previous == null) previous = runCatching { readSteps() }.getOrDefault("")
+            steps.addLast(line); while (steps.size > 40) steps.removeFirst()
+        }
+        // Kept on disk too, so when Android closes the app the next start can report what it was doing.
+        scope.launch { runCatching { val text = steps(); FileSystem.SYSTEM.write(stepsFile()) { writeUtf8(text) } } }
     }
+
+    /** The steps of the run before this one (read before this run's first step replaced them on disk). */
+    private var previous: String? = null
+    fun previousSteps(): String = stepsLock.locked { previous.orEmpty() }
+    private fun stepsFile() = cacheDir() / "last-steps.txt"
+    private fun readSteps(): String = if (FileSystem.SYSTEM.exists(stepsFile())) FileSystem.SYSTEM.read(stepsFile()) { readUtf8() } else ""
 
     fun steps(): String = stepsLock.locked { steps.joinToString("\n") }
 
@@ -52,7 +63,7 @@ object Diag {
      * Sends a report ([kind]: crash, freeze, slow, error, exit). The same problem is sent once an hour at most, and 25
      * reports a day; nothing is sent when reports are off or the build has no server.
      */
-    fun report(kind: String, text: String) {
+    fun report(kind: String, text: String, earlierRun: Boolean = false) {
         val now = nowMs()
         val key = kind + ":" + text.lineSequence().firstOrNull().orEmpty().take(80)
         sentLock.locked {
@@ -61,13 +72,15 @@ object Diag {
             sentAt[key] = now; sentToday++
         }
         val body = scrub(text) + "\n\n--- device\n" + runCatching { facts() }.getOrDefault("") +
-            "\n\n--- last steps\n" + steps()
+            (if (earlierRun) "\n\n--- last steps before it closed\n" + previousSteps() + "\n\n--- this start\n" + steps()
+             else "\n\n--- last steps\n" + steps())
         scope.launch { send(kind, body) }
     }
 
     /** Blocking send (the crash handler's, with the app about to close); true when the server kept it. */
     fun send(kind: String, text: String): Boolean {
-        if (model == "test" || !AccountSync.available || !runCatching { App.store.problemReports }.getOrDefault(true)) return false
+        // Unit tests run without a platform (no model): they never report.
+        if (model == "test" || model.isBlank() || !AccountSync.available || !runCatching { App.store.problemReports }.getOrDefault(true)) return false
         return try {
             val json = JSONObject().put("kind", kind).put("text", text.take(60_000)).put("version", Updates.CURRENT)
                 .put("platform", runCatching { App.device.name.lowercase() }.getOrDefault("unknown"))

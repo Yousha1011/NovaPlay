@@ -66,3 +66,5 @@ actual class Prefs actual constructor() {
     actual fun getInt(k: String, def: Int): Int = if (d.objectForKey(k) == null) def else d.integerForKey(k).toInt()
     actual fun putInt(k: String, v: Int) { d.setInteger(v.toLong(), k) }
 }
+
+actual fun <T> lowPriority(block: () -> T): T = block()

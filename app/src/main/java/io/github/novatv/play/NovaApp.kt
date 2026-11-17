@@ -61,6 +61,10 @@ class NovaApp : Application() {
         super.onTrimMemory(level)
         io.github.novatv.play.data.Diag.note("Android asked for memory back (level $level)")
         if (level < TRIM_MEMORY_RUNNING_LOW) return
+        // Short of memory: pictures in memory and hidden tabs go first (both come back when needed), so Android
+        // has less reason to close the app.
+        io.github.novatv.play.clearImageMemory(this)
+        io.github.novatv.play.App.memoryPressure.value++
         val released = (App.host.previewEngine as? ExoPreviewEngine)?.holder?.releaseIfIdle() ?: false
         if (released) android.util.Log.i("NovaPreview", "memory trim (level $level): idle preview player released")
     }

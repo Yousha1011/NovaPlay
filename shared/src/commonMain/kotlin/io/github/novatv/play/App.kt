@@ -12,6 +12,9 @@ import kotlin.concurrent.Volatile
 
 /** The app's single store, library and guide, shared by every screen; each platform calls [start] first. */
 object App {
+    /** Goes up each time the device runs short of memory: the screens let go of what they can rebuild. */
+    val memoryPressure = kotlinx.coroutines.flow.MutableStateFlow(0)
+
     lateinit var store: Store
         private set
     lateinit var repo: Repo

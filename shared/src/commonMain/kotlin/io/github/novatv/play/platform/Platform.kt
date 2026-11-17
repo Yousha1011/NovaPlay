@@ -98,3 +98,6 @@ fun grouped(n: Number): String {
 }
 
 fun pad2(n: Number): String = n.toLong().toString().padStart(2, '0')
+
+/** Runs [block] on the calling thread at background priority, so the screen keeps the CPU (a Fire TV has little). */
+expect fun <T> lowPriority(block: () -> T): T
