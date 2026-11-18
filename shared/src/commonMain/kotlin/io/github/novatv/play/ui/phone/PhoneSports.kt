@@ -319,7 +319,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
         try {
             kotlinx.coroutines.withTimeoutOrNull(60_000L) {
-                io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l: List<Airing> -> if (l.isNotEmpty() || value.isEmpty()) value = l }
+                io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l: List<Airing> -> value = l }
             }
         } catch (x: Exception) { }
     }
@@ -497,6 +497,8 @@ private fun AiringCard(list: List<Airing>, i: Int) {
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(air.channel.name, style = P.head, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            // An addon stream listed straight away, still being checked (it drops out if it doesn't open).
+            if (io.github.novatv.play.data.Addons.isChecking(air.channel.url)) Text("Checking…", style = P.small.copy(color = P.blue, fontSize = 12.sp))
             Text(air.programme?.let { "${clock(it.start)}  ${it.title}" } ?: air.why, style = P.small, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

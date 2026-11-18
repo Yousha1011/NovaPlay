@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.novatv.play"
         minSdk = 25
         targetSdk = 34
-        versionCode = 31
-        versionName = "1.9.9.1"
+        versionCode = 34
+        versionName = "1.9.10"
     }
 
     // Two apps from one source: the Fire TV app, and the phone app with the iPhone's screens.

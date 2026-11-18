@@ -267,16 +267,23 @@ object Addons {
             if (list().isEmpty()) { send(emptyList()); return@channelFlow }
             found[e.id]?.takeIf { nowMs() - it.first < FRESH_MS }?.let { send(it.second.take(limit)); return@channelFlow }
             val turns = candidates(e)
-            val ok = arrayOfNulls<io.github.novatv.play.sports.Airing>(turns.size)
+            // Listed at once (the stored streams), each marked "checking" until its check ends; one that doesn't
+            // open then drops out. The list is sent again after every check, so the marks clear as they go.
+            val dead = BooleanArray(turns.size)
             val lock = kotlinx.coroutines.sync.Mutex()
-            kotlinx.coroutines.coroutineScope {
-                turns.forEachIndexed { i, a -> launch {
-                    if (Http.opens(a.channel.url!!, StreamHeaders.forUrl(a.channel.url!!).orEmpty(), timeoutMs = 4_000L)) {
-                        lock.lock(); try { ok[i] = a; send(ok.filterNotNull().take(limit)) } finally { lock.unlock() }
-                    }
-                } }
-            }
-            val all = ok.filterNotNull().take(limit)
+            fun shown() = turns.filterIndexed { i, _ -> !dead[i] }.take(limit)
+            turns.forEach { checking[it.channel.url!!] = true }
+            send(shown())
+            try {
+                kotlinx.coroutines.coroutineScope {
+                    turns.forEachIndexed { i, a -> launch {
+                        val url = a.channel.url!!
+                        val plays = Http.opens(url, StreamHeaders.forUrl(url).orEmpty(), timeoutMs = 4_000L)
+                        lock.lock(); try { checking.remove(url); if (!plays) dead[i] = true; send(shown()) } finally { lock.unlock() }
+                    } }
+                }
+            } finally { turns.forEach { checking.remove(it.channel.url!!) } }
+            val all = shown()
             found[e.id] = nowMs() to all
             send(all)
             // Streams listed but none opened on this device: reported (once an hour at most), to find why one device
@@ -286,6 +293,11 @@ object Addons {
             else if (turns.isEmpty() && lastLookup.startsWith("matched 0").not())
                 Diag.report("addons", "Addon events matched ${e.title} but listed no streams: $lastLookup (${io.github.novatv.play.App.device})")
         }
+
+    /** Addon streams listed but still being checked (their address): shown with a "checking" mark. */
+    // Watched by the screens (a snapshot map): a mark clears on screen the moment its check ends.
+    private val checking = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+    fun isChecking(url: String?): Boolean = url != null && checking[url] == true
 
     /** The last catalog read that failed, for Check and problem reports. */
     @kotlin.concurrent.Volatile private var lastError: String? = null

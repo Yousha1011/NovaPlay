@@ -97,7 +97,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
         // Listed as each stream's check passes (the streams themselves are stored by the background update).
         try {
             kotlinx.coroutines.withTimeoutOrNull(60_000L) {
-                io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l -> if (l.isNotEmpty() || value.isEmpty()) value = l }
+                io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l -> value = l }
             }
         } catch (x: Exception) { }
     }
