@@ -43,6 +43,8 @@ interface Host {
     fun toast(msg: String)
     /** Opens a web page outside the app; platforms without a browser to hand ignore it. */
     fun openUrl(url: String) {}
+    /** Closes the app completely (the TV's Exit NovaPlay): its screens, then the process, so nothing runs behind. */
+    fun exitApp() {}
     /**
      * Opens the first of [packages] installed (an Android app), else [web]. False when neither could be opened (a TV
      * with no browser): the caller then names the app to install.

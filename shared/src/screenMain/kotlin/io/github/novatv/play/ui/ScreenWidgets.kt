@@ -121,7 +121,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
         onValueChange = { val changed = it.text != field.text; field = it; if (changed) onChange(it.text) },
         // Keyboard: the field keeps Left and Right for its cursor, except at either end of the text, where they move on
         // like the arrows do everywhere else; Up and Down always move on (it's one line).
-        modifier = modifier.height(if (LocalCompact.current) 44.dp else 54.dp).onPreviewKeyEvent { e ->
+        modifier = modifier.height(if (LocalCompact.current) FIELD_COMPACT else FIELD_HEIGHT).onPreviewKeyEvent { e ->
             if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown || e.isShiftPressed || e.isCtrlPressed || e.isAltPressed) return@onPreviewKeyEvent false
             val sel = field.selection
             when (e.key) {
@@ -133,7 +133,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
             }
         },
         singleLine = true,
-        textStyle = T.body,
+        textStyle = if (LocalCompact.current) T.small else T.body,
         cursorBrush = SolidColor(Color.White),
         interactionSource = src,
         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
@@ -142,7 +142,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
         keyboardActions = KeyboardActions(onDone = { onDone() }),
         decorationBox = { inner ->
             Box(
-                Modifier.fillMaxWidth().height(if (LocalCompact.current) 44.dp else 54.dp).clip(RoundedCornerShape(50))
+                Modifier.fillMaxWidth().height(if (LocalCompact.current) FIELD_COMPACT else FIELD_HEIGHT).clip(RoundedCornerShape(50))
                     .background(if (focused) Color(0x40FFFFFF) else Color(0x1AFFFFFF))
                     .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color(0x40FFFFFF), RoundedCornerShape(27.dp))
                     .padding(horizontal = 20.dp),
@@ -150,7 +150,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        if (text.isEmpty()) Text(hint, style = T.body.copy(color = Color(0x80FFFFFF)), maxLines = 1)
+                        if (text.isEmpty()) Text(hint, style = (if (LocalCompact.current) T.small else T.body).copy(color = Color(0x80FFFFFF)), maxLines = 1)
                         inner()
                     }
                 }

@@ -129,6 +129,8 @@ sealed class Route {
     data class Match(val event: io.github.novatv.play.sports.SportEvent) : Route()
     /** Phone: a league's full table, from a match page. */
     data class Table(val leagueId: String) : Route()
+    /** Phone: a match's full information (scorecards, line-ups, box scores). */
+    data class GameInfo(val event: io.github.novatv.play.sports.SportEvent, val side: io.github.novatv.play.sports.Side? = null) : Route()
     data class ChannelGroup(val id: String, val name: String) : Route()
     data object Playlists : Route()
     data class Find(val scope: String) : Route()
@@ -228,7 +230,7 @@ fun ImageLoaderSetup() {
     setSingletonImageLoaderFactory { ctx ->
         // Logos and posters: a memory cache sized for a TV and a 250 MB disk cache.
         ImageLoader.Builder(ctx)
-            .components { add(KtorNetworkFetcherFactory(httpClient = { Http.client })) }
+            .components { add(KtorNetworkFetcherFactory(httpClient = { Http.imageClient })) }
             // A share of the app's memory, or the host's own size (Windows: a share of its heap would be hundreds of MB).
             .memoryCache {
                 val b = MemoryCache.Builder()
@@ -255,16 +257,23 @@ private fun RootBody() {
         delay(30)
         try { nav.page(nav.tab).requestFocus() } catch (e: Exception) { try { nav.railFocus.requestFocus() } catch (e: Exception) { } }
     }
-    BackHandler(enabled = nav.back(railFocused) != Back.EXIT && io.github.novatv.play.ui.Pin.request == null &&
+    // TV: Back on the side menu asks whether to exit NovaPlay (Yes closes it completely).
+    val tv = App.device == io.github.novatv.play.platform.Device.TV
+    var askExit by remember { mutableStateOf(false) }
+    BackHandler(enabled = (tv || nav.back(railFocused) != Back.EXIT) && !askExit && io.github.novatv.play.ui.Pin.request == null &&
         io.github.novatv.play.data.Updates.offer == null) {
-        when (nav.back(railFocused)) {
+        when (val b = nav.back(railFocused)) {
             Back.POP -> nav.pop()
             Back.TO_RAIL -> try { nav.railFocus.requestFocus() } catch (e: Exception) { }
-            // The rail's focus follows the open tab once Home is laid out.
-            Back.TO_HOME -> { nav.tab = Tab.HOME; scope.launch { delay(30); try { nav.railFocus.requestFocus() } catch (e: Exception) { } } }
-            Back.EXIT -> {}
+            Back.TO_HOME, Back.EXIT -> if (tv) askExit = true
+                // The rail's focus follows the open tab once Home is laid out.
+                else if (b == Back.TO_HOME) { nav.tab = Tab.HOME; scope.launch { delay(30); try { nav.railFocus.requestFocus() } catch (e: Exception) { } } }
         }
     }
+    if (askExit) ExitPrompt(onYes = { App.host.exitApp() }, onNo = {
+        askExit = false
+        scope.launch { delay(30); try { nav.railFocus.requestFocus() } catch (e: Exception) { } }
+    })
     val account by io.github.novatv.play.data.AccountSync.user.collectAsState()
     Box(Modifier.fillMaxSize()) {
         Backdrop()
@@ -422,3 +431,24 @@ private const val KEEP_TABS = 4
 internal val WINDOW_TABS = setOf(Tab.LIVE, Tab.GUIDE, Tab.SPORTS, Tab.MOVIES, Tab.SERIES, Tab.RECORDINGS, Tab.SEARCH)
 /** Tabs with no window of their own: the TV window's channel plays on in their top right corner. */
 internal val CORNER_TABS = setOf(Tab.MOVIES, Tab.SERIES, Tab.RECORDINGS, Tab.SEARCH)
+
+/** "Exit NovaPlay?" with Yes and No (focus on No, so a second Back or OK by accident doesn't close the app). */
+@Composable
+private fun ExitPrompt(onYes: () -> Unit, onNo: () -> Unit) {
+    val no = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onNo) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { repeat(10) { try { no.requestFocus(); return@LaunchedEffect } catch (e: Exception) { delay(80) } } }
+        androidx.compose.foundation.layout.Column(Modifier.exitBox(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+            io.github.novatv.play.ui.Text("Exit NovaPlay?", style = io.github.novatv.play.ui.T.h2.copy(color = androidx.compose.ui.graphics.Color.White))
+            androidx.compose.foundation.layout.Spacer(Modifier.exitGap())
+            androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
+                io.github.novatv.play.ui.Pill("Yes", onClick = onYes)
+                io.github.novatv.play.ui.Pill("No", onClick = onNo, primary = true, modifier = Modifier.focusRequester(no))
+            }
+        }
+    }
+}
+
+private fun Modifier.exitBox() = this.clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+    .background(io.github.novatv.play.ui.C.panel).padding(horizontal = 40.dp, vertical = 28.dp)
+private fun Modifier.exitGap() = this.height(20.dp)

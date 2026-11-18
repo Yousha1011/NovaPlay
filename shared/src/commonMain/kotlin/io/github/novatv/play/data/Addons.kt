@@ -276,16 +276,29 @@ object Addons {
             val all = ok.filterNotNull().take(limit)
             found[e.id] = nowMs() to all
             send(all)
+            // Streams listed but none opened on this device: reported (once an hour at most), to find why one device
+            // lists none where another does.
+            if (turns.isNotEmpty() && all.isEmpty())
+                Diag.report("addons", "No addon stream opened for ${e.title}: $lastLookup, none of ${turns.size} opened (${io.github.novatv.play.App.device})")
+            else if (turns.isEmpty() && lastLookup.startsWith("matched 0").not())
+                Diag.report("addons", "Addon events matched ${e.title} but listed no streams: $lastLookup (${io.github.novatv.play.App.device})")
         }
+
+    /** What the last lookup found, for problem reports. */
+    private var lastLookup = ""
 
     /** [e]'s streams from every source, unchecked, taken in turns (each source's first, then each one's second...). */
     private fun candidates(e: SportEvent): List<io.github.novatv.play.sports.Airing> {
         var n = 0
-        val bySource = forMatch(e).map { ev ->
-            runCatching { storedStreams(ev) }.getOrElse { emptyList() }.map { s ->
-                io.github.novatv.play.sports.Airing(channel(ev, s, n++), null, "${ev.title} · ${ev.catalog}")
-            }
+        val matched = forMatch(e)
+        // Each source's streams read at once (stored ones are instant; a phone that hasn't stored them yet waits once).
+        val read = kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
+            matched.map { ev -> async { ev to runCatching { storedStreams(ev) }.getOrElse { emptyList() } } }.map { it.await() }
         }
+        val bySource = read.map { (ev, streams) ->
+            streams.map { s -> io.github.novatv.play.sports.Airing(channel(ev, s, n++), null, "${ev.title} · ${ev.catalog}") }
+        }
+        lastLookup = "matched ${matched.size} addon events, ${bySource.sumOf { it.size }} streams"
         return (0 until (bySource.maxOfOrNull { it.size } ?: 0)).flatMap { i -> bySource.mapNotNull { it.getOrNull(i) } }
             .distinctBy { it.channel.url }
     }

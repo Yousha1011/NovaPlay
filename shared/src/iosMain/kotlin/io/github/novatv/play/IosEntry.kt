@@ -40,6 +40,10 @@ fun start() {
     // Kotlin errors nothing caught: written down (CrashLog, shown in Settings › About), then iOS closes the app.
     var previous: ReportUnhandledExceptionHook? = null
     previous = setUnhandledExceptionHook { e -> io.github.novatv.play.data.CrashLog.record(e, "iPhone"); previous?.invoke(e) }
+    // Problem reports: without a model nothing is sent (the iPhone sent none before 1.9.9).
+    val d = platform.UIKit.UIDevice.currentDevice
+    io.github.novatv.play.data.Diag.model = "iPhone (${d.model}), iOS ${d.systemVersion}"
+    io.github.novatv.play.data.Diag.facts = { io.github.novatv.play.data.Diag.model }
     App.start(IosHost)
 }
 

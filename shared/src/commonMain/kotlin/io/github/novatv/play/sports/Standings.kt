@@ -58,7 +58,9 @@ data class Standings(
     val columns: List<StandingsColumn>,
     val groups: List<StandingsGroup>,
     val source: String,
-    val fetchedAt: Long
+    val fetchedAt: Long,
+    /** A heading of its own (the ICC rankings'), else the competition's name. */
+    val title: String? = null,
 ) {
     val conferences: List<String> get() = groups.mapNotNull { it.parent }.distinct()
     val hasDivisions: Boolean get() = conferences.isNotEmpty()
@@ -83,6 +85,39 @@ data class Standings(
 object StandingsRepository {
     private val cache = SafeMap<String, Pair<Long, Standings>>()
     private const val TTL = 3600_000L
+
+    /**
+     * The table for a match:
+     *  - cricket between men's national sides (a tour, a friendly): the ICC team rankings in its format;
+     *  - its competition's own table when it has one (leagues, the European cups' league phase, the Nations League,
+     *    World Cup and its qualifiers, Libertadores, AFC Champions League);
+     *  - a domestic cup tie (FA Cup, Carabao Cup, Copa del Rey, DFB-Pokal, Coppa Italia): the league either club
+     *    plays in;
+     *  - national sides with no table of their own (friendlies): the FIFA world ranking.
+     * Null when none applies (women's cricket, A and youth sides, domestic cricket, clubs below the leagues covered).
+     */
+    fun forEvent(e: SportEvent): Standings? {
+        if (e.league.sport == Sport.CRICKET) return IccRankings.forEvent(e)
+        forLeague(e.league)?.takeIf { s -> s.groups.any { it.rows.isNotEmpty() } }?.let { return it }
+        if (e.league.sport == Sport.FOOTBALL) {
+            cupLeagues[e.league.id]?.let { ids ->
+                for (id in ids) {
+                    val l = Catalog.league(id) ?: continue
+                    val t = forLeague(l) ?: continue
+                    if (t.groups.flatMap { it.rows }.any { r -> e.teams.any { s -> r.id == s.id || r.name.equals(s.name, true) } }) return t
+                }
+            }
+            FifaRankings.forEvent(e)?.let { return it }
+        }
+        return null
+    }
+
+    /** Each domestic cup's leagues, top first: a tie shows the table one of its clubs plays in. */
+    private val cupLeagues = mapOf(
+        "eng.fa" to listOf("eng.1", "eng.2", "eng.3"), "eng.league_cup" to listOf("eng.1", "eng.2", "eng.3"),
+        "esp.copa_del_rey" to listOf("esp.1", "esp.2"), "ger.dfb_pokal" to listOf("ger.1", "ger.2"),
+        "ita.coppa_italia" to listOf("ita.1", "ita.2"),
+    )
 
     fun forLeague(league: League): Standings? {
         val now = nowMs()

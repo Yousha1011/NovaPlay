@@ -61,3 +61,7 @@ fun Text(text: String, modifier: Modifier = Modifier, style: TextStyle = T.body,
 
 /** True inside Settings: buttons and text boxes there are drawn a size smaller. */
 val LocalCompact = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+/** A text field's height: a pill's (its text and padding), so a search box lines up with the pills beside it. */
+val FIELD_HEIGHT = 42.dp
+val FIELD_COMPACT = 34.dp

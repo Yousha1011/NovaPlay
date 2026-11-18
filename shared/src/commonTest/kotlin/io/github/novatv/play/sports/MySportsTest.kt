@@ -57,7 +57,7 @@ class MySportsTest {
         assertEquals(MySports.Tag.LIVE, MySports.tag(game("a", pl, now - hour, "A", "B", State.LIVE), now))
         assertEquals(MySports.Tag.TOMORROW, MySports.tag(game("b", pl, now + day, "A", "B"), now))
         assertEquals(MySports.Tag.DATE, MySports.tag(game("c", pl, now + 2 * day, "A", "B"), now))
-        assertEquals(MySports.Tag.DATE, MySports.tag(game("d", pl, now + 2 * hour, "A", "B"), now))
+        assertEquals(MySports.Tag.TODAY, MySports.tag(game("d", pl, now + 2 * hour, "A", "B"), now))
         assertEquals("TOMORROW", MySports.tagText(game("b", pl, now + day, "A", "B"), now))
     }
 

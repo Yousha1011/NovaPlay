@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -58,6 +59,12 @@ import io.github.novatv.play.sports.Teams
 import io.github.novatv.play.sports.bandColor
 import io.github.novatv.play.sports.teamShades
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import kotlinx.coroutines.flow.flowOn
 
 /**
@@ -71,7 +78,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     val home = e.home; val away = e.away
     val homePage by produceState<TeamPage?>(null, e.id) { value = home?.let { withContext(IO) { Teams.info(e.league, it.id) } } }
     val awayPage by produceState<TeamPage?>(null, e.id) { value = away?.let { withContext(IO) { Teams.info(e.league, it.id) } } }
-    val table by produceState<Standings?>(null, e.league.id) { value = withContext(IO) { runCatching { StandingsRepository.forLeague(e.league) }.getOrNull() } }
+    val table by produceState<Standings?>(null, e.id) { value = withContext(IO) { runCatching { StandingsRepository.forEvent(e) }.getOrNull() } }
     // Your channels from the guide and channel names first (at once, offline), then the broadcasters found online
     // added; looked up again when the guide (re)loads, so a game opened while it was loading still finds them.
     val guideVersion = App.repo.state.collectAsState().value.epgVersion
@@ -89,7 +96,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
         // Listed as each stream's check passes (the streams themselves are stored by the background update).
         try {
-            kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+            kotlinx.coroutines.withTimeoutOrNull(60_000L) {
                 io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l -> if (l.isNotEmpty() || value.isEmpty()) value = l }
             }
         } catch (x: Exception) { }
@@ -99,6 +106,13 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
         value = withContext(IO) { io.github.novatv.play.sports.OfficialApps.forEvent(e) }
     }
     var card by remember { mutableStateOf<Side?>(null) }
+    var gameInfo by remember { mutableStateOf(false) }
+    // Game info's line-ups and faces loaded while the page is read, so it opens ready.
+    PrefetchGameInfo(e)
+    // Opened from a team's card: that team only; from the page: the whole match.
+    var infoSide by remember { mutableStateOf<Side?>(null) }
+    val testInfo by App.testGameInfo.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(testInfo) { gameInfo = testInfo }
     // Focus starts on the page (the first side, else the first button), never left in the menu.
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
     androidx.compose.runtime.LaunchedEffect(e.id) {
@@ -160,6 +174,7 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
             }
             Spacer(Modifier.height(14.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                item(key = "gameinfo") { Pill("Game info", onClick = { gameInfo = true }) }
                 for (s in e.teams) item(key = "f_${s.id}_$follows") {
                     val key = teamKey(e, s)
                     val on = isFavTeam(e, s)
@@ -201,8 +216,11 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
 
     card?.let { s ->
         val page = if (s.id == home?.id) homePage else awayPage
-        TeamCard(s, page, rowOf(s), e.league.name, onClose = { card = null })
+        TeamCard(s, page, rowOf(s), if (e.league.sport == io.github.novatv.play.sports.Sport.CRICKET) (e.subtitle ?: e.league.name) else e.league.name, e,
+            onClose = { card = null }, onGameInfo = { infoSide = s; card = null; gameInfo = true })
     }
+    // From a team's card, Back (the button or the remote's) returns to that card; Close shuts both.
+    if (gameInfo) GameInfoDialog(e, infoSide, onBack = infoSide?.let { s -> { gameInfo = false; infoSide = null; card = s } }) { gameInfo = false; infoSide = null }
     if (picking) ChannelsPopup(e, 0) { picking = false }
 }
 
@@ -240,7 +258,10 @@ private fun Scoreboard(e: SportEvent, hp: TeamPage?, ap: TeamPage?, hr: Standing
                         }
                         if (e.state != State.PRE && !App.store.hideScores) {
                             Spacer(Modifier.width(14.dp))
-                            Text(side.score ?: "–", style = T.h1.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1)
+                            // Cricket's long scores ("217 & 360 (130.3 ov)") smaller and kept to half the band, so the name shows.
+                            val sc = side.score ?: "–"
+                            Text(sc, style = (if (sc.length > 9) T.h2 else T.h1).copy(fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.End),
+                                maxLines = 2, modifier = Modifier.widthIn(max = 190.dp))
                         }
                     }
                 }
@@ -271,22 +292,27 @@ private fun Scoreboard(e: SportEvent, hp: TeamPage?, ap: TeamPage?, hr: Standing
 
 /** A team's card: place, points, goal difference and record; its last three results and its next match. */
 @Composable
-private fun TeamCard(s: Side, page: TeamPage?, row: StandingsRow?, league: String, onClose: () -> Unit) {
+private fun TeamCard(s: Side, page: TeamPage?, row: StandingsRow?, league: String, e: SportEvent, onClose: () -> Unit, onGameInfo: () -> Unit) {
     val follow = remember { mutableIntStateOf(0) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.62f).clip(RoundedCornerShape(20.dp)).background(C.panel)
-            .border(1.dp, SportsLook.Border, RoundedCornerShape(20.dp)).padding(22.dp)) {
+        Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.62f).heightIn(max = 620.dp).clip(RoundedCornerShape(20.dp)).background(C.panel)
+            .border(1.dp, SportsLook.Border, RoundedCornerShape(20.dp)).verticalScroll(rememberScrollState()).padding(22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LogoChip(s.logo, 52.dp)
                 Spacer(Modifier.width(14.dp))
                 Column {
                     Text(s.name, style = T.h2.copy(fontWeight = FontWeight.Bold, color = Color.White))
-                    Text(row?.let { "${ordinal(it.pos)} in $league" } ?: page?.standing ?: league, style = T.small.copy(color = SportsLook.Dim))
+                    Text(if (e.league.sport == io.github.novatv.play.sports.Sport.CRICKET) league else row?.let { "${ordinal(it.pos)} in $league" } ?: page?.standing ?: league, style = T.small.copy(color = SportsLook.Dim))
                 }
             }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                for ((label, value) in listOf(
+                // Cricket: the ICC rankings' place, rating and matches (no league points or goal difference).
+                for ((label, value) in if (e.league.sport == io.github.novatv.play.sports.Sport.CRICKET) listOf(
+                    "ICC RANK" to row?.let { ordinal(it.pos) },
+                    "RATING" to row?.values?.get("points"),
+                    "MATCHES" to row?.values?.get("gamesPlayed"),
+                ) else listOf(
                     "PLACE" to row?.let { ordinal(it.pos) },
                     "POINTS" to row?.values?.get("points"),
                     "GOAL DIFF" to row?.values?.get("pointDifferential"),
@@ -315,7 +341,7 @@ private fun TeamCard(s: Side, page: TeamPage?, row: StandingsRow?, league: Strin
                     App.store.favouriteTeams = if (on) App.store.favouriteTeams.filterNot { it.endsWith("|${s.name}") || it == key }.toSet() else App.store.favouriteTeams + key
                     follow.intValue++
                 }, selected = on)
-                Pill("Game info", onClick = onClose, primary = true)
+                Pill("Game info", onClick = onGameInfo, primary = true)
             }
         }
     }
@@ -341,20 +367,28 @@ private fun ResultLine(p: TeamPage, g: SportEvent) {
     }
 }
 
-/** The league table around both teams: the top three, each team and its neighbours, the two teams highlighted. */
+/**
+ * The top of the league table, the two teams highlighted: their own group when the league has groups (each group's
+ * places start at 1), the first [EXCERPT_ROWS] places; the rest is in the full table.
+ */
 @Composable
 internal fun StandingsExcerpt(t: Standings, mark: Set<String>, onFullTable: () -> Unit) {
-    val rows = t.groups.flatMap { it.rows }.distinctBy { it.id }.sortedBy { it.pos }
-    val keep = rows.filter { r -> r.pos <= 3 || mark.any { id -> rows.firstOrNull { it.id == id }?.let { kotlin.math.abs(it.pos - r.pos) <= 1 } == true } }.take(10)
+    val group = t.groups.firstOrNull { g -> g.rows.any { it.id in mark } } ?: t.groups.firstOrNull() ?: return
+    // The ICC rankings have no Tables page: they open out here instead.
+    val inPlace = t.leagueId.startsWith("icc.") || t.leagueId.startsWith("fifa.")
+    var all by remember(t.leagueId) { mutableStateOf(false) }
+    val sorted = group.rows.distinctBy { it.id }.sortedBy { it.pos }
+    val keep = if (all) sorted else sorted.take(EXCERPT_ROWS)
     // Played, goal (or points) difference and points where the league has them, as on a football table.
     val wanted = listOf("gamesPlayed", "pointDifferential", "points").mapNotNull { k -> t.columns.firstOrNull { it.key == k } }
     val cols = if (wanted.size == 3) wanted else t.columns.takeLast(3)
     Panel(null, Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("${(io.github.novatv.play.sports.Catalog.leagues.firstOrNull { it.id == t.leagueId }?.name ?: "League").uppercase()} STANDINGS",
+            Text((t.title ?: "${(io.github.novatv.play.sports.Catalog.leagues.firstOrNull { it.id == t.leagueId }?.name ?: "League").uppercase()} STANDINGS") +
+                    (group.name.takeIf { it.isNotBlank() && t.groups.size > 1 }?.let { " · ${it.uppercase()}" } ?: ""),
                 style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
-            Tile(onFullTable, shape = RoundedCornerShape(8.dp), scale = 1f, color = Color.Transparent) {
-                Text("FULL TABLE ›", style = T.tiny.copy(color = Color.White, fontWeight = FontWeight.Bold), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+            if (!inPlace || sorted.size > EXCERPT_ROWS) Tile({ if (inPlace) all = !all else onFullTable() }, shape = RoundedCornerShape(8.dp), scale = 1f, color = Color.Transparent) {
+                Text(if (inPlace) (if (all) "TOP $EXCERPT_ROWS ‹" else "ALL ${sorted.size} ›") else "FULL TABLE ›", style = T.tiny.copy(color = Color.White, fontWeight = FontWeight.Bold), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
             }
         }
         Row(Modifier.padding(top = 8.dp, bottom = 4.dp).fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0x14FFFFFF)).padding(vertical = 4.dp, horizontal = 6.dp)) {
@@ -362,11 +396,7 @@ internal fun StandingsExcerpt(t: Standings, mark: Set<String>, onFullTable: () -
             Text("TEAM", style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
             for (c in cols) Text(c.label, style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.width(48.dp))
         }
-        var last = 0
         for ((i, r) in keep.withIndex()) {
-            // Dots where the excerpt skips places.
-            if (i > 0 && r.pos > last + 1) Text("···", style = T.tiny.copy(color = SportsLook.Faint), modifier = Modifier.padding(start = 12.dp))
-            last = r.pos
             TableLine(r, cols.map { r.values[it.key] ?: "–" }, highlighted = r.id in mark, zebra = i % 2 == 1, numWidth = 48.dp)
         }
     }
@@ -418,3 +448,76 @@ internal fun fullScreen(c: Channel, list: List<Channel>, watch: (Channel) -> Uni
     if (App.preview.available && App.preview.channel?.id != c.id) watch(c)
     if (App.preview.available) playFromPreview(c, list) else playChannel(list, list.indexOfFirst { it.id == c.id }.coerceAtLeast(0), switchOnFailure = true)
 }
+internal const val EXCERPT_ROWS = 10
+
+/** A team's figures in this game, the other side's beside each when there is one. */
+@Composable
+internal fun GameStats(lines: List<io.github.novatv.play.sports.MatchStats.Line>, mine: String, other: String?) {
+    val paired = lines.any { it.other != null }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).border(1.dp, SportsLook.Border, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+        if (paired) Row(Modifier.padding(bottom = 2.dp)) {
+            Spacer(Modifier.weight(1f))
+            Text(mine, style = T.tiny.copy(color = SportsLook.Blue, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.width(70.dp), maxLines = 1)
+            Text(other.orEmpty(), style = T.tiny.copy(color = SportsLook.Dim, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center), modifier = Modifier.width(70.dp), maxLines = 1)
+        }
+        for (l in lines) Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(l.label, style = T.small.copy(color = SportsLook.Dim), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(l.value, style = T.small.copy(color = Color.White, fontWeight = FontWeight.Bold, textAlign = if (paired) TextAlign.Center else TextAlign.End),
+                modifier = if (paired) Modifier.width(70.dp) else Modifier, maxLines = 1)
+            if (paired) Text(l.other ?: "–", style = T.small.copy(color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center), modifier = Modifier.width(70.dp), maxLines = 1)
+        }
+    }
+}
+
+/**
+ * The whole match: cricket's scorecards, football's key moments and line-ups, other sports' box scores, then both
+ * sides' figures. Scrolls (the remote's up and down move through it); Back closes it.
+ */
+@Composable
+private fun GameInfoDialog(e: SportEvent, side: Side?, onBack: (() -> Unit)?, onClose: () -> Unit) {
+    val info by produceState<io.github.novatv.play.sports.GameInfo.Info?>(null, e.id, side?.id) {
+        value = withContext(IO) { runCatching { io.github.novatv.play.sports.GameInfo.forEvent(e, side) }.getOrDefault(io.github.novatv.play.sports.GameInfo.Info(emptyList(), emptyList())) }
+    }
+    val scroll = rememberScrollState()
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onBack ?: onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { repeat(10) { try { focus.requestFocus(); return@LaunchedEffect } catch (x: Exception) { kotlinx.coroutines.delay(80) } } }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        // One team's: narrower, so its single pitch and tables aren't lost in empty space.
+        Column(Modifier.widthIn(max = if (side != null) 760.dp else 1100.dp).fillMaxWidth(0.86f).heightIn(max = 640.dp).clip(RoundedCornerShape(20.dp)).background(C.panel)
+            .border(1.dp, SportsLook.Border, RoundedCornerShape(20.dp))
+            // The remote moves the page: up and down scroll it; left and right switch the formation shown.
+            .focusRequester(focus)
+            .scrollKeys { up -> scope.launch { scroll.animateScrollBy(if (up) -260f else 260f) } }
+            .focusable()
+            .verticalScroll(scroll).padding(22.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                onBack?.let { back -> Pill("Back", onClick = back, icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.ArrowBack); Spacer(Modifier.width(14.dp)) }
+                Column(Modifier.weight(1f)) {
+                    Text(if (side != null) "${side.name} · ${e.title}" else e.title, style = T.h2.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(e.subtitle ?: e.league.name, e.detail.ifBlank { null }, e.summary).joinToString(" · "), style = T.small.copy(color = SportsLook.Dim), maxLines = 2)
+                }
+                Pill("Close", onClick = onClose)
+            }
+            Spacer(Modifier.height(14.dp))
+            val i = info
+            when {
+                i == null -> Spinner(size = 28.dp)
+                i.isEmpty -> Text(if (e.state == State.PRE) "Line-ups and figures appear once the game is close to starting." else "No details for this game.",
+                    style = T.small.copy(color = SportsLook.Dim))
+                else -> GameInfoBody(i, e.teams.associate { it.name to it.color }, narrow = false)
+            }
+        }
+    }
+}
+
+
+/** Up and down (key presses, not releases) handed to [move]; true for up. */
+private fun Modifier.scrollKeys(move: (Boolean) -> Unit): Modifier = this.then(Modifier.onPreviewKeyEvent { e ->
+    if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
+    when (e.key) {
+        androidx.compose.ui.input.key.Key.DirectionUp -> { move(true); true }
+        androidx.compose.ui.input.key.Key.DirectionDown -> { move(false); true }
+        else -> false
+    }
+})

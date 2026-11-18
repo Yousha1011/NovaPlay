@@ -163,6 +163,7 @@ private fun PhoneBody() {
                 Route.AddSource -> PhoneAddSource(nav)
                 Route.Leagues -> PhoneLeagues(nav)
                 is Route.Match -> MatchPage(nav, top.event)
+                is Route.GameInfo -> GameInfoPage(nav, top.event, top.side)
                 is Route.Table -> Pushed(nav) { Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) { io.github.novatv.play.ui.SportsTablesView(top.leagueId) } }
                 is Route.ChannelGroup -> ChannelGroupPage(nav, top.id, top.name)
             } } }

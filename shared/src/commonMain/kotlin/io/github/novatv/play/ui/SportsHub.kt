@@ -340,7 +340,7 @@ private fun MySportsView(
             item(key = "tabs") {
                 Column(Modifier.fillMaxWidth()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        InputField(sportsQuery, "Search team or competition", { sportsQuery = it }, Modifier.width(420.dp).height(44.dp))
+                        InputField(sportsQuery, "Search team or competition", { sportsQuery = it }, Modifier.width(380.dp))
                         Pill("● Live · ${liveList.size}", onClick = { tab = 0 }, selected = shownTab == 0)
                         Pill("Upcoming · ${upList.size}", onClick = { tab = 1 }, selected = shownTab == 1)
                         Pill("Uncategorized · ${uncList.size}", onClick = { tab = 2 }, selected = shownTab == 2)
@@ -366,7 +366,7 @@ private fun MySportsView(
                 item(key = "s_${shownTab}_${sg.sport.name}") {
                     val folded = sg.sport.name in collapsed
                     SportSection(sg, folded, cols, onToggle = { collapsed = if (folded) collapsed - sg.sport.name else collapsed + sg.sport.name },
-                        onOpen = open, onWatchInWindow = onWatchInWindow, foldedComps = foldedComps,
+                        onOpen = open, onWatchInWindow = onWatchInWindow, foldedComps = foldedComps, compsFoldedByDefault = shownTab != 0,
                         onToggleComp = { k -> foldedComps = if (k in foldedComps) foldedComps - k else foldedComps + k; App.store.foldedComps = foldedComps.toList() })
                 }
             }
@@ -573,6 +573,7 @@ internal fun MatchCardItem(
                         .background(when (tag) {
                             io.github.novatv.play.sports.MySports.Tag.LIVE -> SportsLook.Live
                             io.github.novatv.play.sports.MySports.Tag.TOMORROW -> SportsLook.Tomorrow
+                            io.github.novatv.play.sports.MySports.Tag.TODAY -> SportsLook.Today
                             else -> Color(0x33FFFFFF)
                         })
                         .padding(horizontal = 6.dp, vertical = 2.dp)
@@ -985,6 +986,8 @@ private fun SportSection(
     onOpen: (SportEvent) -> Unit,
     onWatchInWindow: (Channel) -> Unit,
     foldedComps: Set<String> = emptySet(),
+    /** Upcoming and Uncategorized: each competition starts folded; [foldedComps] then holds the ones opened ("open:..."). */
+    compsFoldedByDefault: Boolean = false,
     onToggleComp: (String) -> Unit = {},
 ) {
     val shape = RoundedCornerShape(18.dp)
@@ -1022,8 +1025,8 @@ private fun SportSection(
             sg.comps.forEachIndexed { i, cg ->
                 if (i > 0) Box(Modifier.fillMaxWidth().padding(vertical = 12.dp).height(1.dp).background(SportsLook.Border.copy(alpha = 0.6f)))
                 // The competition's heading folds it away (OK or a click), so the next one is a step away.
-                val foldKey = "${sg.sport.name}|${cg.name}"
-                val compFolded = foldKey in foldedComps
+                val foldKey = compFoldKey(sg.sport.name, cg.name, compsFoldedByDefault)
+                val compFolded = isCompFolded(foldKey, foldedComps, compsFoldedByDefault)
                 Tile({ onToggleComp(foldKey) }, Modifier.fillMaxWidth().padding(bottom = if (compFolded) 0.dp else 10.dp),
                     shape = RoundedCornerShape(10.dp), scale = 1.01f, color = Color(0x0AFFFFFF), focusedColor = Color(0x26FFFFFF)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1075,3 +1078,11 @@ internal fun matchesSearch(e: SportEvent, query: String): Boolean {
         .joinToString(" ")
     return words.all { text.contains(it, ignoreCase = true) }
 }
+
+/**
+ * A competition's fold key: on Live "FOOTBALL|Premier League" marks it folded; on Upcoming and Uncategorized, where
+ * every competition starts folded, "open:FOOTBALL|Premier League" marks it opened.
+ */
+internal fun compFoldKey(sport: String, comp: String, foldedByDefault: Boolean) = (if (foldedByDefault) "open:" else "") + "$sport|$comp"
+
+internal fun isCompFolded(key: String, keys: Set<String>, foldedByDefault: Boolean) = if (foldedByDefault) key !in keys else key in keys

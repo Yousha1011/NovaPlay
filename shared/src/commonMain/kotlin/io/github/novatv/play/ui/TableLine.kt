@@ -47,12 +47,12 @@ internal fun RankChip(row: StandingsRow, size: Dp = 24.dp) {
 internal fun TableLine(row: StandingsRow, figures: List<String>, highlighted: Boolean, zebra: Boolean, numWidth: Dp) {
     val shape = RoundedCornerShape(8.dp)
     val back = when {
-        highlighted -> Brush.horizontalGradient(listOf(SportsLook.Gold.copy(alpha = 0.22f), Color(0x08FFFFFF)))
+        highlighted -> Brush.horizontalGradient(listOf(SportsLook.Blue.copy(alpha = 0.26f), Color(0x08FFFFFF)))
         zebra -> Brush.horizontalGradient(listOf(Color(0x0AFFFFFF), Color(0x0AFFFFFF)))
         else -> Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
     }
     Row(Modifier.fillMaxWidth().height(34.dp).clip(shape).background(back)
-        .border(1.dp, if (highlighted) SportsLook.Gold.copy(alpha = 0.55f) else Color.Transparent, shape)
+        .border(1.dp, if (highlighted) SportsLook.Blue.copy(alpha = 0.65f) else Color.Transparent, shape)
         .padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         RankChip(row, 22.dp)
         Spacer(Modifier.width(8.dp))

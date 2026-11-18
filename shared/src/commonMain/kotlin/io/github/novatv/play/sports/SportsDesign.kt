@@ -30,6 +30,8 @@ internal object SportsLook {
     val Blue = Color(0xFF4DA3FF)
     /** The TOMORROW tag: yellow, as LIVE is red. */
     val Tomorrow = Color(0xFFFFD31A)
+    /** The TODAY tag: green. */
+    val Today = Color(0xFF2EBD5F)
     val Shape = RoundedCornerShape(14.dp)
     val SmallShape = RoundedCornerShape(10.dp)
 }

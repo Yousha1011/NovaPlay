@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -173,11 +174,12 @@ fun PhoneSports(nav: Nav) {
                             SportHeader(sg, folded) { collapsed = if (folded) collapsed - sg.sport.name else collapsed + sg.sport.name }
                         }
                         if (!folded) for (cg in sg.comps) {
-                            val foldKey = "${sg.sport.name}|${cg.name}"
-                            val compFolded = foldKey in foldedComps
+                            val byDefault = whenTab != When.LIVE
+                            val foldKey = io.github.novatv.play.ui.compFoldKey(sg.sport.name, cg.name, byDefault)
+                            val compFolded = io.github.novatv.play.ui.isCompFolded(foldKey, foldedComps, byDefault)
                             item(key = "c:${sg.sport.name}:${cg.name}") {
                                 CompHeader(cg, compFolded) {
-                                    foldedComps = if (compFolded) foldedComps - foldKey else foldedComps + foldKey
+                                    foldedComps = if (foldKey in foldedComps) foldedComps - foldKey else foldedComps + foldKey
                                     io.github.novatv.play.App.store.foldedComps = foldedComps.toList()
                                 }
                             }
@@ -268,6 +270,9 @@ private fun StateTag(e: SportEvent) {
                 if (tag == io.github.novatv.play.sports.MySports.Tag.TOMORROW)
                     Text("TOMORROW", style = P.small.copy(color = Color(0xFF14171E), fontSize = 12.sp),
                         modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFFFFD31A)).padding(horizontal = 8.dp, vertical = 3.dp))
+                else if (tag == io.github.novatv.play.sports.MySports.Tag.TODAY)
+                    Text("TODAY", style = P.small.copy(color = Color.White, fontSize = 12.sp),
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF2EBD5F)).padding(horizontal = 8.dp, vertical = 3.dp))
                 else Text(io.github.novatv.play.sports.MySports.tagText(e, t), style = P.small.copy(color = P.blue))
                 Spacer(Modifier.width(6.dp))
                 Text(io.github.novatv.play.sports.MySports.timeText(e, t), style = P.small.copy(color = P.blue))
@@ -313,7 +318,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     // (the streams themselves are stored by the background update), without waiting for your channels.
     val fromAddons by produceState(io.github.novatv.play.data.Addons.known(e).orEmpty(), e.id) {
         try {
-            kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+            kotlinx.coroutines.withTimeoutOrNull(60_000L) {
                 io.github.novatv.play.data.Addons.airingsFlow(e).flowOn(IO).collect { l: List<Airing> -> if (l.isNotEmpty() || value.isEmpty()) value = l }
             }
         } catch (x: Exception) { }
@@ -325,10 +330,14 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     val awayPage by produceState<io.github.novatv.play.sports.TeamPage?>(null, e.id) {
         value = e.away?.let { s -> withContext(IO) { runCatching { io.github.novatv.play.sports.Teams.info(e.league, s.id) }.getOrNull() } }
     }
-    val table by produceState<io.github.novatv.play.sports.Standings?>(null, e.league.id) {
-        value = withContext(IO) { runCatching { io.github.novatv.play.sports.StandingsRepository.forLeague(e.league) }.getOrNull() }
+    val table by produceState<io.github.novatv.play.sports.Standings?>(null, e.id) {
+        value = withContext(IO) { runCatching { io.github.novatv.play.sports.StandingsRepository.forEvent(e) }.getOrNull() }
     }
     val rows = remember(table) { table?.groups?.flatMap { it.rows }.orEmpty() }
+    // A tap on a side: that team in this game (its figures beside the other side's).
+    var teamOpen by remember(e.id) { mutableStateOf<Side?>(null) }
+    // Game info's line-ups and faces loaded while the page is read, so it opens ready.
+    io.github.novatv.play.ui.PrefetchGameInfo(e)
     fun rowOf(s: Side?) = s?.let { side -> rows.firstOrNull { it.id == side.id } ?: rows.firstOrNull { it.name.equals(side.name, true) } }
     val airings by produceState<List<Airing>?>(null, e.id, st.epgVersion) {
         value = withContext(IO) { App.repo.matcher().airings(e, limit = 150) }
@@ -346,7 +355,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                             // Short scores sit together in the middle; long ones (cricket's 168/9 (79.4 ov)) go under each side.
                             val short = (e.home.score?.length ?: 1) <= 4 && (e.away.score?.length ?: 1) <= 4
                             val apart = e.state != State.PRE && !short
-                            BigSide(e.home, Modifier.weight(1f), if (apart) e.home.score else null)
+                            BigSide(e.home, Modifier.weight(1f).tap { teamOpen = if (teamOpen?.id == e.home.id) null else e.home }, if (apart) e.home.score else null)
                             Column(Modifier.width(120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 val centred = Modifier.fillMaxWidth()
                                 if (e.state == State.PRE) Text(clock(e.start), style = P.large.copy(fontSize = 30.sp), textAlign = TextAlign.Center, modifier = centred)
@@ -356,7 +365,7 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                                 Text(if (e.state == State.PRE) dayLabel(e.start) else e.detail, style = P.small.copy(color = if (e.state == State.LIVE) Color(0xFFFF3B4E) else P.dim),
                                     maxLines = 2, textAlign = TextAlign.Center)
                             }
-                            BigSide(e.away, Modifier.weight(1f), if (apart) e.away.score else null)
+                            BigSide(e.away, Modifier.weight(1f).tap { teamOpen = if (teamOpen?.id == e.away.id) null else e.away }, if (apart) e.away.score else null)
                         }
                     } else {
                         Text(e.title, style = P.title, textAlign = TextAlign.Center)
@@ -371,6 +380,8 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                     if (e.teams.isNotEmpty()) {
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Game info", style = P.head.copy(fontSize = 14.sp), maxLines = 1,
+                                modifier = Modifier.glass(RoundedCornerShape(50)).tap { nav.push(Route.GameInfo(e)) }.padding(horizontal = 14.dp, vertical = 8.dp))
                             for (s in e.teams) {
                                 val fav = favs.let { isFavTeam(e, s) }
                                 Row(Modifier.glass(RoundedCornerShape(50)).tap {
@@ -388,6 +399,36 @@ fun MatchPage(nav: Nav, start: SportEvent) {
                     }
                 }
             }
+            teamOpen?.let { s -> item(key = "team:${s.id}") {
+                // The team's standing, as on the TV's team card; its game info (only this team) one tap away.
+                val row = rowOf(s)
+                val page = if (s.id == e.home?.id) homePage else awayPage
+                val cricket = e.league.sport == io.github.novatv.play.sports.Sport.CRICKET
+                Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(s.name, style = P.head, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Rounded.Close, size = 20.dp, tint = P.dim, modifier = Modifier.tap { teamOpen = null })
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((label, value) in if (cricket) listOf("ICC rank" to row?.pos?.toString(), "Rating" to row?.values?.get("points"), "Matches" to row?.values?.get("gamesPlayed"))
+                            else listOf("Place" to row?.pos?.toString(), "Points" to row?.values?.get("points"), "Record" to page?.record))
+                            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(P.card).padding(10.dp)) {
+                                Text(label, style = P.small.copy(fontSize = 12.sp), maxLines = 1)
+                                Text(value ?: "–", style = P.head, maxLines = 1)
+                            }
+                    }
+                    page?.form?.takeIf { it.isNotEmpty() }?.let { f ->
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Last five", style = P.small, modifier = Modifier.weight(1f))
+                            io.github.novatv.play.ui.FormBoxes(f, lettered = true)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("${s.short} game info ›", style = P.body.copy(color = P.blue), modifier = Modifier.tap { nav.push(Route.GameInfo(e, s)) })
+                }
+            } }
             if (apps.isNotEmpty()) item {
                 Column(Modifier.padding(top = 14.dp)) {
                     Text("Watch in the official app", style = P.title)
@@ -468,5 +509,26 @@ private fun BigSide(s: Side, modifier: Modifier, score: String? = null) {
         Spacer(Modifier.height(8.dp))
         Text(s.short, style = P.head, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
         if (score != null) Text(score, style = P.title.copy(fontSize = 20.sp), maxLines = 2, textAlign = TextAlign.Center)
+    }
+}
+
+/** A match's full information on the phone (only [side]'s when opened from a team): pitch, then the tables. */
+@Composable
+fun GameInfoPage(nav: Nav, e: SportEvent, side: Side? = null) {
+    val info by produceState<io.github.novatv.play.sports.GameInfo.Info?>(null, e.id, side?.id) {
+        value = withContext(IO) { runCatching { io.github.novatv.play.sports.GameInfo.forEvent(e, side) }.getOrDefault(io.github.novatv.play.sports.GameInfo.Info(emptyList(), emptyList())) }
+    }
+    Pushed(nav) {
+        Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 60.dp)) {
+            Text(if (side != null) "${side.name} · ${e.title}" else e.title, style = P.title)
+            Text(listOfNotNull(e.subtitle ?: e.league.name, e.detail.ifBlank { null }, e.summary).joinToString(" · "), style = P.small)
+            Spacer(Modifier.height(14.dp))
+            val i = info
+            when {
+                i == null -> Box(Modifier.fillMaxWidth().padding(30.dp), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() }
+                i.isEmpty -> Empty(Icons.Rounded.SportsSoccer, "No details yet", if (e.state == State.PRE) "Line-ups and figures appear close to the start." else null)
+                else -> io.github.novatv.play.ui.GameInfoBody(i, e.teams.associate { it.name to it.color }, narrow = true)
+            }
+        }
     }
 }

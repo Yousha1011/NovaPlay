@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 
 /** The Fire TV or phone app: starts the shared app with the Android player and messages. */
 class NovaApp : Application() {
+    private val open = java.util.Collections.synchronizedSet(LinkedHashSet<android.app.Activity>())
     override fun onCreate() {
         super.onCreate()
         appContext = this
@@ -24,6 +25,16 @@ class NovaApp : Application() {
             previous?.uncaughtException(t, e)
         }
         migratePrefs()
+        // The open screens, so Exit NovaPlay can close them all.
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) { open.add(a) }
+            override fun onActivityDestroyed(a: android.app.Activity) { open.remove(a) }
+            override fun onActivityStarted(a: android.app.Activity) {}
+            override fun onActivityResumed(a: android.app.Activity) {}
+            override fun onActivityPaused(a: android.app.Activity) {}
+            override fun onActivityStopped(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+        })
         // TVs use the big-screen look (graphite and cyan); the phone draws its own screens with its themes.
         io.github.novatv.play.ui.Look.modern = false
         val recorder = AndroidRecorder(this)
@@ -32,6 +43,15 @@ class NovaApp : Application() {
             override val device = if (PHONE) Device.PHONE else Device.TV
             override val recorder = recorder
             override val previewEngine = preview
+            override fun exitApp() {
+                // Screens closed and out of recents, then the process ended (as a force stop would), so nothing
+                // stays running: no preview player, no guide import. Scheduled overnight updates stay scheduled.
+                runCatching { preview?.release() }
+                open.toList().forEach { runCatching { it.finishAndRemoveTask() } }
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    android.os.Process.killProcess(android.os.Process.myPid()); kotlin.system.exitProcess(0)
+                }, 250)
+            }
             override fun play(item: PlayItem) {
                 // Full screen grows out of the TV window at the top right (PlayerActivity shrinks back into it).
                 val grow = android.app.ActivityOptions.makeCustomAnimation(this@NovaApp, R.anim.player_grow, R.anim.player_stay).toBundle()

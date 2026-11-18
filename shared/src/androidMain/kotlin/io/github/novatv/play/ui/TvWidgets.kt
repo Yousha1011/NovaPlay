@@ -103,11 +103,13 @@ actual fun Pill(text: String, onClick: () -> Unit, modifier: Modifier, icon: Ima
  */
 @Composable
 actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, modifier: Modifier, password: Boolean, onDone: () -> Unit, url: Boolean) {
+    // The text the size of a pill's beside it.
+    val textSp = (if (LocalCompact.current) T.small else T.body).fontSize.value
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val boxFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
     val ui = androidx.compose.runtime.remember { FieldState() }
     androidx.compose.foundation.layout.Box(
-        modifier.height(if (LocalCompact.current) 44.dp else 54.dp)
+        modifier.height(if (LocalCompact.current) FIELD_COMPACT else FIELD_HEIGHT)
             .focusRequester(boxFocus)
             .onFocusChanged { ui.boxFocused = it.isFocused; ui.paint() }
             .onKeyEvent { e ->
@@ -132,7 +134,7 @@ actual fun InputField(value: String, hint: String, onChange: (String) -> Unit, m
                     setText(value)
                     this.hint = hint
                     isSingleLine = true
-                    textSize = 18f
+                    textSize = textSp
                     setTextColor(android.graphics.Color.WHITE)
                     setHintTextColor(0x80FFFFFF.toInt())
                     setPadding(36, 0, 36, 0)

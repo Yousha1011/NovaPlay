@@ -171,10 +171,11 @@ object Espn {
                         full?.optJSONObject("type")?.optString("description")?.ifBlank { null }?.takeIf { e.optString("status") != "pre" })
                         .distinct().joinToString(" · ").ifBlank { null }
                     val situation = full?.optString("summary")?.ifBlank { null }?.takeIf { it != stage }
-                    val shown = if (league.sport == Sport.CRICKET && stage != null) ev.copy(detail = stage, summary = situation) else ev.copy(summary = situation)
+                    val shown = (if (league.sport == Sport.CRICKET && stage != null) ev.copy(detail = stage, summary = situation) else ev.copy(summary = situation))
+                        .copy(espnLeague = lg.optString("id").ifBlank { null })
                     // The header gives a bare "pre/in/post" when fullStatus is missing.
                     out.add(if (full == null) ev.copy(state = when (e.optString("status")) { "in" -> State.LIVE; "post" -> State.POST; else -> State.PRE },
-                        detail = e.optString("summary")) else shown)
+                        detail = e.optString("summary"), espnLeague = lg.optString("id").ifBlank { null }) else shown)
                 }
             }
         }

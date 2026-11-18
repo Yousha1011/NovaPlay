@@ -165,7 +165,7 @@ fun SportsTablesView(
                         if (group.name.isNotBlank() && s.groups.size > 1) {
                             item(key = "h_${group.name}") {
                                 Row(Modifier.padding(top = 10.dp, bottom = 4.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.width(3.dp).height(14.dp).clip(RoundedCornerShape(2.dp)).background(SportsLook.Gold))
+                                    Box(Modifier.width(3.dp).height(14.dp).clip(RoundedCornerShape(2.dp)).background(SportsLook.Blue))
                                     Spacer(Modifier.width(8.dp))
                                     Text(group.name.uppercase(), style = T.tiny.copy(fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 1.2.sp))
                                 }
@@ -300,7 +300,7 @@ private fun StandingsRowItem(
             )
             .border(
                 width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) SportsLook.Gold else Color.Transparent,
+                color = if (isFocused) SportsLook.Blue else Color.Transparent,
                 shape = RoundedCornerShape(8.dp)
             )
             .onFocusChanged { if (it.isFocused) onFocus() }

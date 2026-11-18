@@ -32,6 +32,22 @@ object Http {
         }
     }
 
+    /**
+     * The picture loader's client: every request names the app ([UA]). Wikimedia refuses pictures to unnamed or
+     * generic clients ("okhttp", "Java"), which left players' photos blank.
+     */
+    val imageClient: HttpClient by lazy {
+        HttpClient {
+            followRedirects = true
+            expectSuccess = false
+            install(io.ktor.client.plugins.UserAgent) { agent = UA }
+            install(HttpTimeout) { connectTimeoutMillis = 15_000; socketTimeoutMillis = 60_000 }
+        }
+    }
+
+    /** A picture's HTTP status as the picture loader gets it (checks and tests). Blocking. */
+    fun imageStatus(url: String): Int = runBlocking { imageClient.prepareGet(url).execute { r -> r.status.value } }
+
     /** Blocking: call on [io.github.novatv.play.platform.IO]. */
     fun get(url: String, headers: Map<String, String> = emptyMap()): String = runBlocking {
         client.prepareGet(url) {

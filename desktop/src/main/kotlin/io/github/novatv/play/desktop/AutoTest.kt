@@ -155,6 +155,8 @@ object AutoTest {
                     "addons" -> addons()
                     "matchwatch" -> matchWatch()
                     "tour" -> tour()
+                    "matchpages" -> matchPages()
+                    "gameinfoall" -> gameInfoAll()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -987,10 +989,104 @@ object AutoTest {
         }
     }
 
+    /** Match pages with their tables: a football match in a league, an international cricket match (ICC rankings). */
+    private suspend fun matchPages() {
+        check("playlist loaded", waitForLibrary()); delay(2000)
+        check("reached Sports", goTab("SPORTS"))
+        waitFor(60_000) { App.repo.sports.value.events.size > 20 }
+        val dir = file.parentFile
+        val evs = App.repo.sports.value.events
+        val football = evs.firstOrNull { it.league.sport == io.github.novatv.play.sports.Sport.FOOTBALL && it.league.id.startsWith("uefa.nations") && it.home != null }
+            ?: evs.firstOrNull { it.league.sport == io.github.novatv.play.sports.Sport.FOOTBALL && it.league.path != null && it.home != null }
+        val cricket = evs.firstOrNull { it.league.sport == io.github.novatv.play.sports.Sport.CRICKET && io.github.novatv.play.sports.IccRankings.format(it) != null &&
+            it.teams.size == 2 && it.teams.all { s -> io.github.novatv.play.sports.Cricket.nation(s.name) == s.name } }
+        for ((name, ev) in listOf("football" to football, "cricket" to cricket)) {
+            log("$name match: ${ev?.title} (${ev?.league?.name}, ${ev?.detail})")
+            if (ev == null) continue
+            val table = withContext(Dispatchers.IO) { io.github.novatv.play.sports.StandingsRepository.forEvent(ev) }
+            val stats = withContext(Dispatchers.IO) { ev.home?.let { io.github.novatv.play.sports.MatchStats.forSide(ev, it) }.orEmpty() }
+            log("$name table: ${table?.title ?: table?.leagueId} rows ${table?.groups?.sumOf { it.rows.size }}; home stats ${stats.size}: ${stats.take(4)}")
+            onUi { App.testMatch.value = ev }
+            delay(9000)
+            shot(File(dir, "match-$name.png"))
+            // The first side has focus: OK opens its team card (this game's figures).
+            press(KeyEvent.VK_ENTER, after = 5000)
+            shot(File(dir, "match-$name-team.png"))
+            press(KeyEvent.VK_ESCAPE, after = 1000)
+            val info = withContext(Dispatchers.IO) { io.github.novatv.play.sports.GameInfo.forEvent(ev) }
+            log("$name game info: lineups ${info.lineups.map { "${it.team} ${it.formation} ${it.players.size}" }} ${info.sections.map { "${it.title} (${it.rows.size})" }}")
+            // Escape may have closed the page too: open it again, then its Game info.
+            onUi { App.testMatch.value = null }; delay(500)
+            onUi { App.testMatch.value = ev }; delay(4000)
+            onUi { App.testGameInfo.value = true }
+            delay(6000); shot(File(dir, "match-$name-info.png"))
+            press(KeyEvent.VK_DOWN, after = 300); press(KeyEvent.VK_DOWN, after = 300); press(KeyEvent.VK_DOWN, after = 1500)
+            shot(File(dir, "match-$name-info-down.png"))
+            onUi { App.testGameInfo.value = false }; delay(1000)
+            onUi { App.testMatch.value = null }
+            delay(1500)
+        }
+        delay(3000); shot(File(dir, "sports-live.png"))
+    }
+
+    /**
+     * Game info for every match in the Live and Upcoming lists (the whole set, not only followed competitions): what
+     * each gets (line-ups, tables, figures, innings, table) or why it has none. No screen pictures, data only.
+     */
+    private suspend fun gameInfoAll() {
+        check("playlist loaded", waitForLibrary())
+        waitFor(90_000) { App.repo.sports.value.events.size > 20 }
+        val now = System.currentTimeMillis()
+        val all = App.repo.sports.value.events
+        val list = (io.github.novatv.play.sports.MySports.live(all, now) + io.github.novatv.play.sports.MySports.upcoming(all, now))
+            .distinctBy { it.id }.filter { it.home != null && it.away != null }
+        log("matches: ${list.size} (${list.groupingBy { it.league.sport }.eachCount()})")
+        var errors = 0
+        withContext(Dispatchers.IO) {
+            for (e in list) {
+                val r = runCatching { io.github.novatv.play.sports.GameInfo.forEvent(e) }
+                val t = runCatching { io.github.novatv.play.sports.StandingsRepository.forEvent(e) }.getOrNull()
+                val info = r.getOrNull()
+                if (r.isFailure) errors++
+                log("${e.league.sport} | ${e.state} | ${e.title.take(40)} | " + (if (info == null) "ERROR ${r.exceptionOrNull()?.message}" else
+                    "lineups ${info.lineups.size}, tables ${info.sections.size}, figures ${info.figures != null}, benches ${info.benches.size}, " +
+                    "innings ${info.cricket?.batting?.size ?: 0}") + " | table ${t?.title ?: t?.leagueId ?: "none"} ${t?.groups?.sumOf { g -> g.rows.size } ?: 0}" +
+                    " | flags ${t?.groups?.flatMap { g -> g.rows }?.count { row -> row.logo != null } ?: 0}")
+            }
+        }
+        check("no Game info failed to load", errors == 0)
+        // Faces: for matches with line-ups (football) or scorecards (cricket), how many players have a photo, and
+        // that the photos download through the app's own picture client (as the screen loads them).
+        withContext(Dispatchers.IO) {
+            val withPlayers = list.mapNotNull { e ->
+                val info = runCatching { io.github.novatv.play.sports.GameInfo.forEvent(e) }.getOrNull() ?: return@mapNotNull null
+                val keys = (info.lineups.flatMap { l -> l.players.map { it.fullName } } + info.sections.flatMap { it.photos.orEmpty().filterNotNull() })
+                    .filter { it.isNotBlank() }.distinct()
+                if (keys.isEmpty()) null else e to keys
+            }.take(4)
+            var downloaded = 0; var refused = 0
+            for ((e, keys) in withPlayers) {
+                val found = io.github.novatv.play.platform.SafeMap<String, String>()
+                io.github.novatv.play.sports.PlayerPhotos.fetch(keys) { k, u -> found[k] = u }
+                val urls = found.keys().mapNotNull { found[it] }
+                log("faces ${e.league.sport} ${e.title.take(40)}: ${urls.size} of ${keys.size} players")
+                for (u in urls.take(3)) {
+                    val code = runCatching { io.github.novatv.play.data.Http.imageStatus(u) }.getOrDefault(-1)
+                    if (code in 200..299) downloaded++ else { refused++; log("photo refused: HTTP $code (${u.substringBefore('?').takeLast(50)})") }
+                }
+            }
+            check("players' photos download ($downloaded ok, $refused refused)", downloaded > 0 && refused == 0)
+        }
+    }
+
     /** A picture of the window as it is on screen. */
     private suspend fun shot(f: File) {
         val w = window ?: return
         onUi { w.toFront() }; delay(500)
+        // A screen capture takes whatever is on top: only when this window is the active one, so another app's
+        // window (the user working beside the test) is never captured.
+        var front = false; EventQueue.invokeAndWait { front = w.isActive && w.isShowing }
+        if (!front) { log("skipped ${f.name}: NovaPlay isn't the front window"); return }
         val img = java.awt.Robot().createScreenCapture(w.bounds)
         javax.imageio.ImageIO.write(img, "png", f); log("saved ${f.name}")
     }

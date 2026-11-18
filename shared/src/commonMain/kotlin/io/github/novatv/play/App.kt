@@ -41,6 +41,8 @@ object App {
     @Volatile var testBounds: ((String, Float, Float, Float, Float) -> Unit)? = null
     /** Windows test driver only: a match whose page Sports opens. */
     val testMatch = kotlinx.coroutines.flow.MutableStateFlow<io.github.novatv.play.sports.SportEvent?>(null)
+    /** The Windows test driver opens the open match's Game info; never set otherwise. */
+    val testGameInfo = kotlinx.coroutines.flow.MutableStateFlow(false)
     @Volatile var openTab: String = "HOME"
     @Volatile var menuFocused: Boolean = false
 

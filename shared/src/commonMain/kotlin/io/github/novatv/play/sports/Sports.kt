@@ -81,6 +81,8 @@ data class SportEvent(
     val venue: String?,
     /** ESPN's one-line situation, e.g. "West Indies trail by 23 runs". */
     val summary: String? = null,
+    /** ESPN's own competition id, for feeds the header lists (cricket's series): its match summary needs it. */
+    val espnLeague: String? = null,
 ) {
     val teams: List<Side> get() = listOfNotNull(home, away)
 }

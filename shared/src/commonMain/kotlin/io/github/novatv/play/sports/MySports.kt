@@ -85,18 +85,19 @@ object MySports {
     }.sortedBy { it.sport.ordinal }
 
     /** The tag on a match: LIVE (red), TOMORROW (yellow), else its date. */
-    enum class Tag { LIVE, TOMORROW, DATE, FINAL }
+    enum class Tag { LIVE, TODAY, TOMORROW, DATE, FINAL }
 
     fun tag(e: SportEvent, now: Long): Tag = when {
         e.state == State.LIVE -> Tag.LIVE
         e.state == State.POST -> Tag.FINAL
+        dayOffset(e.start, now) == 0L -> Tag.TODAY
         dayOffset(e.start, now) == 1L -> Tag.TOMORROW
         else -> Tag.DATE
     }
 
     /** "TOMORROW", "LIVE", "FINAL" or the date: "SAT 15 NOV". */
     fun tagText(e: SportEvent, now: Long): String = when (tag(e, now)) {
-        Tag.LIVE -> "● LIVE"; Tag.FINAL -> "FINAL"; Tag.TOMORROW -> "TOMORROW"
+        Tag.LIVE -> "● LIVE"; Tag.FINAL -> "FINAL"; Tag.TOMORROW -> "TOMORROW"; Tag.TODAY -> "TODAY"
         Tag.DATE -> Time.dayMonth(e.start).uppercase()
     }
 
