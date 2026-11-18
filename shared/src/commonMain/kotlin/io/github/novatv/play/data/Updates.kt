@@ -30,7 +30,7 @@ import okio.use
  */
 object Updates {
     /** This version; raised with the build files' versions at each release. */
-    const val CURRENT = "1.9.9"
+    const val CURRENT = "1.9.9.1"
     const val REPO = "Yousha1011/NovaPlay"
 
     class Release(val version: String, val notes: String, val page: String, val file: String?, val fileUrl: String?, val size: Long)
@@ -88,7 +88,8 @@ object Updates {
                 if (!quiet) io.github.novatv.play.toast("Couldn't check for updates")
                 return@launch
             }
-            if (r != null && newer(r.version, CURRENT)) { available = r; offer = r }
+            // Only a release with this device's own file is offered (a TV-only fix isn't one for Windows or a phone).
+            if (r != null && newer(r.version, CURRENT) && (r.fileUrl != null || App.host.updateAsset == null)) { available = r; offer = r }
             else if (!quiet) io.github.novatv.play.toast("NovaPlay is up to date ($CURRENT)")
         }
     }

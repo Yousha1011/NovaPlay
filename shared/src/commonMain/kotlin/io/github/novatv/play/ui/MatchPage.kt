@@ -480,15 +480,17 @@ private fun GameInfoDialog(e: SportEvent, side: Side?, onBack: (() -> Unit)?, on
     }
     val scroll = rememberScrollState()
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Left and right on the remote: (how many presses, which way), for the innings tabs.
+    var sideStep by remember { mutableStateOf(0 to 0) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onBack ?: onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         androidx.compose.runtime.LaunchedEffect(Unit) { repeat(10) { try { focus.requestFocus(); return@LaunchedEffect } catch (x: Exception) { kotlinx.coroutines.delay(80) } } }
         val scope = androidx.compose.runtime.rememberCoroutineScope()
         // One team's: narrower, so its single pitch and tables aren't lost in empty space.
         Column(Modifier.widthIn(max = if (side != null) 760.dp else 1100.dp).fillMaxWidth(0.86f).heightIn(max = 640.dp).clip(RoundedCornerShape(20.dp)).background(C.panel)
             .border(1.dp, SportsLook.Border, RoundedCornerShape(20.dp))
-            // The remote moves the page: up and down scroll it; left and right switch the formation shown.
+            // The remote moves the page: up and down scroll it; left and right go to the innings before or after.
             .focusRequester(focus)
-            .scrollKeys { up -> scope.launch { scroll.animateScrollBy(if (up) -260f else 260f) } }
+            .scrollKeys(onSide = { right -> sideStep = (sideStep.first + 1) to (if (right) 1 else -1) }) { up -> scope.launch { scroll.animateScrollBy(if (up) -260f else 260f) } }
             .focusable()
             .verticalScroll(scroll).padding(22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -505,19 +507,21 @@ private fun GameInfoDialog(e: SportEvent, side: Side?, onBack: (() -> Unit)?, on
                 i == null -> Spinner(size = 28.dp)
                 i.isEmpty -> Text(if (e.state == State.PRE) "Line-ups and figures appear once the game is close to starting." else "No details for this game.",
                     style = T.small.copy(color = SportsLook.Dim))
-                else -> GameInfoBody(i, e.teams.associate { it.name to it.color }, narrow = false)
+                else -> GameInfoBody(i, e.teams.associate { it.name to it.color }, narrow = false, sideStep = sideStep)
             }
         }
     }
 }
 
 
-/** Up and down (key presses, not releases) handed to [move]; true for up. */
-private fun Modifier.scrollKeys(move: (Boolean) -> Unit): Modifier = this.then(Modifier.onPreviewKeyEvent { e ->
+/** Up and down (key presses, not releases) handed to [move], true for up; left and right to [onSide], true for right. */
+private fun Modifier.scrollKeys(onSide: (Boolean) -> Unit = {}, move: (Boolean) -> Unit): Modifier = this.then(Modifier.onPreviewKeyEvent { e ->
     if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
     when (e.key) {
         androidx.compose.ui.input.key.Key.DirectionUp -> { move(true); true }
         androidx.compose.ui.input.key.Key.DirectionDown -> { move(false); true }
+        androidx.compose.ui.input.key.Key.DirectionLeft -> { onSide(false); true }
+        androidx.compose.ui.input.key.Key.DirectionRight -> { onSide(true); true }
         else -> false
     }
 })

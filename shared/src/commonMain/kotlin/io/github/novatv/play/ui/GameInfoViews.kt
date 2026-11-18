@@ -197,7 +197,7 @@ fun InfoTable(s: GameInfo.Section, narrow: Boolean = false, photos: Map<String, 
  * substitutes as short lists.
  */
 @Composable
-fun GameInfoBody(info: GameInfo.Info, colors: Map<String, String?>, narrow: Boolean) {
+fun GameInfoBody(info: GameInfo.Info, colors: Map<String, String?>, narrow: Boolean, sideStep: Pair<Int, Int> = 0 to 0) {
     // The players' photos, each shown as it's found (those seen before at once, from the device).
     val photos by androidx.compose.runtime.produceState(emptyMap<String, String>(), info) {
         val names = (info.lineups.flatMap { l -> l.players.map { it.fullName } } + info.sections.flatMap { it.photos.orEmpty().filterNotNull() + it.photos2.orEmpty().filterNotNull() })
@@ -234,6 +234,10 @@ fun GameInfoBody(info: GameInfo.Info, colors: Map<String, String?>, narrow: Bool
     // batted latest). An innings not played yet says who is yet to bat (or, in one team's view, to bowl).
     val plan = info.cricket
     var inningsTab by androidx.compose.runtime.remember(info) { androidx.compose.runtime.mutableIntStateOf(plan?.open ?: 1) }
+    // The TV remote's left and right: the innings before or after (the window passes each press).
+    androidx.compose.runtime.LaunchedEffect(sideStep.first) {
+        if (plan != null && sideStep.first > 0) inningsTab = (inningsTab + sideStep.second).coerceIn(1, plan.batting.size)
+    }
     if (plan != null) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (n in 1..plan.batting.size) Pill("Innings $n", onClick = { inningsTab = n }, selected = inningsTab == n)
