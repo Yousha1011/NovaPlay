@@ -112,6 +112,27 @@ jobs:
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
 
+      # The Simulator build on Appetize, to try in a browser on any iPhone model before a release. The same app is
+      # updated each time (its key in the repository variable APPETIZE_APP_KEY), so its link stays the same.
+      - name: Upload to Appetize
+        working-directory: iosApp
+        env:
+          APPETIZE_TOKEN: ${{ secrets.APPETIZE_API_TOKEN }}
+          APPETIZE_APP: ${{ vars.APPETIZE_APP_KEY }}
+        run: |
+          if [ -z "$APPETIZE_TOKEN" ]; then echo "No APPETIZE_API_TOKEN: skipped"; exit 0; fi
+          (cd build/Build/Products/Debug-iphonesimulator && zip -qry "$OLDPWD/NovaPlay-simulator.zip" NovaPlay.app)
+          URL="https://api.appetize.io/v1/apps${APPETIZE_APP:+/$APPETIZE_APP}"
+          if ! curl -sS -f -X POST "$URL" -H "X-API-KEY: $APPETIZE_TOKEN" \
+              -F "file=@NovaPlay-simulator.zip" -F "platform=ios" -F "note=${GITHUB_SHA::7}" -o appetize.json; then
+            echo "::warning::Appetize upload failed"; cat appetize.json 2>/dev/null; exit 0
+          fi
+          KEY=$(python3 -c "import json; print(json.load(open('appetize.json')).get('publicKey', ''))")
+          echo "Appetize app: $KEY"
+          echo "### Try this build in your browser: https://appetize.io/app/$KEY" >> "$GITHUB_STEP_SUMMARY"
+          [ -z "$APPETIZE_APP" ] && echo "::notice::First upload. Save APPETIZE_APP_KEY=$KEY as a repository variable to keep updating this app."
+          rm -f NovaPlay-simulator.zip
+
       - name: Run and screenshot
         working-directory: iosApp
         run: |
