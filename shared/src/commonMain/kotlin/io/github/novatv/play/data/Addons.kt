@@ -86,8 +86,11 @@ object Addons {
         return addons.flatMap { a ->
             catalogsOf(a).flatMap { (id, name) ->
                 val key = "${a.manifest}|$id"
-                cache[key]?.takeIf { nowMs() - it.first < KEEP_MS }?.second ?: runCatching { catalog(a, id, name) }.getOrElse { emptyList() }
-                    .also { cache[key] = nowMs() to it }
+                // A read that failed isn't kept (it was, for hours): the next look tries again.
+                cache[key]?.takeIf { nowMs() - it.first < KEEP_MS }?.second ?: runCatching { catalog(a, id, name) }
+                    .onSuccess { cache[key] = nowMs() to it }
+                    .onFailure { lastError = "${id}: ${it::class.simpleName}: ${it.message?.take(160)}" }
+                    .getOrElse { emptyList() }
             }
         }
     }
@@ -284,6 +287,9 @@ object Addons {
                 Diag.report("addons", "Addon events matched ${e.title} but listed no streams: $lastLookup (${io.github.novatv.play.App.device})")
         }
 
+    /** The last catalog read that failed, for Check and problem reports. */
+    @kotlin.concurrent.Volatile private var lastError: String? = null
+
     /** What the last lookup found, for problem reports. */
     private var lastLookup = ""
 
@@ -342,8 +348,19 @@ object Addons {
      */
     fun check(a: Addon, sample: Int = 30): Health {
         cache.keys().filter { it.startsWith("${a.manifest}|") }.forEach { cache.remove(it) }
-        val evs = try { events(listOf(a)) } catch (e: Exception) { return Health(0, 0, 0, 0, 0, "Could not read the addon") }
-        if (evs.isEmpty()) return Health(0, 0, 0, 0, 0)
+        lastError = null
+        val evs = try { events(listOf(a)) } catch (e: Exception) { return Health(0, 0, 0, 0, 0, "Could not read the addon: ${e.message?.take(120)}") }
+        if (evs.isEmpty()) {
+            // Why nothing is listed, on screen and in a problem report (to find what differs on one device).
+            val why = when {
+                a.catalogs.isEmpty() -> "This addon has no live TV catalogs saved: remove it and add it again"
+                lastError != null -> "Could not read its events (${catalogsOf(a).size} catalogs): $lastError"
+                else -> null
+            }
+            Diag.report("addons", "Check found no events for ${a.name}: ${why ?: "catalogs read, all empty"} " +
+                "(${catalogsOf(a).size} catalogs: ${catalogsOf(a).take(3).joinToString { it.first }}) (${io.github.novatv.play.App.device})")
+            return Health(0, 0, 0, 0, 0, why)
+        }
         val streamsBy = kotlinx.coroutines.runBlocking(io.github.novatv.play.platform.IO) {
             evs.take(15).map { ev -> async { runCatching { streams(ev) }.getOrElse { emptyList() } } }.map { it.await() }
         }
