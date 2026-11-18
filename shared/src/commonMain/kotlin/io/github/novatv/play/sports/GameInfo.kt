@@ -429,7 +429,7 @@ object GameInfo {
     }
 
     /** Without a usable formation: a row per depth the players play at. */
-    private fun rowsByDepth(depths: List<Int>): List<Int> = depths.groupingBy { it }.eachCount().toSortedMap().values.toList()
+    private fun rowsByDepth(depths: List<Int>): List<Int> = depths.groupingBy { it }.eachCount().entries.sortedBy { it.key }.map { it.value }
 
     /** How far forward a position plays: keeper 0, defenders 1, holding 2, midfield 3, attacking 4, forwards 5. */
     internal fun depth(position: String): Int {

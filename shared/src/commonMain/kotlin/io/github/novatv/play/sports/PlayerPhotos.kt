@@ -68,7 +68,7 @@ object PlayerPhotos {
             val n = rest[i]
             val url = try { sportsDb(nameOf(n), if (isCricket(n)) "Cricket" else "Soccer") ?: "" } catch (e: Exception) {
                 // Too many lookups at once (the free key's limit): wait a little and go on, twice at most.
-                if ("429" in (e.message ?: "") && waits < 2) { waits++; Thread.sleep(30_000L); continue }
+                if ("429" in (e.message ?: "") && waits < 2) { waits++; kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(30_000L) }; continue }
                 // Any other failure: skip this one (not remembered, so it's tried again next time).
                 i++; continue
             }
