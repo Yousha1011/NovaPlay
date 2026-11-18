@@ -383,7 +383,10 @@ object Addons {
     // ---------- names ----------
 
     /** "🔜 AFG vs ZIM" -> "AFG vs ZIM": emoji and symbols round a name left out. */
-    internal fun clean(s: String): String = s.replace(Regex("""[^\p{L}\p{N}\s.,:;'&()/+\-|]"""), " ").replace(Regex("""\s+"""), " ").trim()
+    // Letters and digits by Char.isLetterOrDigit, not a \p{L} pattern: the iPhone's pattern engine has no such classes
+    // (every addon list failed there with "No such character class").
+    internal fun clean(s: String): String = s.map { c -> if (c.isLetterOrDigit() || c.isWhitespace() || c in ".,:;'&()/+-|") c else ' ' }
+        .joinToString("").replace(Regex("""\s+"""), " ").trim()
 
     /** "A vs B" (also "A v B", "A - B" in a match title) -> (A, B). */
     internal fun sides(title: String): Pair<String, String>? {
@@ -393,7 +396,7 @@ object Addons {
         return if (a.length >= 2 && b.length >= 2) a to b else null
     }
 
-    private fun fold(s: String) = s.lowercase().replace(Regex("""[^\p{L}\p{N} ]"""), "").replace(Regex("""\s+"""), " ").trim()
+    private fun fold(s: String) = s.lowercase().filter { it.isLetterOrDigit() || it == ' ' }.replace(Regex("""\s+"""), " ").trim()
 
     /** An addon's side name is [side]: its full or short name or code, or one containing the other ("Zimbabwe Women"). */
     internal fun same(name: String, side: Side): Boolean {
