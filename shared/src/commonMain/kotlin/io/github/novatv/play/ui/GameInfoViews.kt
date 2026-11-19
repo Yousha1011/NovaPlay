@@ -139,16 +139,20 @@ fun InfoTable(s: GameInfo.Section, narrow: Boolean = false, photos: Map<String, 
     val main = if (short0) (s.head.indexOf("Player").takeIf { it > 0 } ?: s.head.indexOfFirst { it in setOf("Batters", "Event") }.takeIf { it > 0 } ?: 0) else 0
     val key = keyColumn(s)
     val textCols = setOf("How out", "Batters", "Player", "Position", "Event", "Team")
-    val scrolls = narrow && n > 4
+    // A phone scrolls a wide table sideways only when it doesn't fit (upright); turned sideways (or a tablet) the table
+    // fills the width, the names and "How out" sharing the room, so nothing is cut short.
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val need = (if (s.photos != null) 180 else 150) + (1 until n).sumOf { i -> if (s.head[i] in textCols) 110.toInt() else 44.toInt() } + 40
+    val scrolls = narrow && n > 4 && maxWidth < need.dp
     fun width(i: Int): Dp? = when {
-        i == main && !scrolls -> null
+        !scrolls && (i == main || (s.head[i] in textCols && narrow)) -> null
         i == main -> if (s.photos != null) 180.dp else 150.dp
         i == 0 && short0 -> if (narrow) 40.dp else 64.dp
         s.head[i] in textCols -> if (narrow) 110.dp else 140.dp
         else -> if (narrow) 44.dp else 60.dp
     }
     fun cellMod(i: Int, rowScope: androidx.compose.foundation.layout.RowScope): Modifier =
-        with(rowScope) { width(i)?.let { Modifier.width(it) } ?: Modifier.weight(1f) }
+        with(rowScope) { width(i)?.let { Modifier.width(it) } ?: Modifier.weight(if (i == main) 1.4f else 1f) }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(SportsLook.Card).border(1.dp, SportsLook.Border, RoundedCornerShape(14.dp))
         .padding(horizontal = 10.dp, vertical = 10.dp)) {
         Column(if (scrolls) Modifier.horizontalScroll(rememberScrollState()) else Modifier.fillMaxWidth()) {
@@ -188,6 +192,7 @@ fun InfoTable(s: GameInfo.Section, narrow: Boolean = false, photos: Map<String, 
             }
         }
         s.note?.let { Text(it, style = T.small.copy(color = SportsLook.Dim), modifier = Modifier.padding(top = 6.dp, start = 6.dp)) }
+    }
     }
 }
 

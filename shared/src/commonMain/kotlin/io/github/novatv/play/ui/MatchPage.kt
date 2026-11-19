@@ -101,6 +101,14 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
             }
         } catch (x: Exception) { }
     }
+    // Your channels as listed: the found ones, those addons name, and every version (SD, HD, FHD, 4K) of each.
+    val listed by produceState<List<Airing>?>(null, airings, fromAddons) {
+        val found = airings ?: run { value = null; return@produceState }
+        value = found
+        value = withContext(IO) {
+            runCatching { io.github.novatv.play.data.ChannelVersions.forMatch(found, fromAddons, App.repo.state.value.lib.channels) }.getOrDefault(found)
+        }
+    }
     // The broadcasters' own apps, for matches only they show (DRM-protected, so no stream here plays them).
     val apps by produceState(emptyList<io.github.novatv.play.sports.OfficialApps.Service>(), e.id) {
         value = withContext(IO) { io.github.novatv.play.sports.OfficialApps.forEvent(e) }
@@ -138,19 +146,20 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
             Spacer(Modifier.height(18.dp))
             Text("WATCH ON YOUR CHANNELS", style = T.eyebrow.copy(color = SportsLook.Dim))
             Spacer(Modifier.height(8.dp))
+            val shown = listed
             when {
-                airings == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                shown == null -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Spinner(size = 24.dp)
                     // A TV guide loading takes most of a TV's power: the lookup waits on it, so say so.
                     App.repo.state.collectAsState().value.epgStatus?.let {
                         Spacer(Modifier.width(10.dp)); Text("Finding channels · $it", style = T.small.copy(color = SportsLook.Dim))
                     }
                 }
-                airings!!.isEmpty() -> Text("Not found in your channels' guide or names. Pick a channel to remember one for this game.", style = T.small)
+                shown.isEmpty() -> Text("Not found in your channels' guide or names. Pick a channel to remember one for this game.", style = T.small)
                 else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // OK plays it in the TV window; hold OK opens it full screen.
-                    airings!!.take(3).forEachIndexed { i, a ->
-                        AiringRow(a, onLongClick = { fullScreen(a.channel, airings!!.map { it.channel }, onWatch) }) { watchOrFull(a.channel, airings!!.map { it.channel }, onWatch) }
+                    // OK plays it in the TV window; hold OK opens it full screen. Every version, a row each.
+                    shown.forEach { a ->
+                        AiringRow(a, onLongClick = { fullScreen(a.channel, shown.map { it.channel }, onWatch) }) { watchOrFull(a.channel, shown.map { it.channel }, onWatch) }
                     }
                 }
             }

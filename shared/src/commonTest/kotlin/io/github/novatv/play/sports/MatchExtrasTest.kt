@@ -196,4 +196,9 @@ class MatchExtrasTest {
         val cr = GameInfo.forSide(GameInfo.Info(emptyList(), listOf(s)), Side("2", "Costa Rica", "Costa Rica", "CRC", null, null))
         assertEquals(listOf("John Ruiz"), cr.sections.single().photos)
     }
+
+    @Test fun webCodesInDismissalsAreDecoded() {
+        assertEquals("c †Rickelton b Rabada", GameInfo.dismissalText("Tanzid Hasan c &dagger;Rickelton b Rabada 4 (21b) SR: 19", "Tanzid Hasan"))
+        assertEquals("Tom & Jerry's", GameInfo.unescape("Tom &amp; Jerry&#39;s"))
+    }
 }

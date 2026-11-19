@@ -127,9 +127,34 @@ object GameInfo {
         return better + extra
     }
 
+    /**
+     * Web text codes ESPN leaves in names and dismissals, as their characters: "c &dagger;Rickelton" (the
+     * wicketkeeper's mark) -> "c †Rickelton", "&amp;" -> "&", "&#39;" -> "'".
+     */
+    internal fun unescape(s: String): String {
+        if ('&' !in s) return s
+        val named = mapOf("dagger" to "†", "Dagger" to "‡", "amp" to "&", "quot" to "\"", "apos" to "'", "lt" to "<", "gt" to ">",
+            "nbsp" to " ", "ndash" to "–", "mdash" to "—", "rsquo" to "’", "lsquo" to "‘", "bull" to "•")
+        return Regex("""&(#x?[0-9a-fA-F]+|[a-zA-Z]+);""").replace(s) { m ->
+            val code = m.groupValues[1]
+            when {
+                code.startsWith("#x") || code.startsWith("#X") -> code.drop(2).toIntOrNull(16)?.let { codePoint(it) }
+                code.startsWith("#") -> code.drop(1).toIntOrNull()?.let { codePoint(it) }
+                else -> named[code]
+            } ?: m.value
+        }
+    }
+
+    /** A character from its number, without Java-only helpers (the iPhone has none). */
+    private fun codePoint(cp: Int): String? = when {
+        cp < 0 || cp > 0x10FFFF -> null
+        cp < 0x10000 -> cp.toChar().toString()
+        else -> (cp - 0x10000).let { charArrayOf((0xD800 + (it shr 10)).toChar(), (0xDC00 + (it and 0x3FF)).toChar()).concatToString() }
+    }
+
     /** "Mahfijul Islam c Jansen b Rabada 0 (1m 1b 0x4 0x6) SR: 0" -> "c Jansen b Rabada". */
     internal fun dismissalText(text: String, batter: String): String? {
-        val rest = text.trim().removePrefix(batter).trim()
+        val rest = unescape(text).trim().removePrefix(batter).trim()
         val m = Regex("""^(.*?)\s+\d+\s*\(""").find(rest) ?: return null
         return m.groupValues[1].trim().ifBlank { null }
     }
@@ -270,7 +295,7 @@ object GameInfo {
                     players.map { p ->
                         val r = p.optString("runs"); val b = p.optString("ballsFaced")
                         val sr = r.toDoubleOrNull()?.let { rr -> b.toDoubleOrNull()?.takeIf { it > 0 }?.let { bb -> ((rr * 1000 / bb).toLong() / 10.0).toString() } } ?: "–"
-                        listOf(p.optString("playerName"), p.optString("dismissal"), r, b, p.optString("fours"), p.optString("sixes"), sr)
+                        listOf(p.optString("playerName"), unescape(p.optString("dismissal")), r, b, p.optString("fours"), p.optString("sixes"), sr)
                     },
                     note = listOfNotNull(c.optString("extras").ifBlank { null }?.let { "Extras $it" },
                         c.optString("runs").ifBlank { null }?.let { "Total $it ${c.optString("total")}".trim() }).joinToString(" · ").ifBlank { null },

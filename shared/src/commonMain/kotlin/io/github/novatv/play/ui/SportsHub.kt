@@ -113,7 +113,7 @@ fun SportsScreen(nav: Nav) {
     val watch: (Channel) -> Unit = { App.preview.select(it, TV_PREVIEW) }
 
     LaunchedEffect(st.epgVersion, st.lib.channels.size) {
-        withContext(IO) { App.repo.matcher() }
+        withContext(IO) { App.repo.matcher(); io.github.novatv.play.data.ChannelVersions.prepare(App.repo.state.value.lib.channels) }
     }
     LaunchedEffect(Unit) {
         while (true) {

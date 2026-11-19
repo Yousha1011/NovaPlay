@@ -99,7 +99,7 @@ fun PhoneSports(nav: Nav) {
         withContext(IO) { runCatching { io.github.novatv.play.data.Addons.prefetch(live) } }
     }
     // The channel index is built ahead, so a match's channels open at once.
-    LaunchedEffect(st.epgVersion, st.lib.channels.size) { withContext(IO) { App.repo.matcher() } }
+    LaunchedEffect(st.epgVersion, st.lib.channels.size) { withContext(IO) { App.repo.matcher(); io.github.novatv.play.data.ChannelVersions.prepare(st.lib.channels) } }
     val t = now(60_000L)
     val store = App.store
     val pool = remember(sports, store.sportsLeagues, store.sportsComps, store.sportsLeagueTeams) {
@@ -344,6 +344,14 @@ fun MatchPage(nav: Nav, start: SportEvent) {
         val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 150) }
         value = (value.orEmpty() + more).distinctBy { it.channel.id }
     }
+    // Your channels as listed: the found ones, those addons name, and every version (SD, HD, FHD, 4K) of each.
+    val listed by produceState<List<Airing>?>(null, airings, fromAddons) {
+        val found = airings ?: run { value = null; return@produceState }
+        value = found
+        value = withContext(IO) {
+            runCatching { io.github.novatv.play.data.ChannelVersions.forMatch(found, fromAddons, App.repo.state.value.lib.channels) }.getOrDefault(found)
+        }
+    }
     Pushed(nav) {
         LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
@@ -442,10 +450,10 @@ fun MatchPage(nav: Nav, start: SportEvent) {
             item {
                 Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.Bottom) {
                     Text("Watch on your channels", style = P.title, modifier = Modifier.weight(1f))
-                    airings?.takeIf { it.isNotEmpty() }?.let { Text("${it.size} found", style = P.small) }
+                    listed?.takeIf { it.isNotEmpty() }?.let { Text("${it.size} found", style = P.small) }
                 }
             }
-            val a = airings
+            val a = listed
             when {
                 a == null -> item { Box(Modifier.fillMaxWidth().padding(30.dp), contentAlignment = Alignment.Center) { io.github.novatv.play.ui.Spinner() } }
                 a.isEmpty() -> item { Empty(Icons.Rounded.SportsSoccer, "No channels found", "Not in your playlist's guide or channel names.") }

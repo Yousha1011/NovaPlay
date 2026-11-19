@@ -157,6 +157,7 @@ object AutoTest {
                     "tour" -> tour()
                     "matchpages" -> matchPages()
                     "gameinfoall" -> gameInfoAll()
+                    "versions" -> channelVersionsCheck()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -1076,6 +1077,40 @@ object AutoTest {
                 }
             }
             check("players' photos download ($downloaded ok, $refused refused)", downloaded > 0 && refused == 0)
+        }
+    }
+
+    /**
+     * Every version (SD, HD, FHD, 4K) and addon-named channel on each live and upcoming match's list, with the time it
+     * takes on this playlist. Data only, no screen pictures.
+     */
+    private suspend fun channelVersionsCheck() {
+        check("playlist loaded", waitForLibrary())
+        waitFor(90_000) { App.repo.sports.value.events.size > 20 }
+        val now = System.currentTimeMillis()
+        val all = App.repo.sports.value.events
+        val list = (io.github.novatv.play.sports.MySports.live(all, now) + io.github.novatv.play.sports.MySports.upcoming(all, now)).distinctBy { it.id }
+        val channels = App.repo.state.value.lib.channels
+        log("playlist channels: ${channels.size}; matches: ${list.size}")
+        withContext(Dispatchers.IO) {
+            val t0 = System.currentTimeMillis()
+            io.github.novatv.play.data.ChannelVersions.prepare(channels)
+            log("index built in ${System.currentTimeMillis() - t0} ms")
+            var more = 0; var named = 0; var slowest = 0L; var withChannels = 0
+            for (e in list.take(60)) {
+                val found = runCatching { App.repo.matcher().airings(e, limit = 40) }.getOrDefault(emptyList())
+                val addons = io.github.novatv.play.data.Addons.known(e).orEmpty()
+                val t = System.currentTimeMillis()
+                val out = io.github.novatv.play.data.ChannelVersions.forMatch(found, addons, channels)
+                val ms = System.currentTimeMillis() - t; if (ms > slowest) slowest = ms
+                val n = out.count { it.why == io.github.novatv.play.data.ChannelVersions.ADDON_SAYS }
+                more += out.size - found.size; named += n
+                if (found.isNotEmpty()) withChannels++
+                if (out.size != found.size) log("${e.title.take(40)}: ${found.size} found -> ${out.size} listed (${n} named by addons) in $ms ms: " +
+                    out.take(6).joinToString { it.channel.name.take(28) })
+            }
+            log("matches with channels: $withChannels; extra versions listed: $more, addon-named: $named, slowest match: $slowest ms")
+            check("versions add little time (slowest $slowest ms)", slowest < 500)
         }
     }
 

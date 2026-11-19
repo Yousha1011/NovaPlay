@@ -281,6 +281,8 @@ internal fun AiringRow(a: Airing, modifier: Modifier = Modifier, onLongClick: ((
     // MAYBE: a broadcaster's channel, or the competition on at kick-off without the teams named.
     val picked = a.why == io.github.novatv.play.sports.Matcher.PICKED
     val sure = picked || a.why == "Match feed" || a.why == "In your TV guide"
+    // Not in the guide, but an addon's stream for this match is named after it.
+    val named = a.why == io.github.novatv.play.data.ChannelVersions.ADDON_SAYS
     // An addon's stream: the addon listed it for this match.
     val addon = a.channel.categoryId == io.github.novatv.play.data.Addons.CATEGORY
     // Listed straight away, still being checked: it can be played already, and drops out if it doesn't open.
@@ -295,7 +297,7 @@ internal fun AiringRow(a: Airing, modifier: Modifier = Modifier, onLongClick: ((
             }
             Spacer(Modifier.width(8.dp))
             Box(Modifier.clip(RoundedCornerShape(6.dp)).background(if (sure) Color(0xFF1F9D55) else Color(0x33FFFFFF)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                Text(if (picked) "YOUR PICK" else if (checking) "CHECKING…" else if (addon) "ADDON" else if (sure) "SHOWING IT" else "MAYBE",
+                Text(if (picked) "YOUR PICK" else if (checking) "CHECKING…" else if (addon) "ADDON" else if (named) "ADDON SAYS" else if (sure) "SHOWING IT" else "MAYBE",
                     style = T.tiny.copy(color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
             }
         }
