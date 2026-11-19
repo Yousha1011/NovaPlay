@@ -59,3 +59,16 @@ class ChannelVersionsCountriesTest {
         assertEquals(setOf("5", "6"), ChannelVersions.versions(laliga[0], laliga).map { it.id }.toSet())
     }
 }
+
+class ChannelVersionsTyposTest {
+    private fun ch(id: String, name: String, cat: String = "1") = Channel(id = id, name = name, logo = null, categoryId = cat, epgId = null, url = "http://x/$id", number = 0)
+
+    @Test fun addonNameOneLetterOffStillFindsTheChannel() {
+        val all = listOf(ch("1", "PK: TENS SPORTS"), ch("2", "SPORTS: TEN 1 HD"), ch("3", "UK: SKY SPORTS 1 HD"), ch("4", "UK: SKY SPORTS TENNIS"))
+        fun addon(label: String) = Airing(ch("addon:$label", "$label · CNCVerse Bridge", Addons.CATEGORY), null, "x")
+        // "TEN SPORTS HD" is the playlist's "TENS SPORTS"; "SKY SPORTS 2" never becomes "SKY SPORTS 1".
+        val named = ChannelVersions.namedByAddons(listOf(addon("TEN SPORTS HD"), addon("SKY SPORTS 2 HD")), all)
+        assertEquals(listOf("1"), named.map { it.channel.id })
+        assertEquals(null, ChannelVersions.nearest("TEN 1", listOf("TEN 2")))
+    }
+}

@@ -88,9 +88,37 @@ object ChannelVersions {
             val key = HdTwin.core(label)
             // A real channel name: letters, at least 4 of them, and found as is in the playlist.
             if (key.length < 4 || key.none { it.isLetter() }) return@mapNotNull null
-            val found = map[key]?.minByOrNull { rank(it.name) } ?: return@mapNotNull null
+            // As named, else a name one letter off (playlists' typos: the addon's "TEN SPORTS" is "PK: TENS SPORTS").
+            val versions = map[key] ?: nearest(key, map.keys)?.let { map[it] } ?: return@mapNotNull null
+            val found = versions.minByOrNull { rank(it.name) } ?: return@mapNotNull null
             Airing(found, null, ADDON_SAYS)
         }.distinctBy { HdTwin.core(it.channel.name) }
+    }
+
+    /**
+     * The one bare name among [names] that is [key] with one letter added, dropped or changed (spaces ignored), for
+     * names of 8 letters or more; never a different number ("SKY SPORTS 1" is not "SKY SPORTS 2"), and none when
+     * two names are equally near.
+     */
+    internal fun nearest(key: String, names: Collection<String>): String? {
+        val k = key.replace(" ", "")
+        if (k.length < 8) return null
+        val near = names.filter { n ->
+            val m = n.replace(" ", "")
+            kotlin.math.abs(m.length - k.length) <= 1 && m.firstOrNull() == k.firstOrNull() &&
+                m.filter { it.isDigit() } == k.filter { it.isDigit() } && oneEditApart(k, m)
+        }
+        return near.singleOrNull()
+    }
+
+    /** Whether [a] and [b] differ by exactly one letter added, dropped or changed. */
+    private fun oneEditApart(a: String, b: String): Boolean {
+        if (a == b) return false
+        if (a.length == b.length) return a.indices.count { a[it] != b[it] } == 1
+        val (s, l) = if (a.length < b.length) a to b else b to a
+        var i = 0
+        while (i < s.length && s[i] == l[i]) i++
+        return s.substring(i) == l.substring(i + 1)
     }
 
     /** "Watch on your channels": the guide's channels, then those addons name, with all their versions. Blocking. */

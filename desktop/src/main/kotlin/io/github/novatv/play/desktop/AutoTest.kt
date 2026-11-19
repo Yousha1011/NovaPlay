@@ -158,6 +158,7 @@ object AutoTest {
                     "matchpages" -> matchPages()
                     "gameinfoall" -> gameInfoAll()
                     "versions" -> channelVersionsCheck()
+                    "findchannel" -> findChannel()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -1112,6 +1113,17 @@ object AutoTest {
             log("matches with channels: $withChannels; extra versions listed: $more, addon-named: $named, slowest match: $slowest ms")
             check("versions add little time (slowest $slowest ms)", slowest < 500)
         }
+    }
+
+    /** Channels whose name has every word of NOVAPLAY_FIND, with their bare names (what versions are matched by). */
+    private suspend fun findChannel() {
+        check("playlist loaded", waitForLibrary())
+        val words = (System.getenv("NOVAPLAY_FIND") ?: "TEN SPORTS").uppercase().split(' ').filter { it.isNotBlank() }
+        val channels = App.repo.state.value.lib.channels
+        log("label core: '${io.github.novatv.play.data.HdTwin.core(words.joinToString(" ") + " HD")}'")
+        val hits = channels.filter { c -> io.github.novatv.play.data.HdTwin.plain(c.name).let { n -> words.all { it in n } } }
+        log("${hits.size} channels with ${words}:")
+        hits.take(40).forEach { log("  '${it.name}' -> core '${io.github.novatv.play.data.HdTwin.core(it.name)}'") }
     }
 
     /** A picture of the window as it is on screen. */
