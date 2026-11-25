@@ -53,6 +53,10 @@ interface Host {
     /** Keeps a snapshot of the settings where it survives reinstalling the app (the iPhone's Keychain). */
     fun saveBackup(json: String) {}
     fun restoreBackup(): String? = null
+    /** This device's address for push messages (the Android phone app, once Firebase gives one); null: none. */
+    val pushToken: String? get() = null
+    /** Shows game notifications at set times (the phone apps); null hides the notification settings. */
+    val alerter: io.github.novatv.play.data.GameAlerter? get() = null
     /** Records live TV, where the platform can (Android); null hides recording. */
     val recorder: io.github.novatv.play.data.Recorder? get() = null
     /** A small muted player for Live TV previews, where the device can afford one (Android TV); null shows a still panel. */

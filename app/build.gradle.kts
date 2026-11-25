@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.novatv.play"
         minSdk = 25
         targetSdk = 34
-        versionCode = 35
-        versionName = "1.9.11"
+        versionCode = 36
+        versionName = "1.9.12"
     }
 
     // Two apps from one source: the Fire TV app, and the phone app with the iPhone's screens.
@@ -28,6 +28,16 @@ android {
             dimension = "form"
             applicationIdSuffix = ".phone"
             manifestPlaceholders["mainOrientation"] = "portrait"
+            // Firebase (game alerts pushed by the NovaPlay server): its settings read from google-services.json, so
+            // the TV app needs no Firebase project of its own.
+            val gs = file("src/phone/google-services.json")
+            // The value of "name": "..." in the file.
+            fun gsValue(name: String) =
+                if (gs.exists()) Regex("\"$name\"\\s*:\\s*\"([^\"]+)\"").find(gs.readText())?.groupValues?.get(1).orEmpty() else ""
+            buildConfigField("String", "FB_PROJECT", "\"${gsValue("project_id")}\"")
+            buildConfigField("String", "FB_SENDER", "\"${gsValue("project_number")}\"")
+            buildConfigField("String", "FB_APP", "\"${gsValue("mobilesdk_app_id")}\"")
+            buildConfigField("String", "FB_KEY", "\"${gsValue("current_key")}\"")
         }
     }
 
@@ -68,4 +78,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation(project(":shared"))
+    // The phone app only: game alerts pushed by the NovaPlay server.
+    "phoneImplementation"(platform("com.google.firebase:firebase-bom:33.7.0"))
+    "phoneImplementation"("com.google.firebase:firebase-messaging")
 }

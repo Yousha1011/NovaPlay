@@ -12,6 +12,7 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.withPermit
 import okio.BufferedSource
 import okio.FileSystem
 import okio.IOException
@@ -70,7 +71,10 @@ object Http {
     enum class Probe { PLAYS, DRM, DOWN }
 
     /** [opens], saying why not: a DRM-locked stream apart from one that is down. */
-    suspend fun probe(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 6_000L): Probe = try {
+    suspend fun probe(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Long = 6_000L): Probe =
+        checks.withPermit { probeNow(url, headers, timeoutMs) }
+
+    private suspend fun probeNow(url: String, headers: Map<String, String>, timeoutMs: Long): Probe = try {
         var variant: String? = null
         kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
             client.prepareGet(url) {
@@ -84,7 +88,8 @@ object Http {
                 // A playlist: by its type, its name, or plain text (a live video stream is never text, so reading it is safe).
                 val hls = "mpegurl" in type || type.startsWith("text/") || r.call.request.url.encodedPath.endsWith(".m3u8")
                 if (!hls) return@execute Probe.PLAYS
-                val text = r.bodyAsText().take(200_000)
+                // At most 200 KB: a live stream a server calls "text" never ends, and read whole it filled the memory.
+                val text = head(r.bodyAsChannel(), 200_000)
                 // DRM-locked video (FanCode's SAMPLE-AES-CTR): it downloads, but no player here can decrypt it.
                 // Plain AES-128 the players decrypt themselves.
                 if (drm(text)) return@execute Probe.DRM
@@ -93,8 +98,24 @@ object Http {
                 variant = if (next.startsWith("http")) next else r.call.request.url.toString().substringBeforeLast('/') + "/" + next
                 Probe.PLAYS
             }
-        }?.let { p -> if (p == Probe.PLAYS && variant != null) probe(variant!!, headers, timeoutMs) else p } ?: Probe.DOWN
+        }?.let { p -> if (p == Probe.PLAYS && variant != null) probeNow(variant!!, headers, timeoutMs) else p } ?: Probe.DOWN
     } catch (e: Exception) { Probe.DOWN }
+
+    /** The first [max] bytes of [ch] as text (a playlist), never more. */
+    private suspend fun head(ch: io.ktor.utils.io.ByteReadChannel, max: Int): String {
+        val buf = ByteArray(max)
+        var n = 0
+        while (n < max) {
+            val got = ch.readAvailable(buf, n, max - n)
+            if (got < 0) break
+            if (got == 0 && ch.isClosedForRead) break
+            n += got
+        }
+        return buf.decodeToString(0, n)
+    }
+
+    /** At most this many stream checks at once (each holds a connection and a buffer). */
+    val checks = kotlinx.coroutines.sync.Semaphore(6)
 
     /** An HLS playlist whose video is DRM-encrypted (any key method but NONE or AES-128). */
     internal fun drm(playlist: String): Boolean = Regex("""#EXT-X-(?:SESSION-)?KEY:[^\n]*METHOD=([A-Z0-9-]+)""").findAll(playlist)

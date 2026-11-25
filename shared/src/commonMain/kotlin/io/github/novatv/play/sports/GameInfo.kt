@@ -43,7 +43,7 @@ object GameInfo {
     }
 
     /** [e]'s information: the whole match, or with [side] only that team's (its line-up, innings, players, figures). Blocking. */
-    fun forEvent(e: SportEvent, side: Side? = null): Info {
+    fun forEvent(e: SportEvent, side: Side? = null, deep: Boolean = true): Info {
         val o = MatchStats.summary(e) ?: return Info(emptyList(), emptyList())
         val sections = when (e.league.sport) {
             Sport.CRICKET -> cricket(o)
@@ -55,7 +55,8 @@ object GameInfo {
             // A tab per side (home first); asked for one team, only its tab.
             val teams = (e.teams.map { it.name } + sections.mapNotNull { it.team }).distinctBy { it.lowercase() }
                 .filter { t -> sections.any { s -> s.team != null && sameTeam(s.team, t) } || e.teams.any { it.name == t } }
-            return Info(emptyList(), withBallByBall(e, sections), cricket = plan(e, sections, side?.name))
+            // [deep]: the earlier innings completed from the ball-by-ball feed; a match page's early load skips it.
+            return Info(emptyList(), if (deep) withBallByBall(e, sections) else sections, cricket = plan(e, sections, side?.name))
         }
         val all = Info(lineups, sections, figures(o, e).firstOrNull(), if (e.league.sport == Sport.FOOTBALL) benches(o) else emptyList())
         return if (side == null) all else forSide(all, side)
@@ -92,10 +93,15 @@ object GameInfo {
         return x.isNotEmpty() && y.isNotEmpty() && (x == y || x.startsWith("$y ") || y.startsWith("$x "))
     }
 
+    /** Earlier innings worked out from the ball-by-ball ("event|innings" -> partnerships, how each batter was out): finished, so kept. */
+    private val finished = io.github.novatv.play.platform.SafeMap<String, Pair<Section?, Map<String, String>>>()
+
     /**
      * The innings ESPN's scorecards leave out (all but the latest) completed from its ball-by-ball feed: their
-     * partnerships, and the full way each batter was out ("c Jansen b Rabada"). One request per such innings, only
-     * when Game info opens; anything that fails leaves the innings as it was.
+     * partnerships, and the full way each batter was out ("c Jansen b Rabada"). Read 100 balls at a time, each page
+     * counted and let go before the next (one innings at once was 2 MB of text, and filled a Fire TV's memory); an
+     * innings worked out is kept, as it won't change. Only when Game info opens; anything that fails leaves the
+     * innings as it was.
      */
     internal fun withBallByBall(e: SportEvent, sections: List<Section>): List<Section> {
         val missing = sections.filter { it.kind == "bat" && sections.none { p -> p.kind == "part" && p.innings == it.innings } }
@@ -105,19 +111,25 @@ object GameInfo {
         val extra = ArrayList<Section>()
         val howOut = HashMap<String, String>()
         for (bat in missing) {
-            val items = runCatching {
-                val o = JSONObject(io.github.novatv.play.data.Http.get(
-                    "https://site.api.espn.com/apis/site/v2/sports/cricket/$league/playbyplay?event=$id&period=${bat.innings}&limit=1000"))
-                objects(o.optJSONObject("commentary")?.optJSONArray("items"))
-            }.getOrNull() ?: continue
-            val balls = items.filter { it.optInt("period") == bat.innings.toIntOrNull() }.sortedBy { it.optLong("sequence") }
-            partnerships(balls, bat.team.orEmpty(), bat.innings)?.let { extra += it }
-            for (b in balls) {
-                val d = b.optJSONObject("dismissal") ?: continue
-                if (!d.optBoolean("dismissal")) continue
-                val who = d.optJSONObject("batsman")?.optJSONObject("athlete")?.optString("displayName").orEmpty()
-                dismissalText(d.optString("text"), who)?.let { howOut[who] = it }
+            val key = "${e.id}|${bat.innings}"
+            val done = finished[key] ?: run {
+                val count = PartnershipCount(bat.team.orEmpty(), bat.innings)
+                var page = 1; var pages = 1
+                while (page <= pages && page <= 20) {
+                    val items = runCatching {
+                        val o = JSONObject(io.github.novatv.play.data.Http.get(
+                            "https://site.api.espn.com/apis/site/v2/sports/cricket/$league/playbyplay?event=$id&period=${bat.innings}&limit=100&page=$page"))
+                        val c = o.optJSONObject("commentary")
+                        pages = c?.optInt("pageCount", 1) ?: 1
+                        objects(c?.optJSONArray("items"))
+                    }.getOrNull() ?: break
+                    items.filter { it.optInt("period") == bat.innings.toIntOrNull() }.sortedBy { it.optLong("sequence") }.forEach(count::feed)
+                    page++
+                }
+                (count.result() to count.howOut.toMap()).also { if (page > pages) finished[key] = it }
             }
+            done.first?.let { extra += it }
+            howOut.putAll(done.second)
         }
         // The squads' plain "caught" made "c Jansen b Rabada" where the feed says so.
         val better = sections.map { s ->
@@ -159,29 +171,35 @@ object GameInfo {
         return m.groupValues[1].trim().ifBlank { null }
     }
 
+    /** An innings' partnerships from its balls (all at once: tests and small innings). */
+    internal fun partnerships(balls: List<JSONObject>, team: String, innings: String): Section? =
+        PartnershipCount(team, innings).apply { balls.forEach(::feed) }.result()
+
     /**
-     * An innings' partnerships from its balls: each ball carries both batters' running scores and the innings'
-     * total; a wicket closes a partnership (its runs and balls since the last one, each batter's share), and the
-     * pair still in makes the last, unbroken one.
+     * Counts an innings' partnerships ball by ball, a page at a time: each ball carries both batters' running scores
+     * and the innings' total; a wicket closes a partnership (its runs and balls since the last one, each batter's
+     * share), and the pair still in makes the last, unbroken one. Also notes how each batter was out.
      */
-    internal fun partnerships(balls: List<JSONObject>, team: String, innings: String): Section? {
-        if (balls.isEmpty()) return null
-        val rows = ArrayList<List<String>>()
-        var startTotal = 0; var startBalls = 0
-        val startRuns = HashMap<String, Int>()
-        val last = HashMap<String, Int>()
-        var pair = listOf<String>()
-        var total = 0; var legal = 0
-        fun overs(n: Int) = "${n / 6}" + (if (n % 6 != 0) ".${n % 6}" else "")
-        fun ordinal(n: Int) = "$n" + when { n % 100 in 11..13 -> "th"; n % 10 == 1 -> "st"; n % 10 == 2 -> "nd"; n % 10 == 3 -> "rd"; else -> "th" }
-        fun close() {
+    internal class PartnershipCount(private val team: String, private val innings: String) {
+        private val rows = ArrayList<List<String>>()
+        private var startTotal = 0; private var startBalls = 0
+        private val startRuns = HashMap<String, Int>()
+        private val last = HashMap<String, Int>()
+        private var pair = listOf<String>()
+        private var total = 0; private var legal = 0
+        val howOut = HashMap<String, String>()
+
+        private fun overs(n: Int) = "${n / 6}" + (if (n % 6 != 0) ".${n % 6}" else "")
+        private fun ordinal(n: Int) = "$n" + when { n % 100 in 11..13 -> "th"; n % 10 == 1 -> "st"; n % 10 == 2 -> "nd"; n % 10 == 3 -> "rd"; else -> "th" }
+        private fun close() {
             if (pair.size < 2) return
             val (a, b) = pair
             rows += listOf(ordinal(rows.size + 1), a, "${(last[a] ?: 0) - (startRuns[a] ?: 0)}", b, "${(last[b] ?: 0) - (startRuns[b] ?: 0)}",
                 "${total - startTotal}", overs(legal - startBalls))
         }
-        for (ball in balls) {
-            val inn = ball.optJSONObject("innings") ?: continue
+
+        fun feed(ball: JSONObject) {
+            val inn = ball.optJSONObject("innings") ?: return
             val now = listOfNotNull(ball.optJSONObject("batsman"), ball.optJSONObject("otherBatsman")).mapNotNull { x ->
                 x.optJSONObject("athlete")?.optString("displayName")?.ifBlank { null }?.let { it to x.optInt("totalRuns") }
             }
@@ -202,18 +220,28 @@ object GameInfo {
             }
             now.forEach { (n, r) -> last[n] = r }
             total = inn.optInt("runs"); legal = inn.optInt("balls")
-            if (ball.optJSONObject("dismissal")?.optBoolean("dismissal") == true) {
+            val d = ball.optJSONObject("dismissal")
+            if (d?.optBoolean("dismissal") == true) {
                 close(); startTotal = total; startBalls = legal
-                val gone = ball.optJSONObject("dismissal")?.optJSONObject("batsman")?.optJSONObject("athlete")?.optString("displayName")
+                val gone = d.optJSONObject("batsman")?.optJSONObject("athlete")?.optString("displayName")
+                gone?.let { g -> dismissalText(d.optString("text"), g)?.let { howOut[g] = it } }
                 pair = pair.filter { it != gone }
                 pair.forEach { startRuns[it] = last[it] ?: 0 }
             }
         }
-        // The pair still in.
-        if (pair.size == 2 && (total > startTotal || legal > startBalls)) close()
-        if (rows.isEmpty()) return null
-        return Section("$team partnerships · innings $innings", listOf("Wicket", "Batter", "Runs", "Batter", "Runs", "Total", "Overs"), rows,
-            team = team, kind = "part", innings = innings)
+
+        fun result(): Section? {
+            // The pair still in (counted on a copy, so more pages could still follow).
+            val all = ArrayList(rows)
+            if (pair.size == 2 && (total > startTotal || legal > startBalls)) {
+                val (a, b) = pair
+                all += listOf(ordinal(all.size + 1), a, "${(last[a] ?: 0) - (startRuns[a] ?: 0)}", b, "${(last[b] ?: 0) - (startRuns[b] ?: 0)}",
+                    "${total - startTotal}", overs(legal - startBalls))
+            }
+            if (all.isEmpty()) return null
+            return Section("$team partnerships · innings $innings", listOf("Wicket", "Batter", "Runs", "Batter", "Runs", "Total", "Overs"), all,
+                team = team, kind = "part", innings = innings)
+        }
     }
 
     /**

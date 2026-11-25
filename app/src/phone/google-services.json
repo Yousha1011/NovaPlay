@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "690908311731",
+    "project_id": "novaplay-90e9d",
+    "storage_bucket": "novaplay-90e9d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:690908311731:android:cd6f1fb6686f57cf0940c6",
+        "android_client_info": {
+          "package_name": "io.github.novatv.play.phone"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcbG0Z6lt5SmaNtkPZFoMr2maWu_BaH3M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

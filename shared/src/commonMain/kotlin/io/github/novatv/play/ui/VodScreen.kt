@@ -364,7 +364,7 @@ private fun EpisodeRow(s: Series, e: Episode, onClick: () -> Unit) {
             Box(Modifier.size(128.dp, 66.dp).clip(RoundedCornerShape(8.dp)).background(C.panelHi), contentAlignment = Alignment.Center) {
                 Text("E${e.number}", style = T.h2.copy(color = C.faint))
                 if (e.image != null) AsyncImage(e.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                if (prog != null) Bar(prog.first.toFloat() / prog.second.coerceAtLeast(1), Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(4.dp))
+                if (prog != null) Bar((prog.first.toFloat() / prog.second.coerceAtLeast(1)).coerceIn(0f, 1f), Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(4.dp))
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {

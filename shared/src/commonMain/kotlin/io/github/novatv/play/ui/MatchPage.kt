@@ -102,7 +102,9 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
         } catch (x: Exception) { }
     }
     // Your channels as listed: the found ones, those addons name, and every version (SD, HD, FHD, 4K) of each.
-    val listed by produceState<List<Airing>?>(null, airings, fromAddons) {
+    // Worked out again only when the addon streams' names change (not at each stream check).
+    val addonNames = androidx.compose.runtime.remember(fromAddons) { fromAddons.map { it.channel.name.substringBefore(" · ") }.toSet() }
+    val listed by produceState<List<Airing>?>(null, airings, addonNames) {
         val found = airings ?: run { value = null; return@produceState }
         value = found
         value = withContext(IO) {
@@ -158,9 +160,14 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
                 shown.isEmpty() -> Text("Not found in your channels' guide or names. Pick a channel to remember one for this game.", style = T.small)
                 else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // OK plays it in the TV window; hold OK opens it full screen. Every version, a row each.
-                    shown.forEach { a ->
-                        AiringRow(a, onLongClick = { fullScreen(a.channel, shown.map { it.channel }, onWatch) }) { watchOrFull(a.channel, shown.map { it.channel }, onWatch) }
+                    // The first 10 drawn (each row a logo and a guide line; all of a big playlist's versions at once
+                    // left a Fire TV seconds behind each key and out of memory); the rest on request.
+                    var all by androidx.compose.runtime.remember(e.id) { androidx.compose.runtime.mutableStateOf(false) }
+                    val chans = shown.map { it.channel }
+                    (if (all) shown else shown.take(10)).forEach { a ->
+                        AiringRow(a, onLongClick = { fullScreen(a.channel, chans, onWatch) }) { watchOrFull(a.channel, chans, onWatch) }
                     }
+                    if (!all && shown.size > 10) Pill("Show ${shown.size - 10} more", onClick = { all = true })
                 }
             }
             if (fromAddons.isNotEmpty()) {

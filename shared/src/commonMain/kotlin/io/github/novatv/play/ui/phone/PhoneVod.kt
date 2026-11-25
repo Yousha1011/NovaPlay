@@ -344,7 +344,7 @@ private fun EpisodeLine(s: Series, e: Episode, onClick: () -> Unit) {
             Text("E${e.number}", style = P.head.copy(color = P.dim))
             if (e.image != null) AsyncImage(e.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (prog != null) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(5.dp).height(3.dp).background(Color(0x55FFFFFF))) {
-                Box(Modifier.fillMaxWidth(prog.first.toFloat() / prog.second.coerceAtLeast(1)).height(3.dp).background(P.blue))
+                Box(Modifier.fillMaxWidth((prog.first.toFloat() / prog.second.coerceAtLeast(1)).coerceIn(0f, 1f)).height(3.dp).background(P.blue))
             }
         }
         Spacer(Modifier.width(12.dp))

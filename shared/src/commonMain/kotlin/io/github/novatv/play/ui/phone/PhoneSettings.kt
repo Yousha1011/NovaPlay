@@ -165,6 +165,29 @@ fun PhoneConfigurations(nav: Nav) {
                     if (n > 0) SmallButton("Clear favourite clubs ($n)", P.red) { store.favouriteTeams = emptySet(); v++ }
                 }
             }
+            if (App.host.alerter != null) {
+                item { SectionLabel("Notifications") }
+                item {
+                    Card {
+                        Text("Game alerts", style = P.head)
+                        Text("For the competitions and teams you follow in Sports.", style = P.small)
+                        val before = remember(v) { store.alertsBefore }
+                        val start = remember(v) { store.alertsStart }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Choice("30 min before", before) { store.alertsBefore = !before; v++; io.github.novatv.play.data.GameAlerts.update() }
+                            Choice("When it starts", start) { store.alertsStart = !start; v++; io.github.novatv.play.data.GameAlerts.update() }
+                        }
+                        if (io.github.novatv.play.data.GameAlerts.serverBase() != null && App.host.pushToken != null) {
+                            val score = remember(v) { store.alertsScore }
+                            val end = remember(v) { store.alertsEnd }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Choice("Score changes", score) { store.alertsScore = !score; v++; io.github.novatv.play.data.GameAlerts.update() }
+                                Choice("Final result", end) { store.alertsEnd = !end; v++; io.github.novatv.play.data.GameAlerts.update() }
+                            }
+                        }
+                    }
+                }
+            }
             item { SectionLabel("Addons") }
             item {
                 Card {

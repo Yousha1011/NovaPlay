@@ -19,6 +19,10 @@ class MainActivity : ComponentActivity() {
             // The phone app: the iPhone's screens, drawn under the status and navigation bars.
             enableEdgeToEdge()
             setContent { PhoneRoot() }
+            // Game alerts need Android 13's notification permission: asked once, when either alert is switched on.
+            if (android.os.Build.VERSION.SDK_INT >= 33 && (App.store.alertsBefore || App.store.alertsStart) &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
         } else setContent { NovaTheme { Root() } }
     }
 

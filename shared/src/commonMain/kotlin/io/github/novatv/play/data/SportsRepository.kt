@@ -47,6 +47,8 @@ class SportsRepository(
             _state.update { it.copy(loading = true) }
             val all = fetchAll(followed(), 7)
             _state.value = SportsState(all.distinctBy { it.id }.sortedBy { it.start }, false, clock())
+            // The phone's game notifications follow the newest list.
+            runCatching { GameAlerts.update(_state.value.events) }
         }
     }
 

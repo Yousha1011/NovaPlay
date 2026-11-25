@@ -37,11 +37,19 @@ class NovaApp : Application() {
         })
         // TVs use the big-screen look (graphite and cyan); the phone draws its own screens with its themes.
         io.github.novatv.play.ui.Look.modern = false
+        if (PHONE) {
+            // Game alerts' channel first (pushed alerts use it even before one is shown), then push messages.
+            if (android.os.Build.VERSION.SDK_INT >= 26) getSystemService(android.app.NotificationManager::class.java).createNotificationChannel(
+                android.app.NotificationChannel(AndroidGameAlerter.CHANNEL, "Game alerts", android.app.NotificationManager.IMPORTANCE_HIGH))
+            Push.start(this)
+        }
         val recorder = AndroidRecorder(this)
         val preview = if (ExoPreviewEngine.supported(this)) ExoPreviewEngine(this) else null
         App.start(object : Host {
             override val device = if (PHONE) Device.PHONE else Device.TV
             override val recorder = recorder
+            override val alerter: io.github.novatv.play.data.GameAlerter? = if (PHONE) AndroidGameAlerter(this@NovaApp) else null
+            override val pushToken: String? get() = Push.token
             override val previewEngine = preview
             override fun exitApp() {
                 // Screens closed and out of recents, then the process ended (as a force stop would), so nothing

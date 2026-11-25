@@ -212,6 +212,22 @@ class Store(private val sp: Prefs = Prefs()) : SourceList {
         searchHistory = listOf(t) + searchHistory.filterNot { it.equals(t, ignoreCase = true) }
     }
 
+    /** Game notifications (Settings > Notifications): 30 minutes before a followed game, and when it starts. */
+    var alertsBefore: Boolean
+        get() = sp.getBoolean("alertsBefore", true)
+        set(v) { sp.putBoolean("alertsBefore", v) }
+    var alertsStart: Boolean
+        get() = sp.getBoolean("alertsStart", true)
+        set(v) { sp.putBoolean("alertsStart", v) }
+
+    /** Pushed by the NovaPlay server (Android): important score changes, and the final result. */
+    var alertsScore: Boolean
+        get() = sp.getBoolean("alertsScore", true)
+        set(v) { sp.putBoolean("alertsScore", v) }
+    var alertsEnd: Boolean
+        get() = sp.getBoolean("alertsEnd", true)
+        set(v) { sp.putBoolean("alertsEnd", v) }
+
     var searchHistoryOff: Boolean
         get() = sp.getBoolean("searchHistoryOff", false)
         set(v) { sp.putBoolean("searchHistoryOff", v) }

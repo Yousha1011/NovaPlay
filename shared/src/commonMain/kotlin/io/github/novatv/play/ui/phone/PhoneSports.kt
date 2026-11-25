@@ -345,7 +345,9 @@ fun MatchPage(nav: Nav, start: SportEvent) {
         value = (value.orEmpty() + more).distinctBy { it.channel.id }
     }
     // Your channels as listed: the found ones, those addons name, and every version (SD, HD, FHD, 4K) of each.
-    val listed by produceState<List<Airing>?>(null, airings, fromAddons) {
+    // Worked out again only when the addon streams' names change (not at each stream check).
+    val addonNames = androidx.compose.runtime.remember(fromAddons) { fromAddons.map { it.channel.name.substringBefore(" · ") }.toSet() }
+    val listed by produceState<List<Airing>?>(null, airings, addonNames) {
         val found = airings ?: run { value = null; return@produceState }
         value = found
         value = withContext(IO) {

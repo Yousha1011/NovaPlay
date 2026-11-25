@@ -296,7 +296,8 @@ fun PrefetchGameInfo(e: io.github.novatv.play.sports.SportEvent) {
         if (e.league.sport != io.github.novatv.play.sports.Sport.FOOTBALL && e.league.sport != io.github.novatv.play.sports.Sport.CRICKET) return@LaunchedEffect
         kotlinx.coroutines.withContext(io.github.novatv.play.platform.IO) {
             runCatching {
-                val info = GameInfo.forEvent(e)
+                // Without the ball-by-ball (Game info reads that itself, when opened): just line-ups and names.
+                val info = GameInfo.forEvent(e, deep = false)
                 val names = (info.lineups.flatMap { l -> l.players.map { it.fullName } } + info.sections.flatMap { it.photos.orEmpty().filterNotNull() + it.photos2.orEmpty().filterNotNull() }).filter { it.isNotBlank() }
                 if (names.isEmpty()) return@runCatching
                 val loader = coil3.SingletonImageLoader.get(ctx)

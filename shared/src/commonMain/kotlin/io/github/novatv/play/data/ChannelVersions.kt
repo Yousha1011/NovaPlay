@@ -23,11 +23,20 @@ object ChannelVersions {
         "PE", "JP", "KR", "CN", "HK", "TW", "MY", "SG", "PH", "ID", "TH", "VN", "EXYU", "HR", "RS", "BA", "SI", "AL", "MK", "KU")
 
     /** The index for one library: the channel list it was built from, and its channels by bare name. */
-    private var index: Pair<List<Channel>, Map<String, List<Channel>>>? = null
+    @kotlin.concurrent.Volatile private var index: Pair<List<Channel>, Map<String, List<Channel>>>? = null
+    /** Bare names without spaces, by length (for [nearest]), built with [index]. */
+    @kotlin.concurrent.Volatile private var squeezed: Map<Int, List<Pair<String, String>>> = emptyMap()
+    private val lock = kotlinx.atomicfu.locks.SynchronizedObject()
 
+    // Built once per library, behind a lock: several threads building it at once (each a copy of the whole
+    // playlist's names) filled a Fire TV's memory.
     private fun byName(all: List<Channel>): Map<String, List<Channel>> =
-        index?.takeIf { it.first === all }?.second
-            ?: all.groupBy { HdTwin.core(it.name) }.also { index = all to it }
+        index?.takeIf { it.first === all }?.second ?: kotlinx.atomicfu.locks.synchronized(lock) {
+            index?.takeIf { it.first === all }?.second ?: all.groupBy { HdTwin.core(it.name) }.also { m ->
+                squeezed = m.keys.map { it.replace(" ", "") to it }.groupBy { it.first.length }
+                index = all to m
+            }
+        }
 
     internal fun country(name: String): String? =
         Regex("""^\s*([A-Z]{2,4})\s*[:|]""").find(HdTwin.plain(name))?.groupValues?.get(1)?.takeIf { it in countries }
@@ -89,7 +98,7 @@ object ChannelVersions {
             // A real channel name: letters, at least 4 of them, and found as is in the playlist.
             if (key.length < 4 || key.none { it.isLetter() }) return@mapNotNull null
             // As named, else a name one letter off (playlists' typos: the addon's "TEN SPORTS" is "PK: TENS SPORTS").
-            val versions = map[key] ?: nearest(key, map.keys)?.let { map[it] } ?: return@mapNotNull null
+            val versions = map[key] ?: nearSqueezed(key)?.let { map[it] } ?: return@mapNotNull null
             val found = versions.minByOrNull { rank(it.name) } ?: return@mapNotNull null
             Airing(found, null, ADDON_SAYS)
         }.distinctBy { HdTwin.core(it.channel.name) }
@@ -109,6 +118,16 @@ object ChannelVersions {
                 m.filter { it.isDigit() } == k.filter { it.isDigit() } && oneEditApart(k, m)
         }
         return near.singleOrNull()
+    }
+
+    /** [nearest] over the index's names, comparing only names one letter longer or shorter. */
+    private fun nearSqueezed(key: String): String? {
+        val k = key.replace(" ", "")
+        if (k.length < 8) return null
+        val near = (k.length - 1..k.length + 1).flatMap { squeezed[it].orEmpty() }.filter { (m, _) ->
+            m[0] == k[0] && m.filter { it.isDigit() } == k.filter { it.isDigit() } && oneEditApart(k, m)
+        }
+        return near.singleOrNull()?.second
     }
 
     /** Whether [a] and [b] differ by exactly one letter added, dropped or changed. */

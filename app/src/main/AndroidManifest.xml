@@ -69,6 +69,10 @@
             android:foregroundServiceType="dataSync" />
 
         <receiver
+            android:name=".GameAlertReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".OvernightAlarm"
             android:exported="false" />
 

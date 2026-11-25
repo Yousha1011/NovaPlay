@@ -1,0 +1,28 @@
+name: Keep server awake
+
+# Visits the NovaPlay server (Hugging Face Space) every 6 hours: a free Space sleeps after 48 hours without visits,
+# and a visit to a sleeping one wakes it. Needs the repository secret SERVER_KEY (the same key as the Space's).
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Visit the server
+        env:
+          SERVER_KEY: ${{ secrets.SERVER_KEY }}
+        run: |
+          url="https://tarcispera1074-novaplay-server.hf.space/k/${SERVER_KEY}/status"
+          # A sleeping Space takes a minute or two to wake: keep asking for up to 10 minutes.
+          for i in $(seq 1 20); do
+            code=$(curl -s -o status.json -w '%{http_code}' --max-time 60 "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "Server is up:"; python3 -c "import json;s=json.load(open('status.json'));print('up', s['up'], '| playlist', s['playlist']['channels'], '| guide', s['guide']['at'], '| addons', s['addons']['at'])"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $code, waiting 30s"; sleep 30
+          done
+          echo "The server did not answer in 10 minutes."; exit 1

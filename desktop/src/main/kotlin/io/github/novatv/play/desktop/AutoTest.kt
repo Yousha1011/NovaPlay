@@ -159,6 +159,7 @@ object AutoTest {
                     "gameinfoall" -> gameInfoAll()
                     "versions" -> channelVersionsCheck()
                     "findchannel" -> findChannel()
+                    "server" -> serverCheck()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -1113,6 +1114,52 @@ object AutoTest {
             log("matches with channels: $withChannels; extra versions listed: $more, addon-named: $named, slowest match: $slowest ms")
             check("versions add little time (slowest $slowest ms)", slowest < 500)
         }
+    }
+
+    /**
+     * Points the app at the NovaPlay server (its guide only, its addon in place of the CNCVerse ones), reloads the
+     * guide and checks New Zealand v India: guide, channels, addon streams, TEN Sports, memory.
+     */
+    private suspend fun serverCheck() {
+        val base = "https://tarcispera1074-novaplay-server.hf.space/k/" + (System.getenv("NOVAPLAY_SERVER_KEY") ?: "")
+        check("playlist loaded", waitForLibrary())
+        fun mem() = Runtime.getRuntime().let { "${(it.totalMemory() - it.freeMemory()) / 1_048_576} MB used" }
+        withContext(Dispatchers.IO) {
+            App.store.extraEpg = listOf("$base/guide.xml.gz")
+            App.store.universalGuideOnly = true
+            io.github.novatv.play.data.Addons.list().filter { "cncverse" in it.manifest }.forEach { io.github.novatv.play.data.Addons.remove(it) }
+            val a = runCatching { io.github.novatv.play.data.Addons.add("$base/manifest.json") }
+            check("server addon added (${a.getOrNull()?.catalogs?.size} catalogs) ${a.exceptionOrNull()?.message.orEmpty()}", a.isSuccess)
+            log("addons now: " + io.github.novatv.play.data.Addons.list().joinToString { it.name })
+        }
+        val t0 = System.currentTimeMillis()
+        App.repo.reloadGuide()
+        delay(3000)
+        check("guide loaded", waitFor(600_000) { App.repo.state.value.epgStatus == null })
+        log("guide: ${withContext(Dispatchers.IO) { App.repo.epg.summary() }} in ${(System.currentTimeMillis() - t0) / 1000}s, ${mem()}")
+        waitFor(180_000) { App.repo.sports.value.events.any { "New Zealand" in it.title && "India" in it.title } }
+        val all = App.repo.sports.value.events
+        log("sports events: ${all.size}")
+        val e = all.firstOrNull { "New Zealand" in it.title && "India" in it.title }
+            ?: withContext(Dispatchers.IO) { all.filter { it.state != io.github.novatv.play.sports.State.POST }.firstOrNull { io.github.novatv.play.data.Addons.forMatch(it).isNotEmpty() } }
+        check("match found: ${e?.title}", e != null); e ?: return
+        withContext(Dispatchers.IO) {
+            val channels = App.repo.state.value.lib.channels
+            io.github.novatv.play.data.ChannelVersions.prepare(channels)
+            val found = runCatching { App.repo.matcher().airings(e, limit = 40) }.getOrDefault(emptyList())
+            log("guide/feed channels: ${found.size}: " + found.take(8).joinToString { "${it.channel.name} (${it.why})" })
+            val t = System.currentTimeMillis()
+            val events = io.github.novatv.play.data.Addons.forMatch(e)
+            log("addon events for the match: ${events.size} in ${System.currentTimeMillis() - t} ms: " + events.take(4).joinToString { it.title })
+            var streams = emptyList<io.github.novatv.play.sports.Airing>()
+            kotlinx.coroutines.withTimeoutOrNull(60_000) { io.github.novatv.play.data.Addons.airingsFlow(e).collect { streams = it } }
+            log("addon streams that open: ${streams.size}: " + streams.take(6).joinToString { it.channel.name })
+            val listed = io.github.novatv.play.data.ChannelVersions.forMatch(found, streams, channels)
+            log("listed on the page: ${listed.size}: " + listed.take(12).joinToString { "${it.channel.name}${if (it.why == io.github.novatv.play.data.ChannelVersions.ADDON_SAYS) " [ADDON SAYS]" else ""}" })
+            check("TEN Sports listed", listed.any { "TEN" in it.channel.name.uppercase() && "SPORT" in it.channel.name.uppercase() })
+            check("addon streams listed", streams.isNotEmpty())
+        }
+        log("memory at end: ${mem()}")
     }
 
     /** Channels whose name has every word of NOVAPLAY_FIND, with their bare names (what versions are matched by). */

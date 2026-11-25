@@ -65,6 +65,7 @@ fun MainViewController(): UIViewController = ComposeUIViewController {
 
 object IosHost : Host {
     override val device = Device.PHONE
+    override val alerter: io.github.novatv.play.data.GameAlerter = IosGameAlerter
     var message by mutableStateOf<Pair<String, Long>?>(null)
     /** Set by Swift before start: the Keychain, where playlists outlive reinstalling the app. */
     var keychainSave: ((String) -> Unit)? = null

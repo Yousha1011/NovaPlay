@@ -119,7 +119,7 @@ fun HomeScreen(nav: Nav) {
                     LazyRow(Modifier.rememberFocusInList().dust(all) { store.clearContinue(); History.rev++ }, contentPadding = PaddingValues(horizontal = S.gutter),
                         horizontalArrangement = Arrangement.spacedBy(S.cardGap)) {
                         items(resume, key = { it.key }) { r ->
-                            PosterCard(r.title, r.poster, timeLeft(r.dur - r.pos),
+                            PosterCard(r.title, r.poster, if (r.dur > 0) timeLeft(r.dur - r.pos) else "Resume",
                                 modifier = Modifier.width(150.dp).dust(r.key in gone) { store.removeContinue(r.key); History.rev++ },
                                 onLongClick = { ask = r },
                                 progress = if (r.dur > 0) r.pos.toFloat() / r.dur else null, onClick = { open(r, nav) })

@@ -199,6 +199,10 @@ class PlayerActivity : ComponentActivity() {
 
     private var hideJob: Job? = null
     private var startJob: Job? = null
+    /** A film's or episode's saved place, until the stream is ready and has been put there. */
+    private var resumeAt = 0L
+    /** Saves a film's place every 15 seconds while it plays, so a crash or a power cut loses little. */
+    private var saveJob: Job? = null
     private var retried = false
     /** Channels skipped in a row because they wouldn't play (game lists that switch on failure). */
     private var switched = 0
@@ -243,6 +247,9 @@ class PlayerActivity : ComponentActivity() {
                 if (state == Player.STATE_READY) {
                     error = null; retried = false; switched = 0; mainFailures = 0; mainQuiet = false; length = player.duration.coerceAtLeast(0)
                     if (mainPlayingSince == 0L) mainPlayingSince = System.currentTimeMillis()
+                    // Some films ignore a jump made before they open (the start of the file is read first): once
+                    // ready, if it still began at the start, it is put at the saved place now.
+                    if (resumeAt > 0) { if (player.currentPosition < resumeAt - 5_000) player.seekTo(resumeAt); resumeAt = 0L }
                 }
                 // A live stream that "ends" has dropped: open it again.
                 if (state == Player.STATE_ENDED) { if (item is PlayItem.Live) reconnectMain() else onEnded() }
@@ -672,7 +679,10 @@ class PlayerActivity : ComponentActivity() {
             }
             if (url == null) { error = "Could not get the stream address"; loading = false; return@launch }
             player.setMediaItem(mediaItem(url))
-            if (it is PlayItem.Vod) App.store.progress(it.key)?.let { p -> player.seekTo(p.first) }
+            resumeAt = 0L
+            if (it is PlayItem.Vod) App.store.progress(it.key)?.let { p -> resumeAt = p.first; player.seekTo(p.first) }
+            saveJob?.cancel()
+            if (it is PlayItem.Vod) saveJob = lifecycleScope.launch { while (true) { delay(15_000); if (player.isPlaying) saveProgress() } }
             player.prepare()
             player.playWhenReady = true
             if (it is PlayItem.Live) {
@@ -737,8 +747,8 @@ class PlayerActivity : ComponentActivity() {
     private fun saveProgress(ended: Boolean = false) {
         val v = item as? PlayItem.Vod ?: return
         if (v.key.startsWith("rec:")) return
-        val dur = player.duration
-        if (dur <= 0) return
+        val dur = player.duration.let { if (it == androidx.media3.common.C.TIME_UNSET || it < 0) 0L else it }
+        if (dur <= 0 && player.currentPosition <= 0) return
         val poster = v.movie?.poster ?: v.series?.poster
         App.store.saveProgress(v.key, v.title, poster, if (ended) dur else player.currentPosition, dur)
     }
@@ -765,6 +775,12 @@ class PlayerActivity : ComponentActivity() {
                     if (picking && showList) pickBack()
                     else if (showList || showTracks) { showList = false; showTracks = false; picking = false } else { showControls = false; showInfo = false }
                 }
+                return true
+            }
+            // Up from the options row goes back up to the picture (seeking, or zapping), as Back does: the row is the
+            // bottom of the screen, so Up had nowhere to move to and the row could only be left with Back.
+            if (showControls && !showList && !showTracks && e.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (e.action == KeyEvent.ACTION_DOWN) { showControls = false; flashInfo() }
                 return true
             }
             if (showControls && e.action == KeyEvent.ACTION_DOWN) flashInfo(10_000)
