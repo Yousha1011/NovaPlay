@@ -160,6 +160,7 @@ object AutoTest {
                     "versions" -> channelVersionsCheck()
                     "findchannel" -> findChannel()
                     "server" -> serverCheck()
+                    "server2" -> serverTwoCheck()
                     else -> { log("unknown scenario"); failures++ }
                 }
             } catch (e: Throwable) { log("ABORTED: ${e::class.simpleName}: ${e.message}"); failures++ }
@@ -1158,6 +1159,59 @@ object AutoTest {
             log("listed on the page: ${listed.size}: " + listed.take(12).joinToString { "${it.channel.name}${if (it.why == io.github.novatv.play.data.ChannelVersions.ADDON_SAYS) " [ADDON SAYS]" else ""}" })
             check("TEN Sports listed", listed.any { "TEN" in it.channel.name.uppercase() && "SPORT" in it.channel.name.uppercase() })
             check("addon streams listed", streams.isNotEmpty())
+        }
+        log("memory at end: ${mem()}")
+    }
+
+    /**
+     * 2.0: the server's work against the app's own. Its library loads in one download; for each game it has, its
+     * channel list is compared with the one this app works out itself (time, and how many channels each finds).
+     */
+    private suspend fun serverTwoCheck() {
+        check("playlist loaded", waitForLibrary())
+        fun mem() = Runtime.getRuntime().let { "${(it.totalMemory() - it.freeMemory()) / 1_048_576} MB used" }
+        // The same guide as the server's (this PC's may be from before the server's last build).
+        val v0 = App.repo.state.value.epgVersion
+        App.repo.reloadGuide(); delay(3000)
+        check("guide reloaded", waitFor(600_000) { App.repo.state.value.epgVersion > v0 && App.repo.state.value.epgStatus == null })
+        val src = App.repo.state.value.source
+        val mirrors = withContext(Dispatchers.IO) { io.github.novatv.play.data.NovaServer.mirrors(src) }
+        check("server holds this playlist (${src?.name})", mirrors)
+        withContext(Dispatchers.IO) {
+            var t = System.currentTimeMillis()
+            val lib = src?.let { io.github.novatv.play.data.NovaServer.library(it) }
+            log("server library: ${lib?.channels?.size} channels, ${lib?.movies?.size} films, ${lib?.series?.size} series in ${(System.currentTimeMillis() - t) / 1000}s, ${mem()}")
+            check("server library loads", (lib?.channels?.size ?: 0) > 1000)
+            io.github.novatv.play.data.NovaServer.sendFollow()
+            waitFor(120_000) { App.repo.sports.value.events.size > 20 }
+            val all = App.repo.sports.value.events
+            var have = 0; var same = 0; var compared = 0
+            for (e in all.take(80)) {
+                t = System.currentTimeMillis()
+                val server = io.github.novatv.play.data.NovaServer.forMatch(e) ?: continue
+                val ms = System.currentTimeMillis() - t
+                have++
+                val m = App.repo.matcher()
+                val online = kotlinx.coroutines.withTimeoutOrNull(15_000) { runCatching { m.airings(e, io.github.novatv.play.sports.Broadcasters.forEvent(e), limit = 40) }.getOrDefault(emptyList()) }.orEmpty()
+                val found = (m.airings(e, limit = 40) + online).distinctBy { it.channel.id }
+                var n = 0
+                val addons = io.github.novatv.play.data.Addons.forMatch(e).flatMap { ev -> runCatching { io.github.novatv.play.data.Addons.streams(ev) }.getOrDefault(emptyList())
+                    .map { st -> io.github.novatv.play.sports.Airing(io.github.novatv.play.data.Addons.channel(ev, st, n++), null, ev.title) } }
+                val local = io.github.novatv.play.data.ChannelVersions.forMatch(found, addons, App.repo.state.value.lib.channels)
+                    .filter { it.channel.categoryId != io.github.novatv.play.data.Addons.CATEGORY }
+                if (local.isEmpty() && server.isEmpty()) continue
+                compared++
+                val s = server.map { it.channel.id }.toSet(); val l = local.map { it.channel.id }.toSet()
+                val both = (s intersect l).size
+                if (both >= minOf(s.size, l.size) * 0.8) same++
+                if (compared <= 25) log("${e.title.take(40)}: server ${s.size} in $ms ms, app ${l.size}, in both $both")
+                if (both == 0 && s.isNotEmpty() && l.isNotEmpty()) {
+                    log("   server: " + server.take(5).joinToString { "${it.channel.name.take(24)} [${it.why.take(30)}] ${it.programme?.title?.take(30) ?: ""}" })
+                    log("   app:    " + local.take(5).joinToString { "${it.channel.name.take(24)} [${it.why.take(30)}] ${it.programme?.title?.take(30) ?: ""}" })
+                }
+            }
+            log("games the server has: $have of ${all.size.coerceAtMost(80)}; similar lists: $same of $compared")
+            check("server has games", have > 0)
         }
         log("memory at end: ${mem()}")
     }

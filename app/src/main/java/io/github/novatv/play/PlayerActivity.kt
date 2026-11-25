@@ -103,6 +103,7 @@ import io.github.novatv.play.ui.T
 import io.github.novatv.play.ui.Tile
 import io.github.novatv.play.ui.clock
 import io.github.novatv.play.ui.duration
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1244,9 +1245,21 @@ class PlayerActivity : ComponentActivity() {
             } else {
                 val epg = App.repo.state.collectAsState().value.epgVersion
                 val airings by androidx.compose.runtime.produceState<List<io.github.novatv.play.sports.Airing>?>(null, game.id, epg) {
-                    value = withContext(IO) { App.repo.matcher().airings(game, limit = 150) }
-                    val more = withContext(IO) { App.repo.matcher().airings(game, io.github.novatv.play.sports.Broadcasters.forEvent(game), limit = 150) }
-                    value = (value.orEmpty() + more).distinctBy { it.channel.id }
+                    // Worked out already by your NovaPlay server when it has this game; else here, as before.
+                    val server = withContext(IO) { runCatching { io.github.novatv.play.data.NovaServer.forMatch(game) }.getOrNull() }
+                    val mine = server ?: run {
+                        value = withContext(IO) { App.repo.matcher().airings(game, limit = 150) }
+                        val more = withContext(IO) { App.repo.matcher().airings(game, io.github.novatv.play.sports.Broadcasters.forEvent(game), limit = 150) }
+                        (value.orEmpty() + more).distinctBy { it.channel.id }
+                    }
+                    value = mine
+                    // The addons' streams of this game too, after your channels, as each one's check passes (as on the
+                    // match page): they were missing here, so a game only an addon shows couldn't be added.
+                    try {
+                        kotlinx.coroutines.withTimeoutOrNull(60_000L) {
+                            io.github.novatv.play.data.Addons.airingsFlow(game).flowOn(IO).collect { l -> value = (mine + l).distinctBy { it.channel.id } }
+                        }
+                    } catch (x: Exception) { }
                 }
                 Text(game.title, style = T.h2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 6.dp))
                 Text("Channels showing it", style = T.small, modifier = Modifier.padding(start = 6.dp, bottom = 8.dp))

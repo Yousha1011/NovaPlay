@@ -62,6 +62,8 @@ class XtreamProvider(private val s: Source) : Provider {
     override fun load(progress: (String) -> Unit): Library = loadStaged(progress, null) { _, _ -> }
 
     override fun loadStaged(progress: (String) -> Unit, resume: Library?, saved: (Library, Int) -> Unit): Library {
+        // Your NovaPlay server holds this playlist: its ready copy in one download, instead of the panel's long lists.
+        NovaServer.library(s)?.let { lib -> progress("Loaded from your NovaPlay server"); return lib }
         // Repeated texts are shared as each item is read, not after: the peak stays lower on a Fire TV.
         val d = Dedupe()
         progress("Signing in")

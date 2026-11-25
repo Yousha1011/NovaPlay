@@ -340,6 +340,8 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     io.github.novatv.play.ui.PrefetchGameInfo(e)
     fun rowOf(s: Side?) = s?.let { side -> rows.firstOrNull { it.id == side.id } ?: rows.firstOrNull { it.name.equals(side.name, true) } }
     val airings by produceState<List<Airing>?>(null, e.id, st.epgVersion) {
+        // Worked out already by your NovaPlay server: shown at once, with no matching on the phone.
+        withContext(IO) { runCatching { io.github.novatv.play.data.NovaServer.forMatch(e) }.getOrNull() }?.let { value = it; return@produceState }
         value = withContext(IO) { App.repo.matcher().airings(e, limit = 150) }
         val more = withContext(IO) { App.repo.matcher().airings(e, Broadcasters.forEvent(e), limit = 150) }
         value = (value.orEmpty() + more).distinctBy { it.channel.id }
@@ -350,6 +352,8 @@ fun MatchPage(nav: Nav, start: SportEvent) {
     val listed by produceState<List<Airing>?>(null, airings, addonNames) {
         val found = airings ?: run { value = null; return@produceState }
         value = found
+        // The server's list already has every version and the channels addons name.
+        if (withContext(IO) { runCatching { io.github.novatv.play.data.NovaServer.forMatch(e) }.getOrNull() } != null) return@produceState
         value = withContext(IO) {
             runCatching { io.github.novatv.play.data.ChannelVersions.forMatch(found, fromAddons, App.repo.state.value.lib.channels) }.getOrDefault(found)
         }

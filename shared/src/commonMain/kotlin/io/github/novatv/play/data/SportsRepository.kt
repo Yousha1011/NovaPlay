@@ -49,6 +49,8 @@ class SportsRepository(
             _state.value = SportsState(all.distinctBy { it.id }.sortedBy { it.start }, false, clock())
             // The phone's game notifications follow the newest list.
             runCatching { GameAlerts.update(_state.value.events) }
+            // Your NovaPlay server works out these games' channels: it follows the same picks.
+            runCatching { NovaServer.sendFollow() }
         }
     }
 

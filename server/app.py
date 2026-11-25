@@ -12,7 +12,7 @@ A refresh builds a new copy on the side and swaps it in when complete, so the ap
 
 Secrets (Settings -> Variables and secrets): IPTV_HOST, IPTV_USER, IPTV_PASS, ADDONS, SERVER_KEY.
 """
-import os, re, gzip, json, time, difflib, threading, traceback, calendar, urllib.request, urllib.parse
+import os, re, gzip, json, time, difflib, hashlib, shutil, subprocess, threading, traceback, calendar, urllib.request, urllib.parse
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape, quoteattr
 from concurrent.futures import ThreadPoolExecutor
@@ -752,6 +752,69 @@ def watcher():
 
 # ---------------------------------------------------------------- schedule
 
+# ---------------------------------------------------------------- NovaPlay without a screen (the matcher)
+
+# NovaPlay's own code, run here (novaplay-server.jar, from the latest release): it loads your playlist and this server's
+# guide and addon like the apps do, works out every game's "Watch on your channels", and writes out the library for the
+# apps to download. Java comes from packages.txt.
+JAR_URL = os.environ.get("NOVAPLAY_JAR_URL", "https://github.com/Yousha1011/NovaPlay/releases/latest/download/novaplay-server.jar")
+headless = {"running": False, "started": None, "restarts": 0, "error": None}
+
+
+def account_id():
+    """Which playlist this server serves, without saying its login: the apps compare it with theirs."""
+    host = os.environ.get("IPTV_HOST", "").strip().rstrip("/")
+    if not host.startswith("http"):
+        host = "http://" + host
+    for end in ("/player_api.php", "/get.php"):
+        if host.endswith(end):
+            host = host[: -len(end)]
+    return hashlib.sha256(f"{host.lower()}|{os.environ.get('IPTV_USER', '').strip()}".encode()).hexdigest()
+
+
+def run_headless():
+    """Keeps the program running: fetched at start, started again if it stops."""
+    jar = f"{DATA}/novaplay-server.jar"
+    while True:
+        try:
+            # A copy uploaded to the Space itself (Files) wins; else the latest release's, fetched once a day.
+            here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "novaplay-server.jar")
+            if os.path.exists(here):
+                shutil.copyfile(here, jar)
+            elif not os.path.exists(jar) or time.time() - os.path.getmtime(jar) > 86400:
+                with open_url(JAR_URL, 300) as r, open(jar + ".new", "wb") as f:
+                    shutil.copyfileobj(r, f)
+                os.replace(jar + ".new", jar)
+                log("novaplay-server.jar downloaded")
+            # It loads this server's guide and addon: they must be ready first (the guide's first build takes minutes).
+            while not (os.path.exists(f"{DATA}/guide.xml.gz") and addon_view["manifest"]):
+                time.sleep(10)
+            env = dict(os.environ, NOVAPLAY_OUT=DATA, NOVAPLAY_BASE=f"http://127.0.0.1:7860/k/{KEY}",
+                       HOME=f"{DATA}/home", APPDATA=f"{DATA}/home")
+            os.makedirs(f"{DATA}/home", exist_ok=True)
+            headless.update(running=True, started=time.time(), error=None)
+            p = subprocess.run(["java", "-Xmx3g", "-XX:+UseSerialGC", "-Dfile.encoding=UTF-8", "-jar", jar], env=env)
+            headless["error"] = f"stopped with code {p.returncode}"
+        except Exception as e:
+            headless["error"] = f"{type(e).__name__}: {e}"
+            log("matcher: " + headless["error"])
+        headless["running"] = False
+        headless["restarts"] += 1
+        time.sleep(60)
+
+
+def gz_copy(path):
+    """[path] compressed beside it (path.gz), redone when the file changed; None when there is no file yet."""
+    if not os.path.exists(path):
+        return None
+    gz = path + ".gz"
+    if not os.path.exists(gz) or os.path.getmtime(gz) < os.path.getmtime(path):
+        with open(path, "rb") as src, gzip.open(gz + ".tmp", "wb", compresslevel=6) as dst:
+            shutil.copyfileobj(src, dst)
+        os.replace(gz + ".tmp", gz)
+    return gz
+
+
 def scheduler():
     threading.Thread(target=build_addons, daemon=True).start()
     build_guide()
@@ -789,6 +852,9 @@ def status(key: str):
     for part in ("playlist", "guide", "addons"):
         s[part]["at"] = ago(state[part]["at"])
     s["up"] = f"{int(time.time() - state['started'])}s"
+    hp = f"{DATA}/headless.json"
+    s["matcher"] = dict(headless, started=ago(headless["started"]),
+                        report=json.load(open(hp, encoding="utf8")) if os.path.exists(hp) else None)
     s["alerts"] = {"phones": len(devices), "games_followed": len({m for d in devices.values() for m in d["games"]}),
                    "games_on_now": sum(1 for w in watched.values() if w["state"] == "in"), "sent": alerts_sent["count"],
                    "last": alerts_sent["last"], "error": alerts_sent["error"],
@@ -826,6 +892,49 @@ async def watch(key: str, request: Request):
     devices[token] = {"score": bool(b.get("score", True)), "end": bool(b.get("end", True)), "at": time.time(),
                       "games": {g["match"]: g for g in (b.get("games") or [])[:100] if g.get("match") and g.get("path")}}
     return {"watching": len(devices[token]["games"])}
+
+
+@api.get("/k/{key}/account")
+def account(key: str):
+    """The playlist this server mirrors (a fingerprint, not the login), and what it has ready."""
+    check(key)
+    return {"id": account_id(), "library": os.path.exists(f"{DATA}/lib.bin"), "matches": os.path.exists(f"{DATA}/matches.json")}
+
+
+@api.get("/k/{key}/lib.bin.gz")
+def library(key: str):
+    """Your playlist's channels, films and series as the apps keep them on disk, for them to load in one go."""
+    check(key)
+    gz = gz_copy(f"{DATA}/lib.bin")
+    if not gz:
+        raise HTTPException(503, "The library is still loading.")
+    return FileResponse(gz, media_type="application/gzip", filename="lib.bin.gz")
+
+
+@api.get("/k/{key}/matches.json")
+def matches(key: str):
+    """Every coming and live game's channels, worked out here ({game id: [{id, why, title, start, stop}]})."""
+    check(key)
+    path = f"{DATA}/matches.json"
+    if not os.path.exists(path):
+        raise HTTPException(503, "Games are still being worked out.")
+    return FileResponse(path, media_type="application/json")
+
+
+@api.post("/k/{key}/follow")
+async def follow(key: str, request: Request):
+    """The Sports picks the apps use (followed competitions and teams): the games worked out here follow them."""
+    check(key)
+    b = await request.json()
+    keep = {k: b[k] for k in ("sportsLeagues", "sportsLeagueTeams", "favouriteTeams", "sportsEnabled", "sportsComps", "sportsCountry",
+                                    "sportsDbKey", "sportMonksKey") if k in b}
+    text = json.dumps(keep, sort_keys=True)
+    path = f"{DATA}/follow.json"
+    if not os.path.exists(path) or open(path, encoding="utf8").read() != text:
+        with open(path + ".tmp", "w", encoding="utf8") as f:
+            f.write(text)
+        os.replace(path + ".tmp", path)
+    return {"ok": True}
 
 
 @api.get("/k/{key}/guide.xml.gz")
@@ -867,4 +976,5 @@ if __name__ == "__main__":
         log("SERVER_KEY is not set: add it under Settings -> Variables and secrets.")
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=watcher, daemon=True).start()
+    threading.Thread(target=run_headless, daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=7860)

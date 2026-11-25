@@ -83,6 +83,8 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     // added; looked up again when the guide (re)loads, so a game opened while it was loading still finds them.
     val guideVersion = App.repo.state.collectAsState().value.epgVersion
     val airings by produceState<List<Airing>?>(null, e.id, guideVersion) {
+        // Worked out already by your NovaPlay server: shown at once, with no matching on the TV.
+        withContext(IO) { runCatching { io.github.novatv.play.data.NovaServer.forMatch(e) }.getOrNull() }?.let { value = it; return@produceState }
         val local = withContext(IO) { try { App.repo.matcher().airings(e, limit = 40) } catch (x: Exception) { emptyList() } }
         value = local
         val online = withContext(IO) {
@@ -107,6 +109,8 @@ fun MatchPage(e: SportEvent, videoSlot: @Composable () -> Unit, onClose: () -> U
     val listed by produceState<List<Airing>?>(null, airings, addonNames) {
         val found = airings ?: run { value = null; return@produceState }
         value = found
+        // The server's list already has every version and the channels addons name.
+        if (withContext(IO) { runCatching { io.github.novatv.play.data.NovaServer.forMatch(e) }.getOrNull() } != null) return@produceState
         value = withContext(IO) {
             runCatching { io.github.novatv.play.data.ChannelVersions.forMatch(found, fromAddons, App.repo.state.value.lib.channels) }.getOrDefault(found)
         }

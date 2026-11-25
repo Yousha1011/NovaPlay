@@ -5,4 +5,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "NovaPlay"
-include(":shared", ":app", ":desktop")
+include(":shared", ":app", ":desktop", ":headless")
